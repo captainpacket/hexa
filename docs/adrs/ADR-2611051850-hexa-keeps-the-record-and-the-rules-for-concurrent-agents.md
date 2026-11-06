@@ -69,6 +69,32 @@ Not verified: that these hooks fire for a subagent started with `isolation: "wor
 - The #36 fix is not only "credential paths are never committed": the staging rule that swept in a dirty neighbour file is narrowed too, because a credential pattern list will always miss one file.
 - `hexa status` is not a new design. The parked the parked status ADR stays Proposed and is built as phase 1's git/loop half; this ADR adds the runs and tasks half and the default-JSON rule. If the owner prefers, the parked ADR is marked Superseded by this one when phase 1 lands.
 
+### Decisions taken on the open questions (phase 2 and 3 build, 2026-11-05)
+
+Each is the ADR's own stated default, recorded here as a decision so the code and the record agree. The ADR stays Proposed until the owner moves it.
+
+- **`tasks.json` is git-ignored.** `hexa init`, and the first `hexa agent register` in a project that never re-ran init, write `.hexa/.gitignore` naming `tasks.json`, `tasks.lock` and the temp file. It is runtime state; the ADR and the workplan stay in `docs/`.
+- **`hexa do` no longer sweeps in dirty same-package neighbours.** It stages the `--file` and the `--also` paths and nothing else. This is narrower than decision 5's clause "or tracked at HEAD and modified": a modified tracked neighbour is also left, because the owner's answer is that a neighbour needs `--also`, and a rule that sometimes sweeps is the rule that committed `.runner`. The pre-run `start_dirty` list now only guards sealed tests. The tests around `commit_with_also` are rewritten with it.
+- **JSON is the default for the new verbs when stdout is not a terminal; `--json` forces it.** This covers `hexa agent`, `hexa dev worktree merge-order` and `hexa do run --plan-only`. A refusal is an object with `ok: false`, `code`, `message`, `hint`, `field`, `retryable`, printed on stdout, exit 1.
+- **The credential pattern list is fixed and built in** (`hexa-core/src/domain/ledger.rs`). Making it configurable is a non-goal for now. The loose name patterns `*token*` and `*secret*` bind leases and neighbours but not the `--file` an operator names (a file called `tokenizer.rs` is legitimate); the strict names bind everything.
+- **The parked status ADR is marked superseded only when this ADR is Completed.** It is not touched now.
+
+### Phase 2 and 3 build notes (what the code does where the text above left room)
+
+- **The ledger's code** is `hexa-core/src/domain/ledger.rs` (pure rules, re-exported by `ports/ledger.rs`), `hexa-cli/src/commands/task_ledger.rs` (find the main checkout through `git rev-parse --git-common-dir`, an `flock` advisory lock, atomic write, an unreadable file is an error and never an empty ledger) and `hexa-cli/src/commands/agent.rs` (the verbs).
+- **A run record bound to a task is read through its task.** `register` writes `~/.hexa/runs/<id>.json` with the registering process's `pid` and `pid_start`, but that process is a short CLI call; calling the record `abandoned` by pid would mark every task abandoned a second after it starts. `hexa status` therefore lists such a record by its ledger task, never in `runs` and never as `abandoned`, and lists it under `recent` once `report` or `release` has closed it. A task whose harness crashed is released by `hexa agent release`, as decision 4's consequences say.
+- **Binding.** A session is bound by `HEXA_TASK=<id>`, or by the hook payload's `agent_id` equalling the task's `--owner`. A bound session whose ledger cannot be read, or whose `HEXA_TASK` names no task, is refused: a rule that cannot be checked has not passed. Inside a lease a sealed or credential-looking path is still refused.
+- **`SubagentStart` binds, `SubagentStop` closes.** The start event carries no task name, so it binds a claimed task registered with `--owner <agent_id>`, or a claimed task with no owner registered with `--worktree` equal to the subagent's `cwd`, sets it `running` and records the `agent_id` as owner. The stop event reruns the task's gate in the task's worktree for the outcome, reads that worktree's HEAD for the commit, and closes the task. A task with no gate stays claimed and the hook prints the `hexa agent report` that closes it: hexa has no outcome to record and does not guess. The gate runs inside the hook with no timeout of its own; a hook the harness kills leaves the task running, to be released by hand. Both hooks keep their existing log rows and output.
+- **`hexa do run --plan-only`** prints `would_commit`, `left_uncommitted` and `refused` from the same `plan_staging` function the commit uses. After a real run `hexa do` names every path still dirty as uncommitted.
+- **Sealed-file rule (#50)** is `broken_seals_for_run`: absent before and absent after is not an edit; a deletion of a path HEAD tracks still is; a sealed file that is clean and equal to HEAD is not blamed on the run even if its seal is stale; an operator's own pre-run edit stays refused and is never discarded. `hexa harden` uses it too. `hexa spec retire` is not built in this change (see below).
+- **`hexa dev worktree merge-order`** lists done tasks that have a worktree by finish time, names pairs whose leases overlap, and lists worktrees that are not ready. `hexa dev worktree merge` refuses a worktree whose registered task is not done; a worktree no task was registered for is unaffected.
+
+### Not built in this change
+
+- `hexa spec retire <ADR>` (decision 6, last sentence). The sealed-file guard no longer refuses on a spec's missing file, which was the harm of #50, but a superseded spec still guards its files.
+- The manual run of the phase 3 exit gate: one live Claude Code session with two subagents, one stepping outside its lease. The bridge is tested with hand-made payloads in the documented shape only. The ADR is not Completed until that run is recorded here.
+- `describe` entries: hexa has no `describe` verb. Each new verb documents itself in `--help`, in JSON refusals and in `docs/guides/development-workflow.md`.
+
 ## Consequences
 
 - hexa can answer "how many agents are running" from files, on macOS and Linux, and a run that ended says how. A dead process is `abandoned`, not counted as running.

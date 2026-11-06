@@ -305,6 +305,11 @@ ADRs are history and are not checked.")]
     },
     /// Where the work stands: git, the loop, runs and subagents in progress, last outcomes. JSON when piped
     Status(commands::status::StatusArgs),
+    /// The task ledger: register a task and the paths it may edit, report it done, list and release (JSON when piped)
+    Agent {
+        #[command(subcommand)]
+        action: commands::agent::AgentAction,
+    },
     /// Check the docs: freshness, terminology and module READMEs
     Docs {
         #[command(subcommand)]
@@ -527,6 +532,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Skill { action } => commands::skill::run(action).await,
         Commands::Assets { action } => commands::assets_cmd::run(action).await,
         Commands::Status(args) => status::run(args).await,
+        Commands::Agent { action } => commands::agent::run(action).await,
         Commands::Docs { action } => commands::docs::run(action).await,
         Commands::Doctor { verbose, fix, check } => {
             match check.as_deref() {

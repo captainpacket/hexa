@@ -25,6 +25,8 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use crate::commands::run_record::{self, RunRecord};
+use crate::commands::task_ledger;
+use hexa_core::ports::ledger::{Ledger, LedgerError};
 
 /// A subagent that started and never stopped counts as in progress only for
 /// this long; past it the start row is a stale one (a harness that crashed
@@ -70,6 +72,7 @@ fn gather(cwd: &Path, remote: bool) -> Value {
     let mut report = build_report(&Inputs {
         runs_dir: run_record::runs_dir(),
         agent_log: hexa_exec::ports::RunLog::read_checked(&hexa_exec::run_log()),
+        ledger: task_ledger::read(cwd),
         now: Utc::now(),
         alive: &run_record::process_alive,
     });
@@ -86,6 +89,8 @@ fn gather(cwd: &Path, remote: bool) -> Value {
 pub struct Inputs<'a> {
     pub runs_dir: std::path::PathBuf,
     pub agent_log: Result<hexa_exec::ports::AgentRunsRead, String>,
+    /// The task ledger (`.hexa/tasks.json` of the main checkout).
+    pub ledger: Result<Ledger, LedgerError>,
     pub now: DateTime<Utc>,
     pub alive: &'a dyn Fn(u64, Option<u64>) -> bool,
 }
@@ -135,6 +140,12 @@ pub fn build_report(i: &Inputs) -> Value {
                     Some(e) if e <= rec.started => Some(e),
                     _ => Some(rec.started.clone()),
                 };
+                // A record that belongs to a registered task is read through its
+                // task (the `tasks` list): the process that registered it was a
+                // short-lived CLI call, so its pid says nothing about the task.
+                if rec.task.is_some() && rec.ended.is_none() && rec.outcome == "running" {
+                    continue;
+                }
                 let state = run_record::effective_state(rec, i.alive);
                 let started = parse_ts(Some(&json!(rec.started)));
                 let mut entry = run_entry(rec, &state);
@@ -232,6 +243,32 @@ pub fn build_report(i: &Inputs) -> Value {
         }
     }
 
+    // ── the task ledger ──────────────────────────────────────────────────────
+    // Tasks that hold their leases, then the last few that finished. A task
+    // that was released is history and is not listed.
+    let mut tasks: Vec<Value> = Vec::new();
+    let tasks_count: Value = match &i.ledger {
+        Err(e) => {
+            unreadable.push(json!({ "source": "tasks.json", "reason": e.message, "code": e.code, "hint": e.hint }));
+            Value::Null
+        }
+        Ok(l) => {
+            let mut done: Vec<&hexa_core::ports::ledger::Task> =
+                l.tasks.iter().filter(|t| !t.status.is_active() && t.status != hexa_core::ports::ledger::TaskStatus::Released).collect();
+            done.sort_by(|a, b| b.updated.cmp(&a.updated));
+            for t in l.active().chain(done.into_iter().take(RECENT)) {
+                tasks.push(json!({
+                    "id": t.id, "name": t.name, "status": t.status, "owner": t.owner,
+                    "leases": t.leases, "worktree": t.worktree, "gate": t.gate, "run": t.run,
+                    "outcome": t.outcome, "commit": t.commit,
+                    "started": t.created, "updated": t.updated,
+                    "age_secs": age_secs(parse_ts(Some(&json!(t.created))), i.now),
+                }));
+            }
+            json!(l.active().count())
+        }
+    };
+
     finished.sort_by(|a, b| b.0.cmp(&a.0));
     let recent: Vec<Value> = finished.into_iter().take(RECENT).map(|(_, e)| e).collect();
     running.sort_by(|a, b| a["started"].as_str().cmp(&b["started"].as_str()));
@@ -239,16 +276,12 @@ pub fn build_report(i: &Inputs) -> Value {
     json!({
         "runs": running,
         "agents": agents,
-        // The task ledger is phase 2 of ADR-2611051850; until it exists there
-        // are no tasks to list, and the report says so rather than implying a
-        // ledger that was read and found empty.
-        "tasks": [],
-        "tasks_ledger": "not built (phase 2)",
+        "tasks": tasks,
         "recent": recent,
         "count": {
             "runs": runs_count,
             "agents": agents_count,
-            "tasks": 0,
+            "tasks": tasks_count,
             "abandoned": if runs_count.is_null() { Value::Null } else { json!(abandoned) },
             "stale_agents": stale_count,
         },
@@ -480,11 +513,23 @@ pub fn render_text(r: &Value) -> String {
     };
     let _ = writeln!(
         o,
-        "\n  Running: {} run(s) · {} agent(s) · {} abandoned",
+        "\n  Running: {} run(s) · {} agent(s) · {} task(s) · {} abandoned",
         n(&c["runs"]),
         n(&c["agents"]),
+        n(&c["tasks"]),
         n(&c["abandoned"])
     );
+    for t in r["tasks"].as_array().into_iter().flatten() {
+        let _ = writeln!(
+            o,
+            "    task   {:<8} {}  {}  leases {}  {}",
+            show(&t["status"]),
+            show(&t["id"]),
+            show(&t["name"]),
+            t["leases"].as_array().map(|a| a.iter().map(show).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
+            ago(t["age_secs"].as_u64()).dimmed()
+        );
+    }
     for run in r["runs"].as_array().into_iter().flatten() {
         let _ = writeln!(
             o,
@@ -611,6 +656,7 @@ mod tests {
         Inputs {
             runs_dir: dir.to_path_buf(),
             agent_log,
+            ledger: Ok(Ledger::default()),
             now: now(),
             alive,
         }
@@ -771,5 +817,88 @@ mod tests {
             (json!(0), json!(0), json!(0))
         );
         assert_eq!(r["ok"], true);
+    }
+
+    fn task(id: &str, status: hexa_core::ports::ledger::TaskStatus, updated: &str) -> hexa_core::ports::ledger::Task {
+        hexa_core::ports::ledger::Task {
+            id: id.into(),
+            name: format!("name-{id}"),
+            owner: None,
+            worktree: None,
+            gate: None,
+            leases: vec![format!("src/{id}")],
+            status,
+            run: None,
+            outcome: None,
+            commit: None,
+            note: None,
+            created: "2026-11-06T10:00:00Z".into(),
+            updated: updated.into(),
+        }
+    }
+
+    /// ADR-2611051850 phase 2: the ledger's active tasks are counted and listed,
+    /// finished ones are listed but not counted, released ones are not listed.
+    #[test]
+    fn status_lists_tasks_counts_the_active_ones_and_hides_the_released() {
+        use hexa_core::ports::ledger::TaskStatus::*;
+        let d = tempfile::tempdir().unwrap();
+        let mut ledger = Ledger::default();
+        ledger.tasks.push(task("a", Claimed, "2026-11-06T10:00:00Z"));
+        ledger.tasks.push(task("b", Running, "2026-11-06T10:05:00Z"));
+        ledger.tasks.push(task("c", Done, "2026-11-06T10:10:00Z"));
+        ledger.tasks.push(task("d", Released, "2026-11-06T10:11:00Z"));
+        let alive = |_: u64, _: Option<u64>| false;
+        let mut i = inputs(d.path(), log(vec![]), &alive);
+        i.ledger = Ok(ledger);
+        let r = build_report(&i);
+        assert_eq!(r["count"]["tasks"], 2, "{r}");
+        let ids: Vec<&str> = r["tasks"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["a", "b", "c"], "{r}");
+        assert!(render_text(&r).contains("task"));
+    }
+
+    #[test]
+    fn status_lists_tasks_reports_an_unreadable_ledger_as_unreadable_not_zero() {
+        let d = tempfile::tempdir().unwrap();
+        let alive = |_: u64, _: Option<u64>| false;
+        let mut i = inputs(d.path(), log(vec![]), &alive);
+        i.ledger = Err(LedgerError::new("ledger_unreadable", "bad json".into(), "fix it".into(), None, true));
+        let r = build_report(&i);
+        assert!(r["count"]["tasks"].is_null(), "{r}");
+        assert_eq!(r["ok"], false);
+        assert_eq!(r["unreadable"][0]["code"], "ledger_unreadable");
+    }
+
+    /// The record of a registered task is read through its task: a dead
+    /// registering pid must not make it abandoned or running.
+    #[test]
+    fn status_lists_tasks_without_calling_a_task_bound_record_abandoned() {
+        let d = tempfile::tempdir().unwrap();
+        let mut rec = RunRecord {
+            id: "agent-1".into(),
+            verb: "agent".into(),
+            target: "one".into(),
+            pid: 999,
+            pid_start: Some(1),
+            pid_start_unknown: false,
+            started: "2026-11-06T10:00:00Z".into(),
+            ended: None,
+            outcome: "running".into(),
+            commit: None,
+            worktree: None,
+            gate: None,
+            log: None,
+            task: Some("a".into()),
+        };
+        run_record::write(d.path(), &rec).unwrap();
+        let alive = |_: u64, _: Option<u64>| false;
+        let r = build_report(&inputs(d.path(), log(vec![]), &alive));
+        assert_eq!((r["count"]["runs"].clone(), r["count"]["abandoned"].clone()), (json!(0), json!(0)), "{r}");
+        rec.ended = Some("2026-11-06T11:00:00Z".into());
+        rec.outcome = "passed".into();
+        run_record::write(d.path(), &rec).unwrap();
+        let r = build_report(&inputs(d.path(), log(vec![]), &alive));
+        assert_eq!(r["recent"][0]["outcome"], "passed", "a closed task record is a last outcome: {r}");
     }
 }

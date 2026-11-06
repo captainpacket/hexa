@@ -87,6 +87,38 @@ cargo test --workspace
 Then commit. The gate has already decided the work is done. The commit records
 it.
 
+## Several agents at once: the task ledger
+
+When more than one agent edits the same repository, hexa keeps the record and
+the rules (ADR-2611051850). It does not start, supervise or stop an agent; the
+harness owns the processes.
+
+```bash
+hexa status                      # runs, tasks and subagents in progress, last outcomes (JSON when piped)
+hexa agent register --task api --lease src/api/ --gate "cargo test -p api"   # prints the task id
+export HEXA_TASK=<id>            # this session may now edit only src/api/
+hexa agent report --id <id> --outcome passed --commit $(git rev-parse --short HEAD)
+hexa agent list                  # the ledger; `hexa agent release --id <id>` frees a crashed task
+hexa dev worktree merge-order    # finished tasks' worktrees, in the order to merge them
+```
+
+- The ledger is `.hexa/tasks.json` in the main checkout, found from any
+  worktree, and git-ignored.
+- Two tasks may not hold overlapping leases. A refusal is a JSON object with
+  `code`, `message`, `hint`, `field` and `retryable`.
+- `hexa hook pre-edit` refuses an edit outside the lease (exit 2, naming the
+  task) for a session bound by `HEXA_TASK` or by a Claude Code `agent_id` equal
+  to the task's `--owner`. An unbound session is unchanged. A lease governs
+  edits made through hooked tools, not a shell redirect.
+- Sealed tests and credential-looking paths (`.runner`, `.env*`, `*.pem`,
+  `*.key`, `id_rsa*`, `*.p12`, `credentials*`, `.netrc`, `*token*`, `*secret*`)
+  are never leasable, and `hexa do` never commits them. `hexa do` commits the
+  `--file` and the `--also` paths only; a file that was already dirty beside it
+  stays out. `hexa do run --plan-only` shows the list without a model.
+- Every write verb takes `--dry-run`. The `SubagentStart` and `SubagentStop`
+  hooks bind and close tasks; whether a live Claude Code sends them in the
+  documented shape is not yet verified.
+
 ## What is not in the pipeline
 
 There is no spec step. A spec that cannot be run does not exist. It becomes a

@@ -92,17 +92,9 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
             }
 
             let task: hexa_exec::direct_exec::DirectTask = serde_json::from_value(body)?;
-            // The run record (ADR-2611051850). `~/.hexa/agent-runs.jsonl` gets
-            // its row only when the run is over; this is the record that says
-            // the run is in progress, and which process owns it.
-            let mut record = crate::commands::run_record::RunGuard::begin("do", &file, Some(&evidence));
             let r = serde_json::to_value(hexa_exec::execute_direct(task).await)?;
 
             let ok = r.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
-            if let Some(sha) = r.get("committed").and_then(|v| v.as_str()) {
-                record.set_commit(sha);
-            }
-            record.finish(if ok { "passed" } else { "failed" });
             let ev = r.get("evidence_passed").and_then(|v| v.as_bool()).unwrap_or(false);
             let attempts_n = r.get("attempts").and_then(|v| v.as_u64()).unwrap_or(0);
             let committed = r.get("committed").and_then(|v| v.as_str());

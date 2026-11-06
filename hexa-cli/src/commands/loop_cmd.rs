@@ -289,6 +289,38 @@ pub fn read_loop(dir: &Path) -> Option<serde_json::Value> {
     read_entry(dir, &session_id())
 }
 
+/// This session's loop state for `hexa status`. Three answers, never blurred:
+/// `{"readable": true, "recorded": false}` (no file, or none for this
+/// session), `{"readable": true, "recorded": true, ...}`, and
+/// `{"readable": false, "error": ...}` for a file that is there and cannot be
+/// read. The last is not "nothing recorded".
+pub fn loop_summary(dir: &Path) -> serde_json::Value {
+    let file = match read_file_strict(dir) {
+        Ok(f) => f,
+        Err(e) => return serde_json::json!({ "readable": false, "error": e }),
+    };
+    let session = session_id();
+    let Some(entry) = file.and_then(|f| entries(&f, &session).get(&session).cloned()) else {
+        return serde_json::json!({ "readable": true, "recorded": false });
+    };
+    let s = |k: &str, d: &str| entry.get(k).and_then(|v| v.as_str()).unwrap_or(d).to_string();
+    let checklist: Vec<serde_json::Value> = task_list(&entry)
+        .into_iter()
+        .map(|t| serde_json::json!({ "n": t.n, "title": t.title, "status": t.status }))
+        .collect();
+    let done = checklist.iter().filter(|t| t["status"] == "done").count();
+    serde_json::json!({
+        "readable": true,
+        "recorded": true,
+        "adr": s("adr", "none"),
+        "stage": s("stage", "decide"),
+        "gate": s("gate", "none"),
+        "checklist": checklist,
+        "checklist_done": done,
+        "running": running_line(&entry),
+    })
+}
+
 fn write_entries(dir: &Path, m: serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
     let p = loop_path(dir);
     if m.is_empty() {

@@ -1158,7 +1158,10 @@ async fn review(
                 }
                 // A fix may make a sealed test pass, never change it
                 // (ADR-2610221540 §6): refused before any gate, batched or not.
-                let broken = crate::direct_exec::broken_seals(repo_root);
+                // A sealed path absent before the fix and absent after is not
+                // an edit (#50); only a change counts.
+                let started_dirty: Vec<String> = before.keys().cloned().collect();
+                let broken = crate::direct_exec::broken_seals_for_run(repo_root, &started_dirty);
                 if !broken.is_empty() {
                     revert_paths(repo_root, &touched, &before).await;
                     fix.note(format!("REFUSED — {} edited sealed test(s): {}", f.title, broken.join(", ")));

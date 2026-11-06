@@ -10,6 +10,7 @@ pub mod intent;
 pub mod design;
 // What a gate's run proved, read by one fail-closed reader (ADR-2611081151).
 pub mod evidence;
+pub mod ledger;
 pub mod messages;
 pub mod project_floor;
 pub mod provenance;

@@ -509,7 +509,144 @@ async fn subagent_start() -> Result<()> {
         "in_worktree": isolated,
         "ts": chrono::Utc::now().to_rfc3339(),
     }));
+    if !agent_id.is_empty() {
+        bind_subagent_task(&agent_id, &cwd);
+    }
     Ok(())
+}
+
+/// ADR-2611051850 §8: tell the ledger a subagent started. A task registered
+/// with `--owner <agent_id>`, or a claimed task registered for this
+/// subagent's worktree (`--worktree`), becomes `running` and bound to the
+/// `agent_id`, so `pre-edit` holds the subagent to its lease. No task, no
+/// change: the event carries no task name, so a parent must register first.
+fn bind_subagent_task(agent_id: &str, cwd: &Path) {
+    use crate::commands::task_ledger;
+    use hexa_core::ports::ledger::TaskStatus;
+    let Ok(ledger) = task_ledger::read(cwd) else {
+        eprintln!("[hexa hook] the task ledger could not be read, so subagent {agent_id} was not bound to a task; see `hexa status`");
+        return;
+    };
+    let here = task_ledger::canonical_lenient(cwd).display().to_string();
+    let target = ledger
+        .active_for_owner(agent_id)
+        .or_else(|| {
+            ledger
+                .active()
+                .find(|t| t.status == TaskStatus::Claimed && t.owner.is_none() && t.worktree.as_deref() == Some(here.as_str()))
+        })
+        .map(|t| t.id.clone());
+    let Some(id) = target else { return };
+    let bound = task_ledger::update(cwd, |l| {
+        let Some(t) = l.get_mut(&id).filter(|t| t.status.is_active()) else { return Ok(None) };
+        t.status = TaskStatus::Running;
+        t.owner = Some(agent_id.to_string());
+        if t.worktree.is_none() {
+            t.worktree = Some(here.clone());
+        }
+        t.updated = task_ledger::now();
+        Ok(Some((t.id.clone(), t.name.clone(), t.leases.join(", "))))
+    });
+    match bound {
+        Ok(Some((id, name, leases))) => eprintln!("[hexa hook] subagent {agent_id} is bound to task {id} ({name}); lease: {leases}"),
+        Ok(None) => {}
+        Err(e) => eprintln!("[hexa hook] could not bind subagent {agent_id} to task {id}: {e}"),
+    }
+}
+
+/// ADR-2611051850 §8: a subagent stopped. Its task is closed from facts
+/// hexa can read: the task's gate rerun in the task's worktree gives the
+/// outcome, and that worktree's HEAD gives the commit. A task with no gate
+/// has no outcome hexa can judge, so it stays claimed and the line printed
+/// names the `hexa agent report` that closes it: no lease is dropped on a guess.
+fn close_subagent_task(agent_id: &str, project_dir: &Path) {
+    use crate::commands::{agent, task_ledger};
+    use hexa_core::ports::ledger::TaskStatus;
+    let Ok(ledger) = task_ledger::read(project_dir) else {
+        eprintln!("[hexa hook] the task ledger could not be read; subagent {agent_id}'s task was not closed");
+        return;
+    };
+    let Some(task) = ledger.active_for_owner(agent_id).cloned() else { return };
+    let dir = task.worktree.as_deref().map(PathBuf::from).unwrap_or_else(|| project_dir.to_path_buf());
+    let commit = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&dir)
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|c| !c.is_empty());
+    let Some(gate) = task.gate.as_deref().filter(|g| !g.trim().is_empty()) else {
+        println!(
+            "task {} ({}) has no gate, so hexa cannot judge its outcome and keeps its lease; close it with: hexa agent report --id {} --outcome <passed|failed> --commit {}",
+            task.id, task.name, task.id, commit.as_deref().unwrap_or("<sha>")
+        );
+        return;
+    };
+    let passed = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(gate)
+        .current_dir(&dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    let (status, outcome) = if passed { (TaskStatus::Done, "passed") } else { (TaskStatus::Failed, "failed") };
+    let note = format!("closed by SubagentStop for {agent_id}: gate `{gate}` {outcome}");
+    match agent::close_task(project_dir, &task.id, status, Some(outcome), commit.as_deref(), Some(&note), false) {
+        Ok(_) => println!("task {} ({}) closed {outcome} by its gate; leases released", task.id, task.name),
+        Err(e) => eprintln!("[hexa hook] could not close task {}: {e}", task.id),
+    }
+}
+
+/// ADR-2611051850 §4: refuse (exit 2, reason on stderr) an edit outside the
+/// lease of the task this session is bound to. Bound by `HEXA_TASK=<id>`, or
+/// by the payload's `agent_id` equalling the task's owner. Unbound: nothing.
+/// A bound session whose ledger cannot be read, or whose task does not exist,
+/// is refused too: a rule that cannot be checked is not a rule that passed.
+fn lease_gate(project_dir: &Path, file_path: &str) {
+    use crate::commands::task_ledger;
+    use hexa_core::ports::ledger::{lease_decision, Decision};
+    let by_env = std::env::var(task_ledger::ENV_TASK).ok().filter(|v| !v.is_empty());
+    let agent_id = hook_payload()["agent_id"].as_str().filter(|s| !s.is_empty()).map(str::to_string);
+    if by_env.is_none() && agent_id.is_none() {
+        return;
+    }
+    let refuse = |why: String| -> ! {
+        eprintln!("\u{26d4} lease: {why}");
+        std::process::exit(2);
+    };
+    let ledger = match task_ledger::read(project_dir) {
+        Ok(l) => l,
+        Err(e) if by_env.is_some() => refuse(format!("the session is bound to a task but the ledger cannot be read ({e})")),
+        Err(e) => {
+            println!("[hexa hook] lease check skipped for subagent {}: {e}", agent_id.as_deref().unwrap_or("?"));
+            return;
+        }
+    };
+    let task = match (&by_env, &agent_id) {
+        (Some(id), _) => match ledger.get(id) {
+            Some(t) => t,
+            None => refuse(format!("HEXA_TASK={id} names no task in the ledger. `hexa agent list` shows the ids; `hexa agent register` makes one.")),
+        },
+        (None, Some(a)) => match ledger.active_for_owner(a) {
+            Some(t) => t,
+            None => return,
+        },
+        (None, None) => return,
+    };
+    let abs = if Path::new(file_path).is_absolute() { PathBuf::from(file_path) } else { project_dir.join(file_path) };
+    let mut roots: Vec<PathBuf> = vec![project_dir.to_path_buf()];
+    roots.extend(task.worktree.as_deref().map(PathBuf::from));
+    roots.push(task_ledger::main_root(project_dir));
+    let Some(rel) = roots.iter().find_map(|r| task_ledger::relative_to(r, &abs)) else {
+        return; // outside the repository: leases govern the repository's files
+    };
+    if let Decision::Deny(why) = lease_decision(task, &rel, &task_ledger::sealed(project_dir)) {
+        refuse(why);
+    }
 }
 
 /// SubagentStop — record the stop, then name every worktree branch that
@@ -525,6 +662,13 @@ async fn subagent_stop() -> Result<()> {
         "agent_type": v["agent_type"].as_str().unwrap_or(""),
         "ts": chrono::Utc::now().to_rfc3339(),
     }));
+    let agent_id = v["agent_id"].as_str().unwrap_or("");
+    if !agent_id.is_empty() {
+        let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
+        close_subagent_task(agent_id, &project_dir);
+    }
     for (path, branch, ahead) in worktrees_with_unmerged_commits() {
         println!(
             "worktree {} on {} holds {} commit{} not on this branch; land them with: hexa dev worktree merge {}",
@@ -590,6 +734,11 @@ async fn pre_edit(project_dir: &Path) -> Result<()> {
 
     if let Ok(input) = serde_json::from_str::<serde_json::Value>(&tool_input) {
         if let Some(file_path) = input["file_path"].as_str() {
+            // ADR-2611051850 §4: a session bound to a task is held to its
+            // lease. First, so no softer rule below can excuse an edit the
+            // lease refuses. An unbound session passes through unchanged.
+            lease_gate(project_dir, file_path);
+
             // Everything below is this project's rules. A file outside it —
             // a shell profile, another repository — is not held to them.
             let path = Path::new(file_path);

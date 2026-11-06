@@ -98,7 +98,8 @@ hexa loop stage done                    # writes the evidence into the ADR
 | The steps this work is made of | `hexa loop task` |
 | The next right thing | `hexa go` |
 | A plain-English request, routed to the verb it names | `hexa hey "<request>"` — says so when no verb matches; asks before anything that changes the tree, even with `--yes` |
-| Project and git state at a glance | `hexa status` |
+| Project and git state at a glance, runs and tasks in progress (JSON when piped) | `hexa status` |
+| Several agents in one repo: claim a task and the paths it may edit, close it, merge in order | `hexa agent register --task <name> --lease <path>`, `hexa agent report --id <id> --outcome passed --commit <sha>`, `hexa dev worktree merge-order` |
 | A lesson you will otherwise forget | `hexa memory store lesson:<topic> "<text>"` |
 | What was learned before | `hexa memory search <query>` |
 | Test a claim before acting on it | `hexa verify "<claim>"` — CONFIRMED / REFUTED / INCONCLUSIVE |

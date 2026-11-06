@@ -99,6 +99,10 @@ pub async fn run(args: InitArgs) -> Result<()> {
     // ── 1c. .hexa/ADR-rules.toml (enforcement rules) ───────────────
     create_adr_rules_toml(&target)?;
 
+    // ── 1d. the task ledger is runtime state: keep it out of git (ADR-2611051850)
+    crate::commands::task_ledger::ensure_ignored(&target)
+        .context("Failed to write .hexa/.gitignore")?;
+
     // ── 3. .claude/settings.json (hooks → hexa hook <event>) ──────
     create_claude_settings(&target)?;
 

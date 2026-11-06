@@ -244,6 +244,47 @@ pub fn begin_detached_in(
     Ok(rec.id)
 }
 
+/// The run record of a registered task (ADR-2611051850 phase 2/3). It names the
+/// process that registered (`pid` with its start time), but whether the task
+/// is live is the ledger's to say: the registering process is a short-lived
+/// CLI call, so `hexa status` reads a task-bound record through its task and
+/// never calls it `abandoned` by pid.
+pub fn begin_for_task(task_id: &str, name: &str, gate: Option<&str>, worktree: Option<&str>) -> Result<String, String> {
+    begin_for_task_in(&runs_dir(), task_id, name, gate, worktree)
+}
+
+pub fn begin_for_task_in(
+    dir: &Path,
+    task_id: &str,
+    name: &str,
+    gate: Option<&str>,
+    worktree: Option<&str>,
+) -> Result<String, String> {
+    let mut rec = this_process("agent", name, gate, new_id("agent"), None);
+    rec.task = Some(task_id.to_string());
+    if let Some(w) = worktree {
+        rec.worktree = Some(w.to_string());
+    }
+    write(dir, &rec)?;
+    Ok(rec.id)
+}
+
+/// Close the record of a task with its outcome and commit. Errs when the record
+/// is missing or cannot be read: the caller says so, it does not pretend.
+pub fn close_task_run(id: &str, outcome: &str, commit: Option<&str>) -> Result<(), String> {
+    close_task_run_in(&runs_dir(), id, outcome, commit)
+}
+
+pub fn close_task_run_in(dir: &Path, id: &str, outcome: &str, commit: Option<&str>) -> Result<(), String> {
+    let mut rec = read_one(dir, id).ok_or_else(|| format!("run record {id} is missing or unreadable in {}", dir.display()))?;
+    rec.ended = Some(now());
+    rec.outcome = outcome.to_string();
+    if let Some(c) = commit {
+        rec.commit = Some(c.to_string());
+    }
+    write(dir, &rec)
+}
+
 /// Is the process a record names still the one running? The pid must exist
 /// (a permission error means it exists), and when both start times are known
 /// they must match: a recycled pid is somebody else's process.

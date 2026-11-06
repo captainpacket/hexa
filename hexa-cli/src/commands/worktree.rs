@@ -34,6 +34,13 @@ pub enum WorktreeAction {
         #[arg(long)]
         force: bool,
     },
+    /// The order in which finished tasks' worktrees can be merged without a lease conflict.
+    /// Reads the task ledger; runs no merge. JSON when piped or with --json.
+    #[command(name = "merge-order")]
+    MergeOrder {
+        #[arg(long)]
+        json: bool,
+    },
     /// Remove worktrees whose branches are already merged into main
     Cleanup {
         /// Actually remove (default is dry-run)
@@ -46,6 +53,7 @@ pub async fn run(action: WorktreeAction) -> anyhow::Result<()> {
     match action {
         WorktreeAction::List { stale, json } => list(stale, json).await,
         WorktreeAction::Merge { pattern, all, force } => merge(pattern, all, force).await,
+        WorktreeAction::MergeOrder { json } => merge_order(json).await,
         WorktreeAction::Cleanup { force } => cleanup(force).await,
     }
 }
@@ -174,6 +182,115 @@ fn is_merged(branch: &str, main: &str) -> bool {
     false
 }
 
+// ── Ledger (ADR-2611051850) ────────────────────────────
+
+/// The ledger task registered for the worktree at `path`, if any.
+fn task_for_worktree<'a>(ledger: &'a hexa_core::ports::ledger::Ledger, path: &str) -> Option<&'a hexa_core::ports::ledger::Task> {
+    let here = crate::commands::task_ledger::canonical_lenient(Path::new(path)).display().to_string();
+    // The newest registration for the path decides.
+    ledger.tasks.iter().rev().find(|t| t.worktree.as_deref() == Some(here.as_str()))
+}
+
+/// Refuse to merge a worktree whose task is not `done`. A ledger that cannot
+/// be read refuses too: "no task found" must not mean "could not look".
+fn refuse_unfinished_tasks(candidates: &[(String, String)]) -> anyhow::Result<()> {
+    use hexa_core::ports::ledger::TaskStatus;
+    let cwd = std::env::current_dir()?;
+    let ledger = crate::commands::task_ledger::read(&cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let blocked: Vec<String> = candidates
+        .iter()
+        .filter_map(|(path, branch)| {
+            let t = task_for_worktree(&ledger, path)?;
+            (t.status != TaskStatus::Done).then(|| format!("{branch} (task {} `{}` is {})", t.id, t.name, t.status))
+        })
+        .collect();
+    if blocked.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "refusing to merge worktrees whose task is not done: {}. Close each with `hexa agent report --id <id> --outcome passed`, or free it with `hexa agent release --id <id>`; `hexa dev worktree merge-order` lists what is ready.",
+        blocked.join("; ")
+    )
+}
+
+/// `hexa dev worktree merge-order`: done tasks' worktrees in the order they
+/// finished, with every pair whose leases overlap named, and the worktrees
+/// that are not ready and why. Pure reading; no merge is run.
+async fn merge_order(json: bool) -> anyhow::Result<()> {
+    use hexa_core::ports::ledger::{overlaps, TaskStatus};
+    use std::io::IsTerminal;
+    let cwd = std::env::current_dir()?;
+    let ledger = match crate::commands::task_ledger::read(&cwd) {
+        Ok(l) => l,
+        Err(e) => {
+            if json || !std::io::stdout().is_terminal() {
+                let mut v = serde_json::to_value(&e)?;
+                v["ok"] = serde_json::json!(false);
+                println!("{}", serde_json::to_string_pretty(&v)?);
+            } else {
+                eprintln!("{} {}\n  hint: {}", "\u{2717}".red(), e.message, e.hint);
+            }
+            std::process::exit(1);
+        }
+    };
+    let mut ready: Vec<&hexa_core::ports::ledger::Task> =
+        ledger.tasks.iter().filter(|t| t.status == TaskStatus::Done && t.worktree.is_some()).collect();
+    ready.sort_by(|a, b| a.updated.cmp(&b.updated).then(a.id.cmp(&b.id)));
+    let mut conflicts: Vec<serde_json::Value> = Vec::new();
+    for (i, a) in ready.iter().enumerate() {
+        for b in ready.iter().skip(i + 1) {
+            if let Some((x, y)) = a.leases.iter().flat_map(|x| b.leases.iter().map(move |y| (x, y))).find(|(x, y)| overlaps(x, y)) {
+                conflicts.push(serde_json::json!({
+                    "first": a.id, "second": b.id, "paths": [x, y],
+                    "hint": "Their leases overlap (the first was released before the second was registered): merge in this order and expect to resolve the overlap by hand.",
+                }));
+            }
+        }
+    }
+    let not_ready: Vec<serde_json::Value> = ledger
+        .tasks
+        .iter()
+        .filter(|t| t.status != TaskStatus::Done && t.status != TaskStatus::Released && t.worktree.is_some())
+        .map(|t| serde_json::json!({
+            "id": t.id, "name": t.name, "worktree": t.worktree, "status": t.status,
+            "reason": format!("task is {}; a worktree is mergeable when its task is done", t.status),
+        }))
+        .collect();
+    let order: Vec<serde_json::Value> = ready
+        .iter()
+        .enumerate()
+        .map(|(n, t)| serde_json::json!({
+            "position": n + 1, "id": t.id, "name": t.name, "worktree": t.worktree,
+            "commit": t.commit, "finished": t.updated, "leases": t.leases,
+        }))
+        .collect();
+    let report = serde_json::json!({
+        "ok": true,
+        "order": order,
+        "conflicts": conflicts,
+        "not_ready": not_ready,
+        "note": "Disjoint leases merge in any order; the order is by finish time. This verb merges nothing: use `hexa dev worktree merge <branch> --force`.",
+    });
+    if json || !std::io::stdout().is_terminal() {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+    println!("{}", "Merge order".bold());
+    if order.is_empty() {
+        println!("  No finished task has a worktree.");
+    }
+    for o in &order {
+        println!("  {}. {} {}  {}", o["position"], o["id"].as_str().unwrap_or("?").cyan(), o["name"].as_str().unwrap_or(""), o["worktree"].as_str().unwrap_or("").dimmed());
+    }
+    for c in &conflicts {
+        println!("  {} {} then {} overlap on {}", "\u{26a0}".yellow(), c["first"], c["second"], c["paths"]);
+    }
+    for n in &not_ready {
+        println!("  {} {} {}", "\u{25cb}".yellow(), n["id"].as_str().unwrap_or("?"), n["reason"].as_str().unwrap_or(""));
+    }
+    Ok(())
+}
+
 // ── Subcommands ────────────────────────────────────────
 
 async fn list(stale: bool, json: bool) -> anyhow::Result<()> {
@@ -292,6 +409,10 @@ async fn merge(
         println!("  No matching worktree branches found.");
         return Ok(());
     }
+
+    // ADR-2611051850: a worktree whose task has not finished well is not
+    // merged. A worktree no task was registered for is unaffected.
+    refuse_unfinished_tasks(&candidates)?;
 
     println!("{}", "Worktree Merge".bold());
     println!("{}", "\u{2500}".repeat(60));
