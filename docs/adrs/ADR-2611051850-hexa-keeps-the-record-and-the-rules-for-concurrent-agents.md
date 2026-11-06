@@ -1,0 +1,117 @@
+# ADR-2611051850: hexa keeps the record and the rules for concurrent agents
+
+**Status:** Proposed
+**Date:** 2026-11-05
+**Drivers:** In a strata session on 2026-11-02..05, several agents worked at once and hexa could not say how many. Five failures came from one gap: hexa has no record of who is doing what, and no rule about which files a piece of work may touch. (1) The only count was `ps | grep hexa` plus `ls ~/.hexa/runs/` (issue #49). (2) `hexa do run` committed an untracked Forgejo runner credential, `.runner`, next to the file it was asked to edit, and it was pushed (issue #36). (3) The sealed-file guard read a spec's deleted sealed file as an edit and refused every `hexa do` and `hexa harden` commit until the stale spec JSON was deleted by hand (issue #50). (4) Two parallel agents were kept apart by hand, by file boundary, with nothing enforcing it. (5) `pid_start` reads `/proc`, so on macOS it is always null and pid-reuse protection does nothing (issue #40).
+
+## Context
+
+What exists today, read from the tree at origin/main fe294e7:
+
+- `hexa status` (`hexa-cli/src/commands/status.rs`, 56 lines) prints the cwd, whether `.hexa/` exists and the HEAD hash. A parked ADR on branch `adr/2611020850-hexa-status` (the parked status ADR, Proposed, never merged) decides the git, loop and `--json` content of a richer `status`. It knows nothing about runs or tasks.
+- A detached run (`hexa build|harden --detach`) writes `~/.hexa/runs/<verb>-<slug>-<stamp>.log` and prints a pid (`hexa-cli/src/commands/build.rs`, `run_log_path`). Nothing writes a record of the run, so nothing can list it, and a run that ended leaves a log with no outcome.
+- `hexa loop` keeps sessions with a pid and a `pid_start` (ADR-2609131408). `pid_start` in `hexa-cli/src/commands/loop_cmd.rs` reads `/proc/<pid>/stat` and returns `None` on macOS (#40).
+- The pre-edit hook (`hexa hook pre-edit`, `hexa-cli/src/commands/hook/mod.rs`) already receives `tool_input.file_path`, `agent_id` and `agent_type` from Claude Code on stdin. It has two path rules, both too weak for this job. `SessionState.allowed_paths` is fail-open: an empty list allows everything, and `docs/`, `tests/`, `config/`, `.hexa/` are always allowed. `touched_by_others` only prints "coordinate before overlapping" and never blocks (ADR-2609131408 chose visibility over refusal).
+- `hexa do run` stages `git add -A -- <paths>` (`hexa-exec/src/direct_exec.rs`, around line 1552). The path list is the `--file`, every file that was already dirty at the start and sits in the same package prefix, and `--also`. That middle rule is the root cause of #36: a `.runner` file dirty beside the edited file is "in the package" and is committed. The help text promises "no other new file is ever committed".
+- The sealed-file guard compares sealed paths to the state after the run without asking whether the path existed before it (#50).
+- `hexa hook subagent-start` and `subagent-stop` already exist (`hook/mod.rs`). They append an event (`agent_id`, `agent_type`, cwd, whether in a worktree) to hexa's run log and, on stop, name worktree branches holding unmerged commits with `hexa dev worktree merge <branch>`. They create no record that a consumer can list, hold no task and no lease, and refuse nothing. The bridge below extends these hooks; it adds no new hook.
+- `hexa dev worktree` (`hexa-cli/src/commands/worktree.rs`) creates and lists worktrees. It does not know which task a worktree belongs to, and it merges in no particular order.
+
+The owner decided the split already, so this ADR records it and does not reopen it. hexa owns the record and the rules. The agent harness (Claude Code subagents, or hexa's own `hexa do` agent) owns the processes. hexa does not spawn, supervise or kill a subagent. It is told what happened and it refuses what the rules forbid.
+
+A trap the parked ADR names applies here too: a report that degrades silently. A count of zero because the ledger could not be read is not a count of zero. The gate below fails on a vacuous pass for that reason.
+
+## Decision
+
+1. **A run record per run, per registered task.** Every `hexa do|build|harden|bench` run, foreground or detached, and every task registered through the bridge (decision 6), writes `~/.hexa/runs/<id>.json` when it starts and updates it when it ends. Fields: `id`, `verb`, `target`, `pid`, `pid_start`, `started`, `ended` (null while running), `outcome` (`running|passed|failed|killed|abandoned|unknown`), `commit`, `worktree`, `gate`, `log`, `task` (the ledger id, or null). The log keeps its current name and the record points at it. No consumer parses `ps` or a log to answer "what is running". A record whose `pid` is dead with a matching or unknowable `pid_start` and no `ended` is reported as `abandoned`, not `running`.
+2. **`pid_start` works on macOS.** On macOS it reads `proc_pidinfo(PROC_PIDTBSDINFO)` and uses `pbi_start_tvsec` (seconds, with `pbi_start_tvusec`), through the `libc` crate behind a `cfg(target_os = "macos")` function in the same place the Linux one lives. A pid whose start time cannot be read gives `None` and the record says `pid_start_unknown`, not a made-up value. This closes #40 and gives decision 1 its pid-reuse protection on the platform hexa is developed on.
+3. **A task ledger in the project.** `.hexa/tasks.json` holds one entry per task: `id`, `name`, `owner` (an agent label such as a session id or `agent_id`), `worktree`, `gate`, `leases` (list of paths or directory prefixes), `status` (`claimed|running|done|failed|released`), `run` (the run record id), `created`, `updated`. The ledger lives in the main checkout's `.hexa/` and is found from any worktree through `git rev-parse --git-common-dir`, so two worktrees see one ledger. It is runtime state and is git-ignored by `hexa init`; it is not a second source of truth for the ADR or the workplan, which stay in `docs/`. Writes are atomic (write a temp file, rename) and take an advisory lock, because two agents register at once.
+4. **Leases are enforced by the hook that already exists.** A task leases paths when it registers. Two tasks may not hold overlapping leases: the second `register` is refused, naming the holder and the overlapping path. A session is bound to a task by `HEXA_TASK=<id>` in its environment, or, for Claude Code subagents, by the `agent_id` the task was registered with. `hexa hook pre-edit` refuses (exit 2, reason on stderr naming the task, its lease and the path) an edit whose `file_path` is outside the leases of the task the session is bound to. A session bound to no task is unchanged: the hook keeps its current behaviour, so a single-agent project pays nothing. Inside a bound session the always-allowed prefixes (`docs/`, `tests/`, `config/`, `.hexa/`) stop being a blanket exemption unless the task leases them. This replaces the fail-open `allowed_paths` for bound sessions and leaves `touched_by_others` as the advisory line for unbound ones.
+5. **Sealed and credential-looking paths are never leasable and never committed by `hexa do`.** Never leasable: any path a spec in `docs/specs/*.json` lists as sealed, and any path that matches the credential patterns (`.runner`, `.env`, `.env.*` other than `.env.example`, `*.pem`, `*.key`, `id_rsa*`, `*.p12`, `credentials*`, `.netrc`, `*token*`, `*secret*`). `register` refuses such a lease with `code: "lease_not_allowed"`, a `field`, a `hint` and `retryable: false`. Never committed: `hexa do run` removes those paths from its staging list even when they are dirty, in the same package, or named by `--also`, and says it left them (`left_uncommitted` in the output). The `add -A` over "dirty files in the same package prefix" is narrowed in this decision: a file already dirty at the start is committed only when it is the `--file`, or named by `--also`, or tracked at HEAD and modified. An untracked file beside the edit is never swept in. This is the whole fix for #36.
+6. **A sealed file absent before and absent after is not an edit** (#50, same rule family). The guard compares each sealed path's state before the run with its state after. Only a change counts. Deleting a sealed file during a run is still refused. `hexa spec` gains `retire <ADR>` so a superseded ADR's spec stops guarding files; that verb is decided here and built in phase 2, and `hexa spec verify` on a retired ADR says "retired".
+7. **Verbs, agent-first.** Every verb prints JSON when stdout is not a terminal and with `--json`, takes `--dry-run` for every write, returns errors that carry `code`, `hint`, `field` and `retryable`, and has a `describe` entry.
+   - `hexa status [--json] [--remote]`: the loop's ADR, stage, gate and task progress; runs and tasks in progress with verb, target, age, state, log; the last 5 outcomes; a `count` of running runs and a `count` of claimed or running tasks. It adopts the parked the parked status ADR decisions 1 to 5 unchanged (git ahead/behind/dirty, opt-in `--remote`, loop, honest "could not tell"). Where that ADR says `--json` is a flag, this one changes it: JSON is also the default when stdout is not a terminal, as issue #49 asks.
+   - `hexa agent register --task <name> --lease <path>... [--worktree <dir>] [--gate <cmd>] [--owner <label>] [--dry-run]`: claims a task and its leases and prints `{id, run, leases}`. Refuses overlap and non-leasable paths.
+   - `hexa agent report --id <id> --outcome <passed|failed|killed> [--commit <sha>] [--note <text>]`: closes the run record and the ledger entry, releases the leases.
+   - `hexa agent list [--json]`: the ledger. `hexa agent release --id <id>` frees a claimed task without an outcome.
+   - `hexa dev worktree merge-order [--json]`: given the ledger, prints the order in which done tasks' worktrees can be merged without a lease conflict (disjoint leases merge in any order; the order is by finished time) and refuses to merge a worktree whose task is not `done`. It does not run the merge. Merge itself stays the existing `hexa dev worktree` verbs.
+8. **The bridge to Claude Code is hooks, not supervision.** hexa documents (in `docs/agents.md` and the `hexa-workflow` skill) the hook entries that feed the bridge. See the section "What Claude Code can feed" below. hexa does not spawn, supervise, restart or kill any subagent, and does not read a transcript.
+9. **Non-goals.** hexa does not start Claude Code subagents, does not schedule them, does not own their lifetimes, and does not arbitrate between a user's instructions and a lease: a lease constrains edits made through hooked tools, nothing else.
+
+### What Claude Code can feed
+
+Checked on 2026-11-05 by fetching https://code.claude.com/docs/en/hooks with WebFetch. The tool summarises the page with a model and, for this page, read only the first 100,000 of 286,092 characters, so the points below are what that summary reported and were not checked against the page text by eye:
+
+- Events named `SubagentStart` and `SubagentStop`, carrying `agent_id`, `agent_type` and `transcript_path`. `SubagentStop` can block (exit 2 prevents the subagent stopping).
+- `PreToolUse` and `PostToolUse` fire inside subagents and carry `agent_id` and `agent_type`; `PreToolUse` can deny with exit 2 or `permissionDecision: "deny"`.
+- Also `TaskCreated`, `TaskCompleted`, `WorktreeCreate`, `WorktreeRemove`, `SessionStart`, `SessionEnd`.
+
+How hexa would use them, each marked with what is not yet proven:
+
+| Event | hexa verb | Status |
+|---|---|---|
+| `SubagentStart` | extends the existing `hexa hook subagent-start`: writes the run record and, if the parent registered a task for this `agent_id`, binds it | The event carries no task name or leases; a task must be registered first by the parent (or named in the subagent's prompt). Whether the hook can read the prompt is not verified. |
+| `PreToolUse` (Edit/Write) inside the subagent | `hexa hook pre-edit`, which finds the task from `agent_id` | `agent_id` presence in a subagent's PreToolUse is documented; hexa's hook already reads it (`hook/mod.rs`). Not yet exercised against a live subagent. |
+| `SubagentStop` | extends the existing `hexa hook subagent-stop`: closes the run record, calls the `agent report` logic | The event gives no outcome or commit. hexa would take the outcome from the task's gate rerun, and the commit from the task's worktree HEAD. Whether the final message is in the payload is not verified. |
+| `WorktreeCreate` / `WorktreeRemove` | register / release the worktree on the task | Not verified how a hook learns which task a worktree is for. |
+
+Not verified: that these hooks fire for a subagent started with `isolation: "worktree"`, that `agent_id` is stable between a subagent's start and its tool calls, and that a hook configured in a project's `.claude/settings.json` applies to a subagent in a different worktree. The phase 3 gate tests the bridge with hand-made payloads in this documented shape; whether a live Claude Code produces them is checked by the phase 3 exit gate as a manual step, and the ADR is not Completed until it has been.
+
+### Where this design differs from the brief it was written from
+
+- The ledger lives in the main checkout and is found through `git rev-parse --git-common-dir`, not in each worktree's `.hexa/`, or two worktrees would hold two ledgers.
+- Binding a session to a task uses `HEXA_TASK` or the Claude Code `agent_id`. The hook payload has no task field, so the brief's "the task the session is registered to" needs one of those two.
+- The #36 fix is not only "credential paths are never committed": the staging rule that swept in a dirty neighbour file is narrowed too, because a credential pattern list will always miss one file.
+- `hexa status` is not a new design. The parked the parked status ADR stays Proposed and is built as phase 1's git/loop half; this ADR adds the runs and tasks half and the default-JSON rule. If the owner prefers, the parked ADR is marked Superseded by this one when phase 1 lands.
+
+## Consequences
+
+- hexa can answer "how many agents are running" from files, on macOS and Linux, and a run that ended says how. A dead process is `abandoned`, not counted as running.
+- Parallel agents are kept apart by a rule that is checked at the edit, not by a convention a person holds in their head. A subagent that strays outside its lease is refused with a reason it can act on.
+- `hexa do` can no longer commit a credential or any untracked neighbour of the edited file. The change narrows staging; a run that relied on the sweep to commit a related dirty file must now name it with `--also`. That is a behaviour change to `hexa do`, and the test around `commit_with_also` in `direct_exec.rs` is rewritten with it.
+- A deleted sealed file stops blocking commits (#50). The sealed-file protection for a file that is edited or removed during a run is unchanged.
+- Cost: a hook-time read of `.hexa/tasks.json` on every edit in a bound session, and a lock on register. Unbound sessions pay nothing.
+- What this will NOT fix:
+  - An agent that edits through a tool the hook does not see (a shell redirect, `sed -i` in Bash) is not stopped by a lease. `pre-bash` already blocks destructive commands, and the lease is no sandbox.
+  - hexa does not know about agents it was not told about. A Claude Code subagent that never calls `register` and has no hook configured is invisible, as issue #49 notes ("other Claude Code sessions in the same checkout, which hexa does not launch").
+  - A lease does not prevent a semantic conflict between two files that import each other; it prevents two agents writing one file.
+  - A harness that crashes before `report` leaves a task `claimed`; hexa marks the run `abandoned` by pid and the task is released by `hexa agent release`, not automatically, so no lease is dropped on a guess.
+  - A credential file whose name matches no pattern and which is not in the package neighbourhood is still not recognised; the secret scan of ADR-2611031914 covers text bodies, not file names.
+  - Merge conflicts in lock files and generated files; `merge-order` reports lease overlap only.
+- Risks: `libc`'s macOS bindings must expose `proc_bsdinfo` and `PROC_PIDTBSDINFO` (to verify in phase 1; the fallback is `sysctl KERN_PROC_PID`, named in #40). A gate recorded for a Proposed ADR that is red: hexa's own gate ledger (ADR-2610271110) may fail on it, since the list of unbuilt ADRs may only shrink. This is an open question for the owner, below.
+
+## Gate
+
+`bash scripts/gate-run-ledger.sh`: it builds hexa from this tree and runs that binary, never the one on PATH. It runs in a temporary git repo with `HOME` pointed at a temporary directory, and checks, in order, each as a separate named check that must pass (a check that cannot run counts as a failure, and the script runs every check, prints one PASS or FAIL line each, and exits 0 only when all passed): (1) with nothing registered `hexa status --json` reports zero runs and zero tasks, so the later count cannot be a leftover; (2) two tasks with disjoint leases register and each prints an id; (3) `hexa status --json` lists both with a count of exactly 2, and the count is not 0 or 1; (4) a third task with a lease overlapping the first is refused with `code`, `hint`, `field` and `retryable` set; (5) `hexa hook pre-edit` for a session bound to task one refuses (exit 2) an edit in task two's lease and allows (exit 0) one in its own; (6) registering a lease on a sealed path from a spec in the temporary repo is refused, and so is a lease on `.runner`; (7) `hexa do run --plan-only` in a repo where an untracked `.runner` sits beside a modified `--file` lists the file and not `.runner` in `would_commit` and lists `.runner` in `left_uncommitted`; (8) a spec naming a sealed file that does not exist does not make `--plan-only` refuse; (9) `hexa agent report` marks one task done with a commit and `hexa status --json` then shows it ended with that outcome, its run record at `$HOME/.hexa/runs/<id>.json` has a non-null `pid_start` on macOS and Linux, and the count of running tasks is 1. The script is written before the code and is red today because the `agent` verb and the `--plan-only` flag do not exist; it fails at check 2 and says so.
+
+## Implementation
+
+Smallest phase first. Each phase has its own exit gate, and the gate script above is the exit gate of phase 3 as a whole; its checks are grouped so each earlier phase passes its own subset.
+
+| Phase | Work | Exit gate |
+|---|---|---|
+| 1. Run records and `hexa status` | `pid_start` on macOS (#40). Run record `~/.hexa/runs/<id>.json` written by `do|build|harden|bench`, foreground and detached. `hexa status` per the parked the parked status ADR plus runs and a count, JSON when piped. Ledger file format and `hexa agent list`. | `bash scripts/gate-run-ledger.sh --phase 1` passes check 1 (and no other check runs); plus `cargo test -p hexa-cli status_lists_runs` (non-zero tests run) and the two tests #40 names pass on macOS. |
+| 2. Ledger and leases | `hexa agent register|release|list`, the overlap refusal, never-leasable paths, the pre-edit hook rule for bound sessions. `do` staging narrowed (#36) with `--plan-only`. Sealed-file rule (#50) and `hexa spec retire`. | `bash scripts/gate-run-ledger.sh --phase 2` passes checks 1 to 8 (the script takes `--phase 1` to `3`); `cargo test -p hexa-exec commit_with_also` rewritten and passing; a test that a deleted sealed file does not block a commit and a deleted-during-run one still does. |
+| 3. The bridge | `hexa agent report`, `hexa dev worktree merge-order`, hook documentation and `docs/agents.md` lines, `describe` entries for every new verb. A manual run: one live Claude Code session with two subagents, each registered with a disjoint lease, one deliberately stepping outside it. | `bash scripts/gate-run-ledger.sh` (all nine checks, no `--phase`) exits 0; `hexa spec verify --ci`; `hexa analyze .` still A+; the manual run's result recorded in this ADR's addendum. |
+
+The script takes `--phase N` to run only the checks up to that phase, and with no argument runs all nine. A phase run that executes zero checks fails.
+
+Files this will touch: `hexa-cli/src/commands/status.rs`, `hexa-cli/src/commands/loop_cmd.rs` (`pid_start`), `hexa-cli/src/commands/build.rs` (run records), `hexa-cli/src/commands/hook/mod.rs` (pre-edit), `hexa-cli/src/commands/worktree.rs` (merge-order), `hexa-exec/src/direct_exec.rs` (staging), a new `hexa-cli/src/commands/agent.rs`, and a new domain type for the ledger in `hexa-core` so the hook and the verbs share one definition.
+
+## Alternatives considered
+
+- **hexa spawns and supervises subagents.** Rejected by the owner: the harness already owns processes, and a second supervisor would disagree with it about who is alive.
+- **Locks held by a daemon.** hexa has no daemon and the project forbids one. Files and an advisory lock are enough for a handful of agents.
+- **Detect conflicts only at merge.** Cheap, but it finds the conflict after both agents have spent their work. The lease refuses at the edit.
+- **A credential deny-list alone for #36.** A list misses the next file; narrowing what `hexa do` stages removes the cause. Both are kept.
+- **Per-worktree ledgers.** Simpler paths, but two worktrees would hold two ledgers and the overlap check would pass wrongly.
+
+## References
+
+- The parked status ADR (branch `adr/2611020850-hexa-status`, not on main): `hexa status` says where the work stands. Built on, not superseded yet.
+- ADR-2609131408: sessions see each other (pid and `pid_start`, `touched_by_others`).
+- ADR-2611020815: a run does not replace the loop's gate.
+- ADR-2610271110: the unbuilt list may only shrink.
+- ADR-2611031914: hexa files issues and opens PRs (the secret scan).
+- Issues gaberger/hexa #36 (hexa do commits untracked files), #40 (pid_start reads /proc), #49 (no way to count agents), #50 (retired spec's missing sealed file blocks commits).
+- Claude Code hooks reference: https://code.claude.com/docs/en/hooks
