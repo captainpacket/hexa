@@ -137,6 +137,42 @@ pub fn recent_runs(limit: usize) -> Vec<Value> {
     read_tail(RUNS, limit)
 }
 
+/// Where hexa keeps user-level state: `$HEXA_HOME`, else `$HOME/.hexa`. The
+/// same directory the feeds above use, so a consumer outside this crate (the
+/// run records under `runs/`) cannot disagree with them about where it is.
+pub fn state_dir() -> PathBuf {
+    hexa_home()
+}
+
+use crate::ports::AgentRunsRead;
+
+/// Read the whole agent-run feed, or say why not ([`recent_runs`] answers
+/// both "empty" and "unreadable" with an empty list). A missing file is `Ok` with
+/// `present: false`; a file that exists and cannot be read is `Err`.
+pub fn read_agent_runs_checked() -> Result<AgentRunsRead, String> {
+    read_agent_runs_checked_in(&hexa_home())
+}
+
+pub fn read_agent_runs_checked_in(dir: &Path) -> Result<AgentRunsRead, String> {
+    let path = dir.join(RUNS);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(AgentRunsRead { path, present: false, rows: Vec::new(), skipped_lines: 0 })
+        }
+        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+    };
+    let mut rows = Vec::new();
+    let mut skipped_lines = 0;
+    for l in text.lines().filter(|l| !l.trim().is_empty()) {
+        match serde_json::from_str::<Value>(l) {
+            Ok(v) => rows.push(v),
+            Err(_) => skipped_lines += 1,
+        }
+    }
+    Ok(AgentRunsRead { path, present: true, rows, skipped_lines })
+}
+
 // ── gaps (ADR-2610301500) ─────────────────────────────────────────────────────
 
 const GAPS: &str = "gaps.jsonl";
@@ -405,6 +441,9 @@ impl crate::ports::RunLog for LocalRuns {
     fn recent(&self, limit: usize) -> Vec<Value> {
         recent_runs(limit)
     }
+    fn read_checked(&self) -> Result<AgentRunsRead, String> {
+        read_agent_runs_checked()
+    }
 }
 
 /// [`GapLog`](crate::ports::GapLog) on `~/.hexa/gaps.jsonl`.
@@ -548,6 +587,26 @@ mod tests {
     /// two tests that both `set_var("HEXA_HOME", …)` overwrite each other's answer.
     fn dir() -> tempfile::TempDir {
         tempfile::tempdir().expect("tempdir")
+    }
+
+    #[test]
+    fn the_checked_agent_run_read_tells_absent_from_unreadable_and_keeps_torn_lines_countable() {
+        let d = dir();
+        // No file: a true, empty answer.
+        let r = read_agent_runs_checked_in(d.path()).unwrap();
+        assert!(!r.present && r.rows.is_empty());
+        // A file with a torn last line: rows kept, the torn line counted.
+        let p = d.path().join(RUNS);
+        std::fs::write(&p, "{\"kind\":\"subagent\",\"event\":\"start\"}\n{\"torn\n").unwrap();
+        let r = read_agent_runs_checked_in(d.path()).unwrap();
+        assert_eq!((r.present, r.rows.len(), r.skipped_lines), (true, 1, 1));
+        // Bytes that are not text: an error, not an empty feed.
+        std::fs::write(&p, [0xff, 0xfe, 0xfd]).unwrap();
+        assert!(read_agent_runs_checked_in(d.path()).is_err());
+        // A directory where the file should be: an error too.
+        std::fs::remove_file(&p).unwrap();
+        std::fs::create_dir(&p).unwrap();
+        assert!(read_agent_runs_checked_in(d.path()).is_err());
     }
 
     #[test]

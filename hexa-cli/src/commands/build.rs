@@ -113,8 +113,11 @@ fn first_blocker(found: &[hexa_infer::Found], verb: &str) -> Option<String> {
 /// the adversarial pass for the full pipeline.
 pub async fn run_build(args: BuildArgs) -> anyhow::Result<()> {
     if args.detach {
-        return detach("build", &args.target);
+        return detach("build", &args.target, Some(&args.gate));
     }
+    // The run record (ADR-2611051850): closed `failed` by its Drop on any
+    // early return, and with the build's own verdict below.
+    let record = crate::commands::run_record::RunGuard::begin("build", &args.target, Some(&args.gate));
     // The gate is recorded in the loop, so the hooks can see the work is under
     // one, unless the loop already has another (ADR-2611020815).
     crate::commands::loop_cmd::note_run_gate(&args.gate, "build", None);
@@ -188,6 +191,9 @@ pub async fn run_build(args: BuildArgs) -> anyhow::Result<()> {
         running_done(&repo_root);
         print_review(&r, "    ");
     }
+    // `Ok` here means the pipeline ran; whether the build passed its gate is
+    // `build_ok`, and a record that said "passed" for a FAILED build would lie.
+    record.finish(if b.build_ok { "passed" } else { "failed" });
     Ok(())
 }
 
@@ -213,14 +219,14 @@ fn run_log_path(verb: &str, target: &str, stamp: &str) -> PathBuf {
         .collect::<String>()
         .trim_matches('-')
         .to_string();
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-    home.join(".hexa/runs").join(format!("{verb}-{slug}-{stamp}.log"))
+    // The same directory as the run records beside it (`$HEXA_HOME` or `~/.hexa`).
+    crate::commands::run_record::runs_dir().join(format!("{verb}-{slug}-{stamp}.log"))
 }
 
 /// Re-run this command in its own process group with its output in a log,
 /// then return. A host tool's timeout, a closed terminal and a hangup no
 /// longer take a run with them mid-fix (ADR-2609131611 §3).
-fn detach(verb: &str, target: &str) -> anyhow::Result<()> {
+fn detach(verb: &str, target: &str, gate: Option<&str>) -> anyhow::Result<()> {
     use std::os::unix::process::CommandExt;
     let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
     let log = run_log_path(verb, target, &stamp);
@@ -230,8 +236,15 @@ fn detach(verb: &str, target: &str) -> anyhow::Result<()> {
     let out = std::fs::File::create(&log)?;
     let err = out.try_clone()?;
     let exe = std::env::current_exe()?;
+    // The record is written before the spawn (ADR-2611051850): the child
+    // completes it with its own pid, and a child that never starts is still
+    // listed, as abandoned. A record that cannot be written stops the detach
+    // rather than starting a run `hexa status` cannot see.
+    let run_id = crate::commands::run_record::begin_detached(verb, target, gate, &log)
+        .map_err(|e| anyhow::anyhow!("cannot write the run record: {e}"))?;
     let child = std::process::Command::new(exe)
         .args(detached_args(std::env::args()))
+        .env(crate::commands::run_record::ENV_RUN_ID, &run_id)
         .current_dir(std::env::current_dir()?)
         .stdin(std::process::Stdio::null())
         .stdout(out)
@@ -239,6 +252,7 @@ fn detach(verb: &str, target: &str) -> anyhow::Result<()> {
         .process_group(0)
         .spawn()?;
     println!("{} {} detached as pid {}", "⬡".cyan().bold(), verb, child.id());
+    println!("  run   {run_id}  (hexa status)");
     println!("  log   {}", log.display());
     println!("  watch tail -f {}", log.display());
     println!("  or    hexa loop, from any session in this checkout");
@@ -292,8 +306,9 @@ pub async fn run_harden(args: HardenArgs) -> anyhow::Result<()> {
         },
     };
     if args.detach {
-        return detach("harden", &args.target);
+        return detach("harden", &args.target, Some(&args.gate));
     }
+    let record = crate::commands::run_record::RunGuard::begin("harden", &args.target, Some(&args.gate));
     // Before anything is recorded or hunted: a run that cannot reach a model
     // fails once, here, rather than once per dimension.
     if let Some(blocker) = first_blocker(&hexa_infer::discovery().discover(), "hexa harden") {
@@ -335,6 +350,7 @@ pub async fn run_harden(args: HardenArgs) -> anyhow::Result<()> {
     if !report.reviewed() {
         anyhow::bail!("nothing was reviewed: {} of {} lenses answered", report.answered, report.lenses);
     }
+    record.finish(if report.gate_line() == "FAIL" { "failed" } else { "passed" });
     Ok(())
 }
 

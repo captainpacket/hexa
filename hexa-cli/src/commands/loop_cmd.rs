@@ -196,7 +196,7 @@ fn pid_start_with(probe: &dyn ProcessProbe, pid: u64) -> Option<u64> {
     Some(text.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3)))
 }
 
-fn pid_start(pid: u64) -> Option<u64> {
+pub(crate) fn pid_start(pid: u64) -> Option<u64> {
     pid_start_with(&SystemProbe, pid)
 }
 

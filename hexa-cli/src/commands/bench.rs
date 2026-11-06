@@ -84,7 +84,12 @@ struct ArmResult {
 pub async fn run(action: BenchAction) -> anyhow::Result<()> {
     match action {
         BenchAction::Agentic { model, corpus, arms, filter, include_draft } => {
-            agentic(model, corpus, arms, filter, include_draft).await
+            // The run record (ADR-2611051850): a bench is a run, and it
+            // checks out a staging branch, so "is one in progress" matters.
+            let record = crate::commands::run_record::RunGuard::begin("bench", &corpus, None);
+            let r = agentic(model, corpus, arms, filter, include_draft).await;
+            record.finish_result(&r);
+            r
         }
     }
 }

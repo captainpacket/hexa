@@ -181,6 +181,12 @@ pub fn run_log() -> impl ports::RunLog {
     local_store::LocalRuns
 }
 
+/// Where hexa keeps user-level state: `$HEXA_HOME`, else `~/.hexa`. The run
+/// records (`runs/`) live under it, beside the feeds the stores above write.
+pub fn state_dir() -> std::path::PathBuf {
+    local_store::state_dir()
+}
+
 /// Where a build's receipt goes, wired: `PROVENANCE.md` in the target.
 pub fn provenance_store() -> impl ports::Provenance {
     provenance::ProvenanceFile

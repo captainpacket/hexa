@@ -22,7 +22,7 @@ fi
 command -v jq >/dev/null || { echo "FAIL setup: jq is required"; exit 1; }
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-export HOME="$TMP/home"; mkdir -p "$HOME"
+export HOME="$TMP/home"; mkdir -p "$HOME"; unset HEXA_HOME
 REPO="$TMP/repo"; mkdir -p "$REPO"; cd "$REPO" || exit 1
 git init -q . && git config user.email g@example.com && git config user.name gate
 mkdir -p src/a src/b tests docs/specs .hexa
@@ -40,6 +40,23 @@ H() { "$HEXA_BIN" "$@"; }
 c1() { local o; o="$(H status --json 2>&1)" || { WHY="status --json exited non-zero: $(echo "$o" | head -1)"; return 1; }
   echo "$o" | jq -e '(.runs|type=="array") and (.tasks|type=="array") and .count.runs==0 and .count.tasks==0' >/dev/null \
     || { WHY="expected empty runs/tasks with count 0 and 0; got: $(echo "$o" | head -c 120)"; return 1; }; }
+# 1b: a record that cannot be read is reported as unreadable, never as a count of zero.
+c1b() { local o rc
+  mkdir -p "$HOME/.hexa"; : > "$HOME/.hexa/runs"      # a file where the runs directory must be
+  o="$(H status --json 2>&1)"; rc=$?; rm -f "$HOME/.hexa/runs"
+  [ $rc -eq 0 ] || { WHY="status --json crashed on an unreadable runs dir (exit $rc): $(echo "$o" | head -1)"; return 1; }
+  echo "$o" | jq -e '.count.runs==null and .ok==false and (.unreadable|length)>=1' >/dev/null \
+    || { WHY="unreadable runs dir did not read as unreadable (count.runs must be null); got: $(echo "$o" | head -c 160)"; return 1; }; }
+# 1c: a real run writes a record that status lists with its outcome, and pid_start is set
+#     (macOS and Linux). `bench` over an empty corpus is a real run that needs no model.
+c1c() { local o f; mkdir -p "$TMP/empty-corpus"
+  H bench agentic --corpus "$TMP/empty-corpus" >/dev/null 2>&1 || { WHY="bench over an empty corpus failed"; return 1; }
+  o="$(H status --json 2>&1)" || { WHY="status failed"; return 1; }
+  echo "$o" | jq -e '.recent[0].verb=="bench" and .recent[0].outcome=="passed" and .count.runs==0' >/dev/null \
+    || { WHY="finished bench run not listed as passed in recent: $(echo "$o" | head -c 200)"; return 1; }
+  f="$HOME/.hexa/runs/$(echo "$o" | jq -r '.recent[0].id').json"
+  jq -e '.pid_start!=null and .pid_start_unknown==false and .ended!=null and .outcome=="passed"' "$f" >/dev/null 2>&1 \
+    || { WHY="run record $f lacks pid_start or ended"; return 1; }; }
 c2() { T1="$(H agent register --task one --lease src/a/ --json 2>&1)" && T2="$(H agent register --task two --lease src/b/ --json 2>&1)" \
     || { WHY="register failed: $(echo "${T1:-}" | head -1)"; return 1; }
   ID1="$(echo "$T1" | jq -er .id)" && ID2="$(echo "$T2" | jq -er .id)" && [ "$ID1" != "$ID2" ] || { WHY="no distinct ids in output"; return 1; }; }
@@ -81,6 +98,8 @@ c9() { local o f
     || { WHY="run record $f lacks outcome/commit/pid_start/ended"; return 1; }; }
 
 check "1 empty state reports zero runs and zero tasks"            1 c1
+check "1b an unreadable runs dir is reported, not counted as zero" 1 c1b
+check "1c a real run leaves a record with outcome and pid_start"   1 c1c
 check "2 two tasks with disjoint leases register"                 2 c2
 check "3 status --json lists both, count exactly 2"               2 c3
 check "4 overlapping lease refused with code/hint/field/retryable" 2 c4

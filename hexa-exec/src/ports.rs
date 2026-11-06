@@ -162,6 +162,27 @@ pub trait RunLog: Send + Sync {
     fn record(&self, run: &Value);
     /// The most recent `limit` rows, newest first.
     fn recent(&self, limit: usize) -> Vec<Value>;
+    /// The whole feed, oldest first, or why it could not be read. `recent`
+    /// answers "unreadable" with an empty list, which is right for a display
+    /// and wrong for a count (ADR-2611051850). The default says "cannot",
+    /// never "empty".
+    fn read_checked(&self) -> Result<AgentRunsRead, String> {
+        Err("this run log cannot be read in full".to_string())
+    }
+}
+
+/// The run feed as read by a consumer that has to tell "empty" from "could
+/// not read".
+#[derive(Debug, Clone)]
+pub struct AgentRunsRead {
+    pub path: PathBuf,
+    /// False when the file does not exist: a zero that is true, not a failure.
+    pub present: bool,
+    /// Oldest first.
+    pub rows: Vec<Value>,
+    /// Lines that were not JSON (a torn final line from a killed writer).
+    /// Counted, so a log that is mostly garbage does not read as empty.
+    pub skipped_lines: usize,
 }
 
 /// Where a tool that proposes a change files it for a person to approve, and

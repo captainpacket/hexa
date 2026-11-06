@@ -303,8 +303,8 @@ ADRs are history and are not checked.")]
         #[command(subcommand)]
         action: commands::assets_cmd::AssetsAction,
     },
-    /// Project, config and git state at a glance
-    Status,
+    /// Where the work stands: git, the loop, runs and subagents in progress, last outcomes. JSON when piped
+    Status(commands::status::StatusArgs),
     /// Check the docs: freshness, terminology and module READMEs
     Docs {
         #[command(subcommand)]
@@ -450,7 +450,7 @@ async fn run() -> anyhow::Result<()> {
         Some(cmd) => cmd,
         None => {
             // hexa with no args → status + getting-started guide (Layer 1)
-            commands::status::run().await?;
+            commands::status::run_text().await?;
             print_getting_started();
             return Ok(());
         }
@@ -526,7 +526,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Hook { event } => commands::hook::run(event).await,
         Commands::Skill { action } => commands::skill::run(action).await,
         Commands::Assets { action } => commands::assets_cmd::run(action).await,
-        Commands::Status => status::run().await,
+        Commands::Status(args) => status::run(args).await,
         Commands::Docs { action } => commands::docs::run(action).await,
         Commands::Doctor { verbose, fix, check } => {
             match check.as_deref() {
