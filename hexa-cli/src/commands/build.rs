@@ -453,7 +453,11 @@ mod visible_run {
 
     #[test]
     fn a_runs_log_is_named_for_its_verb_target_and_start() {
-        let p = run_log_path("harden", "hexa-cli/src/commands/loop_cmd.rs", "20260913T1611Z");
+        // `run_log_path` reads HEXA_HOME through `runs_dir`; another test may have it set to a temp
+        // dir. Take the shared scope with the variable removed, so the default `.hexa/runs` is what is checked.
+        let p = crate::commands::run_record::with_env_home(None, || {
+            run_log_path("harden", "hexa-cli/src/commands/loop_cmd.rs", "20260913T1611Z")
+        });
         let name = p.file_name().unwrap().to_string_lossy().to_string();
         assert_eq!(name, "harden-loop-cmd-rs-20260913T1611Z.log", "{name}");
         assert!(p.to_string_lossy().contains(".hexa/runs/"), "{}", p.display());

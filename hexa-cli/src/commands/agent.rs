@@ -533,18 +533,10 @@ mod tests {
     }
 
     // `register` writes a run record under the state dir; a test must not touch the real one.
+    // The scope is shared with every other test that reads HEXA_HOME (`run_record::with_env_home`).
     fn with_home<T>(f: impl FnOnce() -> T) -> T {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
-        let old = std::env::var_os("HEXA_HOME");
-        std::env::set_var("HEXA_HOME", home.path());
-        let out = f();
-        match old {
-            Some(v) => std::env::set_var("HEXA_HOME", v),
-            None => std::env::remove_var("HEXA_HOME"),
-        }
-        out
+        crate::commands::run_record::with_env_home(Some(home.path()), f)
     }
 
     #[test]

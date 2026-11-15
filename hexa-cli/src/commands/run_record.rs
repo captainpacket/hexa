@@ -357,6 +357,33 @@ pub fn read_all(dir: &Path) -> Result<RunsRead, String> {
     Ok(out)
 }
 
+/// Run `f` with `HEXA_HOME` set to `home` (or removed, for `None`), and put it back after, even
+/// if `f` panics. The process environment is shared and the test harness runs tests on parallel
+/// threads, so a test that sets it, or reads a path derived from it (`runs_dir`, `state_dir`),
+/// must take this scope: one test at a time holds the variable, and every other test that reads
+/// it waits. A test that reads it without the scope can see another test's temporary directory.
+#[cfg(test)]
+pub(crate) fn with_env_home<T>(home: Option<&Path>, f: impl FnOnce() -> T) -> T {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    struct Restore(Option<std::ffi::OsString>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(v) => std::env::set_var("HEXA_HOME", v),
+                None => std::env::remove_var("HEXA_HOME"),
+            }
+        }
+    }
+    // A test that panicked inside the scope poisons the lock; the environment is already restored.
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _restore = Restore(std::env::var_os("HEXA_HOME"));
+    match home {
+        Some(h) => std::env::set_var("HEXA_HOME", h),
+        None => std::env::remove_var("HEXA_HOME"),
+    }
+    f()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -454,5 +481,47 @@ mod tests {
         assert!(read_all(&f).is_err());
         // No directory at all is a true zero.
         assert!(read_all(&d.path().join("nope")).unwrap().records.is_empty());
+    }
+
+    #[test]
+    fn an_env_scope_excludes_every_other_scope_so_no_test_reads_anothers_home() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        let other = tmp();
+        let holder_done = Arc::new(AtomicBool::new(false));
+        let (entered, wait) = std::sync::mpsc::channel();
+        let holder = {
+            let (home, done) = (other.path().to_path_buf(), holder_done.clone());
+            std::thread::spawn(move || {
+                with_env_home(Some(&home), || {
+                    entered.send(()).unwrap();
+                    std::thread::sleep(std::time::Duration::from_millis(150));
+                    let mine = std::env::var_os("HEXA_HOME");
+                    done.store(true, Ordering::SeqCst);
+                    mine
+                })
+            })
+        };
+        wait.recv().unwrap(); // the holder is inside its scope, with HEXA_HOME at `other`
+        // A second scope must not start its body until the holder's body has finished.
+        let (waited, seen) = with_env_home(None, || (holder_done.load(Ordering::SeqCst), std::env::var_os("HEXA_HOME")));
+        assert!(waited, "the second scope ran its body while the first still held HEXA_HOME");
+        assert_eq!(seen, None);
+        assert_eq!(holder.join().unwrap(), Some(other.path().into()), "the holder saw only its own value");
+    }
+
+    #[test]
+    fn an_env_scope_restores_the_variable_when_its_body_panics() {
+        let marker = tmp();
+        let before = with_env_home(Some(marker.path()), || std::env::var_os("HEXA_HOME"));
+        assert_eq!(before, Some(marker.path().into()));
+        let r = std::panic::catch_unwind(|| {
+            let d = tempfile::tempdir().unwrap();
+            with_env_home(Some(d.path()), || panic!("a failing test inside the scope"))
+        });
+        assert!(r.is_err());
+        // The panic poisoned the lock and must not have left the variable pointing at a deleted directory.
+        let after = with_env_home(None, || std::env::var_os("HEXA_HOME"));
+        assert_eq!(after, None);
     }
 }
