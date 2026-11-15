@@ -118,3 +118,32 @@ the commit. A decision counts as built when its phase sections carry a
 A decision whose gate is not built yet is declared in `.hexa/project.json →
 adr.unbuilt` with a reason; `hexa adr gates` then reports it rather than failing
 on it, and fails if its gate starts passing.
+
+## Closing out
+
+These are the rules a model skips, because nothing says *when*. There are four
+moments.
+
+1. **Before you start.** `hexa agent register --task <name> --lease <path>…`,
+   before the first edit, not after the work: a claim made afterwards held
+   nothing while the work was done. Write the gate first (`hexa loop gate`).
+2. **When you open the pull request.** The same pull request carries the ADR's
+   `**Built:**` line: which phases, the date, the commit, the tests that show
+   it. Credit is part of the change, and a change with no `**Built:**` line is
+   unfinished.
+3. **When work merges** — yours, or one you merge for someone else. Run
+   `hexa adr board`. An ADR whose work merged and still reads 0 built is your
+   finding, fixed now: add the `**Built:**` line from the code and a test, as a
+   small change of its own. `hexa adr board --strict` exits 1 when a status is
+   behind its evidence.
+4. **Before you report, stop, or ask what is next.** Every item still open is
+   written down first, and it is not in your message. A decision not yet made
+   is an ADR (`docs/adrs/`). Work not yet done is a workplan:
+   `hexa plan draft "<what is left>"`, then `hexa plan status`. Your message
+   then points at them. A list that exists only in the conversation is lost
+   with it. Then close your claim:
+   `hexa agent report --id <id> --outcome <passed|failed|killed> --commit <sha>`.
+
+Do not end a turn with a menu, or a question about work you were already asked
+to do: take the next item. If the next item needs a decision that is not yours,
+write it as an ADR and say that.

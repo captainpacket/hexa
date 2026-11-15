@@ -31,6 +31,21 @@ its paths first (`hexa agent register`); `hexa agent report` closes it with the
 commit. When your ADR's evidence is in, add a `**Built:**` line to it so the
 board can see it. Each agent works in its own worktree: `hexa dev worktree`.
 
+### Closing out work
+
+Four moments, each with a verb. Doing them later is the same as not doing them.
+
+- **Before you start:** `hexa agent register --task <name> --lease <path>`,
+  before the first edit. A claim made after the work held nothing.
+- **When you open the pull request:** it carries the ADR's `**Built:**` line
+  (phases, date, commit, tests). Credit is part of the change.
+- **When work merges** (yours or one you merge): `hexa adr board`. An ADR whose
+  work merged and reads 0 built is yours to fix now, from the code.
+- **Before you report, stop or ask what is next:** every open item is written
+  down first, and it is not in your message. Write it with
+  `hexa plan draft "<what is left>"`, or as an ADR for a decision. Then
+  `hexa agent report`. Do not end with a menu: take the next item.
+
 If the verb you want is missing, **build the verb**. That is how the tool grows.
 
 If hexa's own path does not work and you have to route around it, hexa may

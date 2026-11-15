@@ -318,6 +318,70 @@ mod tests {
         }
     }
 
+    /// The text of the section under `heading` (a `## ` or `### ` line) up to the
+    /// next heading of the same or a higher level.
+    fn section<'a>(doc: &'a str, heading: &str) -> &'a str {
+        let start = doc.find(heading).unwrap_or_else(|| panic!("no section {heading:?}"));
+        let level = heading.chars().take_while(|c| *c == '#').count();
+        let rest = &doc[start + heading.len()..];
+        let end = rest
+            .lines()
+            .scan(0usize, |at, l| {
+                let here = *at;
+                *at += l.len() + 1;
+                Some((here, l))
+            })
+            .find(|(_, l)| {
+                let n = l.chars().take_while(|c| *c == '#').count();
+                n > 0 && n <= level && l.chars().nth(n) == Some(' ')
+            })
+            .map(|(i, _)| i)
+            .unwrap_or(rest.len());
+        &rest[..end]
+    }
+
+    /// Observed 2026-11-15 on kairos: an agent ended its work with "what is still
+    /// open" in its message and no workplan; merged work kept reading 0 on the ADR
+    /// board because nobody added the `**Built:**` line; tasks were registered
+    /// after the work, so no lease held. The rules were in CLAUDE.md ("record work,
+    /// do not defer it") and the model did not follow them, because nothing taught
+    /// it *when* to do each one. The skill and the managed section now name the
+    /// moments: before you start, when you open a PR, when work merges, and before
+    /// you report.
+    #[test]
+    fn the_workflow_skill_and_the_managed_section_teach_closing_out() {
+        let skill = Assets::get_str("skills/hexa-workflow/SKILL.md").expect("embedded");
+        let closing = section(&skill, "## Closing out");
+        for needle in [
+            // open work is written down, not said
+            "hexa plan draft",
+            "not in your message",
+            // the claim comes first, the report last
+            "hexa agent register",
+            "before you start",
+            "hexa agent report",
+            // credit is part of the change
+            "**Built:**",
+            "same pull request",
+            // after a merge, look
+            "hexa adr board",
+            "merged",
+        ] {
+            assert!(
+                closing.to_lowercase().contains(&needle.to_lowercase()),
+                "the skill's Closing out section lacks {needle:?}:\n{closing}"
+            );
+        }
+        let template = Assets::get_str("templates/claude-md-hexa-section.md").expect("embedded");
+        let rules = section(&template, "### Closing out work");
+        for needle in ["hexa plan draft", "not in your message", "**Built:**", "hexa adr board", "hexa agent register"] {
+            assert!(
+                rules.to_lowercase().contains(&needle.to_lowercase()),
+                "the managed section's Closing out work lacks {needle:?}:\n{rules}"
+            );
+        }
+    }
+
     #[test]
     fn descriptions_are_clipped_on_a_character_boundary() {
         let wide = "\u{e9}".repeat(200);
