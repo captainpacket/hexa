@@ -55,6 +55,70 @@ struct VerdictEnvelope {
     reasoning: String,
 }
 
+/// How many lines of a gate's output are kept (ADR-2611151645 §4).
+const GATE_TAIL_LINES: usize = 60;
+/// The most bytes kept of them.
+const GATE_TAIL_BYTES: usize = 8 * 1024;
+/// How many lines are shown where a gate fails.
+const GATE_SHOWN_LINES: usize = 12;
+
+/// One run of the gate and what it said (ADR-2611151645 §4): which run it was
+/// (`baseline`, a fix's title, `final`, `without any fix`), whether it passed,
+/// how long it took, and the end of its output.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GateRun {
+    pub label: String,
+    pub passed: bool,
+    pub secs: u64,
+    /// The last [`GATE_TAIL_LINES`] lines of stdout and stderr, at most
+    /// [`GATE_TAIL_BYTES`].
+    pub tail: String,
+}
+
+impl GateRun {
+    /// The last few non-empty lines of its output, one per element.
+    pub fn shown_lines(&self) -> Vec<&str> {
+        let lines: Vec<&str> = self.tail.lines().filter(|l| !l.trim().is_empty()).collect();
+        let from = lines.len().saturating_sub(GATE_SHOWN_LINES);
+        lines[from..].to_vec()
+    }
+
+    /// [`GateRun::shown_lines`] on one line, for a note.
+    pub fn shown(&self) -> String {
+        let mut line = self.shown_lines().join(" | ");
+        if line.len() > 600 {
+            let mut cut = line.len() - 600;
+            while !line.is_char_boundary(cut) {
+                cut += 1;
+            }
+            line = format!("…{}", &line[cut..]);
+        }
+        line
+    }
+}
+
+/// The end of a gate's output: the last [`GATE_TAIL_LINES`] lines, bounded.
+fn tail_of(output: &str) -> String {
+    let lines: Vec<&str> = output.lines().collect();
+    let from = lines.len().saturating_sub(GATE_TAIL_LINES);
+    let mut tail = lines[from..].join("\n");
+    if tail.len() > GATE_TAIL_BYTES {
+        let mut cut = tail.len() - GATE_TAIL_BYTES;
+        while !tail.is_char_boundary(cut) {
+            cut += 1;
+        }
+        tail = tail[cut..].to_string();
+    }
+    tail
+}
+
+/// Run `gate` in `repo_root` and keep what it said.
+async fn run_gate(label: &str, gate: &str, repo_root: &Path) -> GateRun {
+    let started = std::time::Instant::now();
+    let (passed, output) = crate::direct_exec::run_evidence(gate, repo_root).await;
+    GateRun { label: label.to_string(), passed, secs: started.elapsed().as_secs(), tail: tail_of(&output) }
+}
+
 /// Outcome of a review run.
 #[derive(Debug)]
 pub struct ReviewReport {
@@ -94,6 +158,17 @@ pub struct ReviewReport {
     /// Full gates that did not reproduce, naming both prefixes and both
     /// outputs (ADR-2610160756 §5).
     pub flakes: Vec<String>,
+    /// The gate, run on the tree as it was before the hunt, when it was red
+    /// twice: the pass stopped there (ADR-2611151645 §2). `None` when it was
+    /// green, or not run.
+    pub baseline: Option<GateRun>,
+    /// The operator asked not to run the baseline (§3).
+    pub baseline_skipped: bool,
+    /// Every gate run, in order, each with what it said (§4).
+    pub gate_runs: Vec<GateRun>,
+    /// The gate run on the tree with every failed fix reverted, when it was
+    /// red: the gate is red without any fix, and the loop stopped (§5).
+    pub red_without_fix: Option<GateRun>,
 }
 
 /// One batch of fast-gated fixes and what its full gate said
@@ -136,6 +211,10 @@ impl Default for ReviewReport {
             batches: Vec::new(),
             dropped: Vec::new(),
             flakes: Vec::new(),
+            baseline: None,
+            baseline_skipped: false,
+            gate_runs: Vec::new(),
+            red_without_fix: None,
         }
     }
 }
@@ -160,6 +239,9 @@ impl ReviewReport {
 
     /// The headline: what this pass is entitled to claim.
     pub fn verdict_line(&self) -> String {
+        if self.baseline.is_some() {
+            return "the gate is red before any fix: nothing was hunted, verified or fixed".to_string();
+        }
         if !self.reviewed() {
             return format!("{} of {} lenses answered — nothing was reviewed", self.answered, self.lenses);
         }
@@ -191,6 +273,24 @@ impl ReviewReport {
             cut
         ) + &cal
             + &self.batching_line()
+            + &self.gate_state_line()
+    }
+
+    /// What the gate runs say beyond the final one: a red tree without any
+    /// fix, a baseline that was not run (ADR-2611151645 §3, §5).
+    fn gate_state_line(&self) -> String {
+        let mut line = String::new();
+        if self.red_without_fix.is_some() {
+            let judged = self.fixed.len() + self.uncommitted.len();
+            line += &format!(
+                " · the gate is red without any fix: {} not judged",
+                plural(self.confirmed.len().saturating_sub(judged), "finding")
+            );
+        }
+        if self.baseline_skipped {
+            line += " · baseline skipped";
+        }
+        line
     }
 
     /// How the fixes were proven when a fast gate was used: the full gates,
@@ -915,7 +1015,7 @@ pub async fn run_review_with(
     repo_root: &Path,
     reporter: Reporter,
 ) -> ReviewReport {
-    let gates = HardenGates { gate: gate.to_string(), fast_gate: None, batch: None };
+    let gates = HardenGates { gate: gate.to_string(), fast_gate: None, batch: None, baseline: true };
     review(frontier, None, target, &gates, repo_root, reporter).await
 }
 
@@ -930,6 +1030,9 @@ pub struct HardenGates {
     /// Close a batch with a full gate after this many fixes; `None` = one
     /// batch for the whole pass (§3).
     pub batch: Option<usize>,
+    /// Run the full gate once on the tree as it is before the hunt, and stop
+    /// when it is red (ADR-2611151645 §1 to §3). `false` is `--no-baseline`.
+    pub baseline: bool,
 }
 
 /// [`run_review`] under `gates`: with a fast gate, each fix is gated fast,
@@ -972,6 +1075,42 @@ async fn review(
     // What the operator had already changed. A fix that touches any of these
     // is left in the tree for review, never committed over the operator's work.
     let dirty_before: std::collections::BTreeSet<String> = changed_files(repo_root).await.into_keys().collect();
+
+    // ── Phase 0: the gate on the tree as it is (ADR-2611151645 §1 to §3) ────
+    // A gate that is red before the pass starts cannot judge a fix, and finding
+    // that out after the hunt, the verification and the fixes is the whole
+    // pass spent. Red once is run again: a flake is not a red tree.
+    if gates.baseline {
+        let base = Phase::start(&reporter, "baseline", format!("the gate on the tree as it is: {gate}"), HEARTBEAT);
+        let first = run_gate("baseline", gate, repo_root).await;
+        report.gate_runs.push(first.clone());
+        if first.passed {
+            base.finish("passed");
+        } else {
+            base.note(format!("gate FAILED, running it once more: {}", first.shown()));
+            let second = run_gate("baseline", gate, repo_root).await;
+            report.gate_runs.push(second.clone());
+            if second.passed {
+                report.flakes.push("baseline: the gate failed, then passed on its second run".to_string());
+                base.finish("passed on its second run (a flake)");
+            } else {
+                for line in second.shown_lines() {
+                    base.note(format!("  │ {line}"));
+                }
+                base.finish("FAILED twice: the gate is red before any fix");
+                report.notes.push(format!(
+                    "the gate is red before any fix, so nothing was hunted: {} (--no-baseline runs the pass anyway)",
+                    second.shown()
+                ));
+                report.gate_run = true;
+                report.gate_passed = false;
+                report.baseline = Some(second);
+                return report;
+            }
+        }
+    } else {
+        report.baseline_skipped = true;
+    }
 
     // The local reviewer cannot go and read the code, so it is read once
     // here and carried in every prompt (ADR-2609131702 §1).
@@ -1116,6 +1255,9 @@ async fn review(
     let under = if batching.is_some() { "the fast gate, each batch under the full gate" } else { "the gate" };
     let fix = Phase::start(&reporter, "fix", format!("{} to fix, one at a time, each under {under}", plural(report.confirmed.len(), "bug")), HEARTBEAT);
     let confirmed = report.confirmed.clone();
+    // Fixes that failed the gate one after another: two in a row ask whether
+    // the tree is red without any fix (ADR-2611151645 §5).
+    let mut failed_in_a_row = 0u32;
     for f in &confirmed {
         fix.note(format!("fixing: {}", f.title));
         let prompt = format!(
@@ -1177,8 +1319,11 @@ async fn review(
                     continue;
                 }
                 fix.note(format!("gate after fix: {gate}"));
-                let (passed, _) = crate::direct_exec::run_evidence(gate, repo_root).await;
+                let run = run_gate(&f.title, gate, repo_root).await;
+                let passed = run.passed;
+                report.gate_runs.push(run.clone());
                 if passed {
+                    failed_in_a_row = 0;
                     fix.note(format!("gate passed: {}", f.title));
                     let held: Vec<&str> = touched
                         .iter()
@@ -1213,8 +1358,36 @@ async fn review(
                     }
                 } else {
                     fix.note(format!("gate FAILED after: {}", f.title));
+                    for line in run.shown_lines() {
+                        fix.note(format!("  │ {line}"));
+                    }
                     revert_paths(repo_root, &touched, &before).await;
-                    report.notes.push(format!("fix for '{}' did not pass the gate — reverted", f.title));
+                    report.notes.push(format!(
+                        "fix for '{}' did not pass the gate — reverted; the gate said: {}",
+                        f.title,
+                        run.shown()
+                    ));
+                    failed_in_a_row += 1;
+                    if failed_in_a_row >= 2 {
+                        let check = run_gate("without any fix", gate, repo_root).await;
+                        report.gate_runs.push(check.clone());
+                        if check.passed {
+                            fix.note("the gate is green without those fixes: they failed on their own");
+                            failed_in_a_row = 0;
+                        } else {
+                            let judged = report.fixed.len() + report.uncommitted.len();
+                            report.notes.push(format!(
+                                "the gate is red without any fix, so {} confirmed finding(s) were not judged: {}",
+                                confirmed.len().saturating_sub(judged),
+                                check.shown()
+                            ));
+                            fix.finish("stopped: the gate is red on the tree with every failed fix reverted");
+                            report.gate_run = true;
+                            report.gate_passed = false;
+                            report.red_without_fix = Some(check);
+                            return report;
+                        }
+                    }
                 }
             }
             Err(e) => fix.note(format!("no fix produced for {}: {e}", f.title)),
@@ -1244,7 +1417,9 @@ async fn review(
         }
     }
     let final_gate = Phase::start(&reporter, "gate", format!("running: {gate}"), HEARTBEAT);
-    let (passed, _) = crate::direct_exec::run_evidence(gate, repo_root).await;
+    let run = run_gate("final", gate, repo_root).await;
+    let passed = run.passed;
+    report.gate_runs.push(run);
     if batching.is_some() {
         report.full_gates += 1;
     }

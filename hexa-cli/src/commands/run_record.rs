@@ -47,6 +47,19 @@ pub struct RunRecord {
     /// The task-ledger id (phase 2). Always null in phase 1.
     #[serde(default)]
     pub task: Option<String>,
+    /// What the last gate run said (ADR-2611151645 §6): `hexa status` and the
+    /// next session can say why a pass failed without running the gate again.
+    #[serde(default)]
+    pub gate_result: Option<GateResult>,
+}
+
+/// The last gate run of a pass: whether it passed, how long it took, and the
+/// end of its output.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GateResult {
+    pub passed: bool,
+    pub secs: u64,
+    pub tail: String,
 }
 
 /// `<state dir>/runs`: the directory of both the records and the detached
@@ -109,6 +122,7 @@ fn this_process(
         gate: gate.map(str::to_string),
         log,
         task: None,
+        gate_result: None,
     }
 }
 
@@ -173,6 +187,13 @@ impl RunGuard {
 
     pub fn id(&self) -> &str {
         self.rec.as_ref().map(|r| r.id.as_str()).unwrap_or("")
+    }
+
+    /// Keep what the pass's last gate run said (ADR-2611151645 §6).
+    pub fn set_gate_result(&mut self, passed: bool, secs: u64, tail: &str) {
+        if let Some(r) = self.rec.as_mut() {
+            r.gate_result = Some(GateResult { passed, secs, tail: tail.to_string() });
+        }
     }
 
     pub fn set_commit(&mut self, sha: &str) {

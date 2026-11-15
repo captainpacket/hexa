@@ -75,6 +75,12 @@ pub struct HardenArgs {
     /// them, one batch). Needs --fast-gate.
     #[arg(long, requires = "fast_gate")]
     pub batch: Option<usize>,
+    /// Do not run the gate once on the tree as it is before the hunt. By
+    /// default a gate that is red before any fix stops the pass, with its
+    /// output, before any inference is spent (ADR-2611151645). Use this for a
+    /// gate that is red on purpose, such as a test written for the bug.
+    #[arg(long)]
+    pub no_baseline: bool,
     /// Run in its own process group, output to `~/.hexa/runs/`, and return.
     /// The run then belongs to no terminal and no host tool (ADR-2609131611).
     #[arg(long)]
@@ -333,7 +339,9 @@ pub async fn run_harden(args: HardenArgs) -> anyhow::Result<()> {
         gate: args.gate.clone(),
         fast_gate: args.fast_gate.clone(),
         batch: args.batch,
+        baseline: !args.no_baseline,
     };
+    let mut record = record;
     let report = hexa_exec::adversarial::run_review_gated_with(
         frontier,
         hexa_exec::default_git_history(),
@@ -345,6 +353,20 @@ pub async fn run_harden(args: HardenArgs) -> anyhow::Result<()> {
     .await;
     running_done(&repo_root);
     print_review(&report, "  ");
+    // What the pass's last gate run said, for `hexa status` (ADR-2611151645 §6).
+    if let Some(last) = report.gate_runs.last() {
+        record.set_gate_result(last.passed, last.secs, &last.tail);
+    }
+    // A gate that was red before any fix: nothing was reviewed, and why is the
+    // gate's own output (ADR-2611151645 §2).
+    if let Some(base) = &report.baseline {
+        record.finish("failed");
+        anyhow::bail!(
+            "the gate is red before any fix, so nothing was hunted or fixed ({}s): {}\nfix the gate, or run with --no-baseline if it is red on purpose",
+            base.secs,
+            base.shown()
+        );
+    }
     // A pass that reviewed nothing is not a pass: `hexa harden && ship`
     // would otherwise proceed on code no reviewer read (ADR-2609131646 §2).
     if !report.reviewed() {
@@ -381,6 +403,16 @@ fn print_review(report: &hexa_exec::adversarial::ReviewReport, indent: &str) {
     }
     for f in &report.flakes {
         println!("{}  {} flaky: {}", indent, "~".yellow(), f.dimmed());
+    }
+    // Why the gate was red, where it was red: the output of the run that
+    // stopped the pass (ADR-2611151645 §2, §4, §5).
+    for (what, run) in [("baseline", &report.baseline), ("without any fix", &report.red_without_fix)] {
+        if let Some(run) = run {
+            println!("{}  {} the gate's output ({what}, {}s):", indent, "✗".red(), run.secs);
+            for line in run.tail.lines() {
+                println!("{}      {}", indent, line.dimmed());
+            }
+        }
     }
     let gate = match report.gate_line() {
         "PASS" => "PASS".green(),

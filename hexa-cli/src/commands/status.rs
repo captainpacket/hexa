@@ -644,6 +644,7 @@ mod tests {
             gate: Some("g".into()),
             log: None,
             task: None,
+            gate_result: None,
         };
         run_record::write(dir, &rec).unwrap();
     }
@@ -890,6 +891,7 @@ mod tests {
             gate: None,
             log: None,
             task: Some("a".into()),
+            gate_result: None,
         };
         run_record::write(d.path(), &rec).unwrap();
         let alive = |_: u64, _: Option<u64>| false;
