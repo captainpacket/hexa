@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-11-15
-**Drivers:** Kairos and Strata are built by several agents and people at once, in several checkouts (a main checkout, git worktrees, a second repository). Two things went wrong together. (1) Work collided: two sessions edited the same ADR or the same files, and nobody could see it until the merge. (2) hexa could not say what was finished. In kairos, `hexa adr list` shows `proposed` for ADRs whose phases are built and tested (ADR-2611121443 P5, ADR-2611130723), and `accepted` for ADRs with no sign they were built; `hexa adr gates` reports 11 of 14 recorded gates as failed because it cannot read `cargo test ... | grep -q` output, so it cannot be used as a progress number either. The owner asked for one panel: every ADR, proposed or in progress, with a progress figure, so "when are we done" has an answer.
+**Drivers:** Kairos and Strata are built by several agents and people at once, in several checkouts (a main checkout, git worktrees, a second repository). Two things went wrong together. (1) Work collided: two sessions edited the same ADR or the same files, and nobody could see it until the merge. (2) hexa could not say what was finished. In kairos, `hexa adr list` shows `proposed` for ADRs whose phases are built and tested (kairos ADRs numbered 2611121443, the P5 predict phase, and 2611130723, policy definitions; they live in the kairos repository, not this one), and `accepted` for ADRs with no sign they were built; `hexa adr gates` reports 11 of 14 recorded gates as failed because it cannot read `cargo test ... | grep -q` output, so it cannot be used as a progress number either. The owner asked for one panel: every ADR, proposed or in progress, with a progress figure, so "when are we done" has an answer.
 
 ## Context
 
@@ -69,4 +69,4 @@
 
 - ADR-2611051850: the task ledger and leases this joins to
 - ADR-2610271110: the unbuilt list; ADR-2609132122: `hexa adr gates`
-- kairos `docs/adrs/ADR-2611141124` and `ADR-2611131030`: the `## Phases` and `**Built**` convention the board reads
+- the kairos repository's ADRs numbered 2611141124 and 2611131030: the `## Phases` and `**Built**` convention the board reads (not citations: those files are not in this repository)
