@@ -684,6 +684,11 @@ mod tests {
             r#"{"sealed":{"tests/s.rs":"00"}}"#,
         )
         .unwrap();
+        // A seal counts as HEAD has it (main's `seals`: an agent cannot loosen one by editing the
+        // spec record in its working tree), so the spec must be committed.
+        for args in [&["add", "-A"][..], &["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "seal"][..]] {
+            assert!(std::process::Command::new("git").args(args).current_dir(d.path()).status().unwrap().success());
+        }
         with_home(|| {
             for l in ["tests/s.rs", ".runner", "a/.env"] {
                 assert_eq!(

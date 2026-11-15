@@ -68,7 +68,7 @@ pub struct Analysis {
     pub drift: Vec<String>,
 }
 
-pub const DRIFT_STATUS_BEHIND_EVIDENCE: &str = "status-behind-evidence";
+const DRIFT_STATUS_BEHIND_EVIDENCE: &str = "status-behind-evidence";
 
 /// Read one ADR. `status` is the normalised status word (`proposed`,
 /// `accepted`, `completed`, ...) the adapter already parsed; `content` is the

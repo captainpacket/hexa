@@ -14,7 +14,7 @@ case "$PHASE" in 1|2|3) ;; *) echo "usage: $0 [--phase 1|2|3]" >&2; exit 2;; esa
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [ -z "${HEXA_BIN:-}" ]; then
-  export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target-wt}"
+  export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target/gate-run-ledger}"
   (cd "$ROOT" && cargo build -q -p hexa-cli) || { echo "FAIL build: cargo build -p hexa-cli failed"; exit 1; }
   HEXA_BIN="$CARGO_TARGET_DIR/debug/hexa"
 fi
@@ -22,6 +22,7 @@ fi
 command -v jq >/dev/null || { echo "FAIL setup: jq is required"; exit 1; }
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+REAL_HOME="$HOME"   # cargo needs the real one: its toolchain and registry live under it
 export HOME="$TMP/home"; mkdir -p "$HOME"; unset HEXA_HOME
 REPO="$TMP/repo"; mkdir -p "$REPO"; cd "$REPO" || exit 1
 git init -q . && git config user.email g@example.com && git config user.name gate
@@ -82,12 +83,16 @@ c6() { local o rc
     echo "$o" | jq -e '.code=="lease_not_allowed" and has("hint") and has("field") and .retryable==false' >/dev/null 2>&1 \
       || { WHY="$pth refused for the wrong reason (want code lease_not_allowed): $(echo "$o" | head -c 100)"; return 1; }
   done; }
-c7() { local o; echo 'fn a() { 1 }' > src/a/x.rs; echo 'token' > src/a/.runner
-  o="$(H do run "edit" --file src/a/x.rs --evidence true --plan-only --json 2>&1)" || { WHY="plan-only failed: $(echo "$o" | head -1)"; return 1; }
-  echo "$o" | jq -e '(.would_commit|index("src/a/x.rs")!=null) and (.would_commit|index("src/a/.runner")==null) and (.left_uncommitted|index("src/a/.runner")!=null)' >/dev/null \
-    || { WHY="expected x.rs committed and .runner left; got: $(echo "$o" | head -c 160)"; return 1; }; }
-c8() { local o; o="$(H do run "edit" --file src/a/x.rs --evidence true --plan-only --json 2>&1)" || { WHY="refused: $(echo "$o" | head -1)"; return 1; }
-  echo "$o" | jq -e '(.refused // false)==false' >/dev/null || { WHY="a sealed file absent before and after read as an edit"; return 1; }; }
+# 7 and 8 ran `hexa do run --plan-only` in the first build of this ADR. `--plan-only` and the staging
+# rewrite behind it are not in this release (main shipped its own answer to #36, narrower than a rewrite);
+# the behaviours are checked where they now live, by the tests that exercise the released code. A run of
+# zero tests is a failure, never a pass.
+cargo_passes() { local o; o="$(cd "$ROOT" && HOME="$REAL_HOME" cargo test -q "$@" 2>&1)" || { WHY="cargo test $* failed: $(echo "$o" | grep -E 'FAILED|panicked' | head -2 | tr '\n' ' ')"; return 1; }
+  echo "$o" | grep -qE 'test result: ok\. [1-9][0-9]* passed' || { WHY="cargo test $* ran no test"; return 1; }; }
+# #36: a pre-run untracked neighbour (a .runner credential, a draft) is not swept into a `hexa do` commit.
+c7() { cargo_passes -p hexa-exec --test do_commit_scope; }
+# #50: a sealed path absent at HEAD and after the run is not an edit (main's own fix and test).
+c8() { cargo_passes -p hexa-exec --test a_sealed_test_is_never_committed a_sealed_file_absent_at_head_and_after_the_run_is_not_an_edit; }
 c9() { local o f
   o="$(H agent report --id "${ID1:-none}" --outcome passed --commit abc1234 --json 2>&1)" || { WHY="report failed: $(echo "$o" | head -1)"; return 1; }
   o="$(H status --json 2>&1)"
@@ -105,8 +110,8 @@ check "3 status --json lists both, count exactly 2"               2 c3
 check "4 overlapping lease refused with code/hint/field/retryable" 2 c4
 check "5 edit outside the lease refused, inside allowed"          2 c5
 check "6 sealed path and .runner are not leasable"                2 c6
-check "7 do leaves an untracked .runner uncommitted"              2 c7
-check "8 a deleted sealed file does not read as an edit"          2 c8
+check "7 do leaves an untracked neighbour uncommitted (do_commit_scope tests)"              2 c7
+check "8 an absent sealed file is not an edit (#50 test)"          2 c8
 check "9 report closes task and run record (pid_start set)"       3 c9
 
 echo "---- $RAN checks, $FAILED failed (phase $PHASE, HEXA_BIN=$HEXA_BIN)"

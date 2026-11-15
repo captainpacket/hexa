@@ -1400,43 +1400,9 @@ fn changed_spec_records(repo_root: &std::path::Path) -> Vec<String> {
         .collect()
 }
 
-/// The seals a *run* broke (#50): `broken_seals`, less every sealed path whose
-/// state the run did not change. Only a change counts.
-///
-/// - Absent now: an edit only when HEAD tracks the path and it was not already
-///   dirty at the start (so this run deleted it). A path HEAD never had, or one
-///   the operator had already deleted, was absent before and is absent after.
-/// - Present now but not matching its seal: an edit when it was already dirty at
-///   the start (the operator's own edit, which stays refused and is never
-///   discarded) or when it now differs from HEAD (the run changed it). A file
-///   that is clean and equal to HEAD was not touched by the run; a stale seal
-///   there is `hexa spec verify`'s to report, not a reason to refuse the commit.
-pub fn broken_seals_for_run(repo_root: &std::path::Path, start_dirty: &[String]) -> Vec<String> {
-    broken_seals(repo_root)
-        .into_iter()
-        .filter(|p| {
-            if repo_root.join(p).exists() {
-                start_dirty.contains(p) || !tracked_in_head(repo_root, p) || differs_from_head(repo_root, p)
-            } else {
-                tracked_in_head(repo_root, p) && !start_dirty.contains(p)
-            }
-        })
-        .collect()
-}
-
-/// Whether the working copy of a tracked `path` differs from `HEAD`.
-fn differs_from_head(repo_root: &std::path::Path, path: &str) -> bool {
-    std::process::Command::new("git")
-        .args(["diff", "--quiet", "HEAD", "--"])
-        .arg(path)
-        .current_dir(repo_root)
-        .status()
-        .map(|s| !s.success())
-        .unwrap_or(true)
-}
-
-/// Every path a spec in `docs/specs/*.json` lists as sealed, sorted. Whether
-/// the file exists is not asked: a sealed path is never leasable either way.
+/// Every path a spec in `docs/specs/*.json` lists as sealed, sorted. Whether the
+/// file exists is not asked: a sealed path is never leasable either way
+/// (ADR-2611051850 decision 5).
 pub fn sealed_paths(repo_root: &std::path::Path) -> Vec<String> {
     let mut v: Vec<String> = seals(repo_root).into_iter().map(|(p, _)| p).collect();
     v.sort();
@@ -1579,8 +1545,7 @@ pub async fn commit_with_also(
     // The code side may only make a sealed test pass, never change it
     // (ADR-2610221540 §6). Judged over the whole tree, not this commit's
     // paths: a test loosened and left uncommitted still made the gate pass.
-    // A sealed path absent before the run and absent after is not an edit (#50); only a change counts.
-    let broken = broken_seals_for_run(repo_root, start_dirty);
+    let broken = broken_seals(repo_root);
     if !broken.is_empty() {
         let mut kept = Vec::new();
         for p in &broken {
@@ -1702,12 +1667,6 @@ fn committed_hash(stdout: &str) -> Option<String> {
     let line = stdout.lines().find(|l| l.starts_with('['))?;
     let hash = line[1..line.find("] ")?].rsplit(' ').next()?;
     (hash.len() >= 4 && hash.chars().all(|c| c.is_ascii_hexdigit())).then(|| hash.to_string())
-}
-
-/// The repository a `hexa do` run works in (`HEXA_PROJECT_ROOT`, else the
-/// nearest `.git` above the working directory).
-pub fn repo_root_path() -> std::path::PathBuf {
-    repo_root()
 }
 
 pub(crate) fn repo_root() -> std::path::PathBuf {
@@ -2071,71 +2030,6 @@ mod commit_snapshot_tests {
         settle(false);
         assert_eq!(wts.0.lock().unwrap().len(), 1, "a run whose evidence never passed is still cleaned up");
     }
-
-    /// A repo whose spec seals `tests/sealed.rs` (present) and `tests/gone.rs`
-    /// (never existed), committed.
-    fn sealed_repo_with_ghost(dir: &std::path::Path) {
-        init_repo(dir);
-        std::fs::create_dir_all(dir.join("docs/specs")).unwrap();
-        std::fs::create_dir_all(dir.join("tests")).unwrap();
-        let body = "#[test]
-fn holds() {}
-";
-        std::fs::write(dir.join("tests/sealed.rs"), body).unwrap();
-        let sum = super::sha256_hex(body.as_bytes());
-        std::fs::write(
-            dir.join("docs/specs/spec.json"),
-            format!(r#"{{"adr":"x","feature":"f","sealed":{{"tests/sealed.rs":"{sum}","tests/gone.rs":"00"}},"specs":[]}}"#),
-        )
-        .unwrap();
-        git(dir, &["add", "."]);
-        git(dir, &["commit", "-qm", "seal"]);
-    }
-
-    // #50: a sealed path the spec lists that never existed is not an edit; one
-    // HEAD tracks and the run deleted still is.
-    #[tokio::test]
-    async fn commit_with_also_ignores_an_absent_sealed_file_but_refuses_a_deleted_one() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        sealed_repo_with_ghost(dir);
-        std::fs::write(dir.join("target.rs"), "fn t() {}").unwrap();
-        let start_dirty = dirty_paths(dir).await;
-        assert!(super::broken_seals(dir).contains(&"tests/gone.rs".to_string()), "the plain check still sees it");
-        assert!(super::broken_seals_for_run(dir, &start_dirty).is_empty(), "absent before and after is not an edit");
-        commit_with_also(dir, "target.rs", "add target", false, &start_dirty, &[]).await.unwrap();
-
-        std::fs::remove_file(dir.join("tests/sealed.rs")).unwrap();
-        std::fs::write(dir.join("target.rs"), "fn t2() {}").unwrap();
-        let err = commit_with_also(dir, "target.rs", "again", false, &[], &[]).await.unwrap_err();
-        assert!(err.starts_with("refused:") && err.contains("tests/sealed.rs"), "{err}");
-        assert!(!err.contains("tests/gone.rs"), "the ghost is not named: {err}");
-    }
-
-    // #50: "only a change counts". A sealed file that is clean and equal to HEAD
-    // but does not match a stale seal was not touched by the run.
-    #[tokio::test]
-    async fn commit_with_also_does_not_blame_the_run_for_a_stale_seal_it_did_not_touch() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        sealed_repo_with_ghost(dir);
-        std::fs::write(
-            dir.join("docs/specs/spec.json"),
-            r#"{"adr":"x","feature":"f","sealed":{"tests/sealed.rs":"00"},"specs":[]}"#,
-        )
-        .unwrap();
-        git(dir, &["add", "."]);
-        git(dir, &["commit", "-qm", "stale seal"]);
-        std::fs::write(dir.join("target.rs"), "fn t() {}").unwrap();
-        let start_dirty = dirty_paths(dir).await;
-        assert!(super::broken_seals(dir).contains(&"tests/sealed.rs".to_string()));
-        assert!(super::broken_seals_for_run(dir, &start_dirty).is_empty());
-        commit_with_also(dir, "target.rs", "add target", false, &start_dirty, &[]).await.unwrap();
-        // The run then edits it: now it counts.
-        std::fs::write(dir.join("tests/sealed.rs"), "// loosened\n").unwrap();
-        assert_eq!(super::broken_seals_for_run(dir, &[]), vec!["tests/sealed.rs".to_string()]);
-    }
-
 }
 
 #[cfg(test)]

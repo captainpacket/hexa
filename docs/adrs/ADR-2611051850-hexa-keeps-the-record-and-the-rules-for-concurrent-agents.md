@@ -95,6 +95,19 @@ Each is the ADR's own stated default, recorded here as a decision so the code an
 - The manual run of the phase 3 exit gate: one live Claude Code session with two subagents, one stepping outside its lease. The bridge is tested with hand-made payloads in the documented shape only. The ADR is not Completed until that run is recorded here.
 - `describe` entries: hexa has no `describe` verb. Each new verb documents itself in `--help`, in JSON refusals and in `docs/guides/development-workflow.md`.
 
+### Integrated onto 26.11.7 (2026-11-15): what is in this release and what is not
+
+The three phases above were built on a 26.11.3 base. Main had moved to 26.11.7 and had shipped its own answers to #36, #40 and #50, so integrating them was a choice, not a replay. The ADR stays Proposed.
+
+- **In:** the ledger and the lease rules (`hexa-core` `domain::ledger`), `hexa agent register|report|list|release`, the pre-edit hook rule for bound sessions, the run records and `hexa status`, `hexa dev worktree merge-order`, and `sealed_paths` (a sealed path is never leasable).
+- **Out, because main already answered it differently:**
+  - *#40, `pid_start` on macOS.* Main's `ProcessProbe` reads `ps -o lstart=`; phase 1's `proc_pidinfo` version is dropped. `pid_start` is now `pub(crate)` for the run records.
+  - *#36, `hexa do` committing untracked neighbours.* Main keeps a package sweep narrowed to tracked files, plus `refuse_credentials`. Phase 3's rewrite (stage only `--file` and `--also`) and `hexa do run --plan-only` are not built, because `--plan-only` would describe a plan the real commit does not follow.
+  - *#50, a sealed file absent at HEAD.* Main's `broken_seals` already treats it as no change. Phase 3's `broken_seals_for_run` also stopped blaming a run for a stale seal on a clean file; that is a behaviour change nobody decided for main, so it is not built.
+- **Changed to follow main:** a sealed path is judged as HEAD has it (main's `seals`), so a spec record must be committed to make a path unleasable.
+- **Gate:** `scripts/gate-run-ledger.sh` checks 7 and 8 ran `--plan-only`; they now run main's own tests for #36 (`do_commit_scope`) and #50 (`a_sealed_file_absent_at_head_and_after_the_run_is_not_an_edit`), and a run of zero tests fails.
+- **Test isolation:** tests that read `HEXA_HOME` take one shared scope (`run_record::with_env_home`); the first build raced, and `hexa dev validate` failed on it.
+
 ## Consequences
 
 - hexa can answer "how many agents are running" from files, on macOS and Linux, and a run that ended says how. A dead process is `abandoned`, not counted as running.
