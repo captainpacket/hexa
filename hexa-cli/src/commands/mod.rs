@@ -3,6 +3,7 @@ pub mod claude_paths;
 pub mod api;
 pub mod assets_cmd;
 pub mod bootstrap;
+pub mod build_keys;
 pub mod ci;
 pub mod claude_mods;
 pub mod design;

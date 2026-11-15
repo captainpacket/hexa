@@ -22,6 +22,8 @@ pub mod claude_mods;
 pub mod ledger;
 // What an ADR says it has built: units, evidence, state, drift (ADR-2611151030).
 pub mod adr_board;
+// Whether a native build script is keyed the same under every cargo command (ADR-2611151330).
+pub mod build_keys;
 // State port contract (IStatePort + focused sub-traits + DTOs). Relocated from
 // hexa-nexus where it was an anomaly — port traits belong in hexa-core with the
 // rest (ADR-2606071340 P1). Implemented by the STDB/SQLite adapters.

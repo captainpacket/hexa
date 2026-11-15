@@ -29,6 +29,10 @@ pub async fn run() -> anyhow::Result<()> {
     // Gate 7: the API contract still matches its tags (ADR-2610092245)
     all_passed &= gate_api_contract();
 
+    // Gate 8: a native build script is keyed the same under every cargo command, when the
+    // project asks for it (ADR-2611151330). Silent when `build_keys.enabled` is not set.
+    all_passed &= gate_build_keys();
+
     // Gate 6 is gone with the modules it guarded. It compared hexa-cli/assets/wasm/<x>.wasm against
     // spacetime-modules/<x>/src/ — both deleted in the solo collapse. A freshness check against a
     // source tree that does not exist cannot fail honestly, and a gate that cannot fail is worse
@@ -217,6 +221,30 @@ fn gate_api_contract() -> bool {
         }
         Err(e) => {
             println!("{} ({})", "fail".red(), e);
+            false
+        }
+    }
+}
+
+fn gate_build_keys() -> bool {
+    let dir = std::path::Path::new(".");
+    if !super::build_keys::enabled(dir) {
+        return true;
+    }
+    print!("  {} Build keys ................ ", "\u{25cb}".dimmed());
+    match super::build_keys::compute(dir, &[]) {
+        Ok(r) if r.stable => {
+            println!("{} ({} native build script(s), {} selections)", "pass".green(), r.summary.native_scripts, r.summary.selections);
+            true
+        }
+        Ok(r) => {
+            let names: Vec<&str> = r.scripts.iter().filter(|s| !s.stable).map(|s| s.package.as_str()).collect();
+            println!("{} (unstable: {})", "fail".red(), names.join(", "));
+            println!("      {}", "run `hexa dev build-keys` for the units and the fix".dimmed());
+            false
+        }
+        Err(e) => {
+            println!("{} (cannot check: {})", "fail".red(), e.message);
             false
         }
     }

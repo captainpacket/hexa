@@ -104,6 +104,19 @@ enum DevGroupAction {
         #[arg(long)]
         standalone_gate: bool,
     },
+    /// Does a native build script (C or C++) get the same cache key under every
+    /// cargo command? Compares unit graphs; runs no compiler (ADR-2611151330)
+    BuildKeys {
+        /// A cargo command to compare, as arguments (repeatable), e.g. "test --no-run -p strata-server"
+        #[arg(long = "selection", value_name = "ARGS")]
+        selection: Vec<String>,
+        /// JSON (the default when stdout is not a terminal)
+        #[arg(long)]
+        json: bool,
+        /// A readable report, even when stdout is not a terminal
+        #[arg(long)]
+        text: bool,
+    },
     /// Git worktree management (list, merge, cleanup)
     Worktree {
         #[command(subcommand)]
@@ -479,6 +492,7 @@ async fn run() -> anyhow::Result<()> {
                 if standalone_gate { commands::ci::run_standalone_gate().await }
                 else { commands::ci::run().await }
             }
+            DevGroupAction::BuildKeys { selection, json, text } => commands::build_keys::run(selection, json, text).await,
             DevGroupAction::Worktree { action } => commands::worktree::run(action).await,
             DevGroupAction::Init(args) => commands::init::run(args).await,
             DevGroupAction::Refresh(args) => commands::refresh::run(args).await,
