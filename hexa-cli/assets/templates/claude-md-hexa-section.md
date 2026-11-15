@@ -18,6 +18,18 @@ needs to be started. Every verb below runs in this process and exits.
 | read a file before editing it blind | `hexa graph context <path>` |
 | a lesson you will forget | `hexa memory store lesson:<topic> "<text>"` |
 | claim something about the repo | `hexa verify "<claim>"` |
+| guess which decisions are done, or what another agent is on | `hexa adr board` (progress from evidence) and `hexa agent list` (who holds which paths) |
+| edit paths another agent may be editing | `hexa agent register --task <name> --lease <path>`, and `hexa agent report` when done |
+| wonder why a native (C/C++) dependency rebuilds per command | `hexa dev build-keys` |
+
+### Several agents, one repository
+
+Before you start: `hexa adr board` says which decisions are built, how far, and
+who is on them; `hexa agent list` says which paths are leased. Do not start an
+ADR another agent holds, and do not edit a leased path. Register your task and
+its paths first (`hexa agent register`); `hexa agent report` closes it with the
+commit. When your ADR's evidence is in, add a `**Built:**` line to it so the
+board can see it. Each agent works in its own worktree: `hexa dev worktree`.
 
 If the verb you want is missing, **build the verb**. That is how the tool grows.
 

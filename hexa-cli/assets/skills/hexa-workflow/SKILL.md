@@ -98,14 +98,22 @@ hexa loop stage done                    # writes the evidence into the ADR
 | The steps this work is made of | `hexa loop task` |
 | The next right thing | `hexa go` |
 | A plain-English request, routed to the verb it names | `hexa hey "<request>"` — says so when no verb matches; asks before anything that changes the tree, even with `--yes` |
+| Which decisions are done, how far each is built (from evidence, not status), who is on it | `hexa adr board` (`--text` for a table, `--html <file>` for a page, `--strict` to fail when a status is behind its evidence) |
 | Project and git state at a glance, runs and tasks in progress (JSON when piped) | `hexa status` |
 | Several agents in one repo: claim a task and the paths it may edit, close it, merge in order | `hexa agent register --task <name> --lease <path>`, `hexa agent report --id <id> --outcome passed --commit <sha>`, `hexa dev worktree merge-order` |
+| Whether a native C/C++ dependency (DuckDB, say) is rebuilt by each cargo command | `hexa dev build-keys` (`--selection "<cargo args>"` to compare commands) |
 | A lesson you will otherwise forget | `hexa memory store lesson:<topic> "<text>"` |
 | What was learned before | `hexa memory search <query>` |
 | Test a claim before acting on it | `hexa verify "<claim>"` — CONFIRMED / REFUTED / INCONCLUSIVE |
 | Which module the gate does not actually cover | `hexa gate coverage --gate "<command>"` |
 | A workplan for a larger change | `hexa plan create <requirements> --adr ADR-<id>`, then `hexa plan status` |
 | What inference has cost | `hexa spend` |
+
+**Before starting work in a repository other agents use:** run `hexa adr board`
+and `hexa agent list`; do not start an ADR someone holds or edit a leased path;
+`hexa agent register` your task and paths first and `hexa agent report` it with
+the commit. A decision counts as built when its phase sections carry a
+`**Built:**` line naming the commit, so add one when the evidence is in.
 
 A decision whose gate is not built yet is declared in `.hexa/project.json →
 adr.unbuilt` with a reason; `hexa adr gates` then reports it rather than failing

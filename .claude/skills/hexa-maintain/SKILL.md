@@ -23,15 +23,17 @@ behind, and the warning carries the rebuild command.
 ```bash
 hexa refresh            # the hexa-managed sections of CLAUDE.md, in place
 hexa skill list         # skills embedded in the binary, and the project's own
-hexa skill sync         # write the embedded skills into .claude/skills/ (never overwrites)
+hexa skill sync         # write the embedded skills into .claude/skills/; names any whose copy differs
+hexa skill sync --update   # replace those (only skills the binary carries; your own are untouched)
 hexa skill show <name>
 hexa assets list        # everything embedded: scaffold templates, provider presets, skills, schemas
 hexa assets sync        # write them into .claude/
 ```
 
-`sync` never overwrites, so a skill that changed in the binary does not reach a
-project that already has it. Compare with `hexa skill show <name>` and replace
-the file by hand when they differ.
+`hexa skill sync` never overwrites, so a skill that changed in the binary does not
+reach a project that already has it on its own: it names the ones that differ, and
+`--update` replaces them (a skill you edited by hand is replaced too). After
+`hexa self-update`, run `hexa refresh` and `hexa skill sync --update`.
 
 ## The docs
 

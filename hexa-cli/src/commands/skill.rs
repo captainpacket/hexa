@@ -22,8 +22,13 @@ use crate::assets::Assets;
 pub enum SkillAction {
     /// List available skills — embedded and project-local
     List,
-    /// Write the embedded skills into .claude/skills/ (never overwrites)
-    Sync,
+    /// Write the embedded skills into .claude/skills/. Never overwrites; names a skill whose copy differs
+    /// from this binary's, and `--update` replaces those (a project's own skills are never touched)
+    Sync {
+        /// Replace the embedded skills whose copy here differs from this binary's
+        #[arg(long)]
+        update: bool,
+    },
     /// Show one skill's frontmatter and source
     Show {
         /// Skill name
@@ -34,7 +39,7 @@ pub enum SkillAction {
 pub async fn run(action: SkillAction) -> anyhow::Result<()> {
     match action {
         SkillAction::List => list_skills(),
-        SkillAction::Sync => sync_skills(),
+        SkillAction::Sync { update } => sync_skills(update),
         SkillAction::Show { name } => show_skill(&name),
     }
 }
@@ -149,15 +154,51 @@ fn list_skills() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn sync_skills() -> anyhow::Result<()> {
+fn sync_skills(update: bool) -> anyhow::Result<()> {
     let target = project_root().join(".claude").join("skills");
-    let written = Assets::extract_to("skills/", &target)?;
-    if written.is_empty() {
-        println!("{} Skills already present in {}", "\u{2713}".green(), target.display());
-    } else {
-        println!("{} {} skills written to {}", "\u{2713}".green(), written.len(), target.display());
+    let (written, stale) = sync_into(&target, update)?;
+    if written.is_empty() && stale.is_empty() {
+        println!("{} Skills already present and current in {}", "\u{2713}".green(), target.display());
+    }
+    if !written.is_empty() {
+        let what = if update { "written or updated" } else { "written" };
+        println!("{} {} skill files {} in {}", "\u{2713}".green(), written.len(), what, target.display());
+    }
+    if !stale.is_empty() {
+        println!(
+            "{} {} skill file{} differ from this binary's (not changed): {}",
+            "!".yellow(),
+            stale.len(),
+            if stale.len() == 1 { "" } else { "s" },
+            stale.join(", ")
+        );
+        println!("  `hexa skill sync --update` replaces them; a skill you edited by hand is replaced too.");
     }
     Ok(())
+}
+
+/// Write the embedded skills into `target`. Without `update` an existing file is never overwritten and the
+/// ones whose bytes differ are returned as stale; with it they are replaced (only files this binary
+/// carries: a project's own skills are left alone). Returns (written, stale).
+fn sync_into(target: &Path, update: bool) -> std::io::Result<(Vec<String>, Vec<String>)> {
+    if update {
+        return Ok((Assets::extract_owned("skills/", target)?, Vec::new()));
+    }
+    let written = Assets::extract_to("skills/", target)?;
+    let mut stale = Vec::new();
+    for path in Assets::iter() {
+        let Some(rel) = path.strip_prefix("skills/") else { continue };
+        let rel = rel.strip_suffix(".tmpl").unwrap_or(rel);
+        if written.iter().any(|w| w == rel) {
+            continue;
+        }
+        let (Some(file), Ok(now)) = (Assets::get(&path), std::fs::read(target.join(rel))) else { continue };
+        if now != file.data.as_ref() {
+            stale.push(rel.to_string());
+        }
+    }
+    stale.sort();
+    Ok((written, stale))
 }
 
 fn show_skill(name: &str) -> anyhow::Result<()> {
@@ -226,6 +267,55 @@ mod tests {
         let skills = embedded_skills();
         assert!(!skills.is_empty(), "no skills embedded in the binary");
         assert!(skills.iter().all(|s| !s.name.is_empty()));
+    }
+
+    #[test]
+    fn sync_leaves_a_changed_skill_alone_but_names_it_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join("skills");
+        let (written, stale) = sync_into(&skills, false).unwrap();
+        assert!(!written.is_empty(), "a fresh project gets the skills");
+        assert!(stale.is_empty(), "what was just written is current");
+
+        let wf = skills.join("hexa-workflow/SKILL.md");
+        std::fs::write(&wf, "---\nname: hexa-workflow\n---\nold text\n").unwrap();
+        let (written, stale) = sync_into(&skills, false).unwrap();
+        assert!(written.is_empty(), "sync never overwrites");
+        assert_eq!(stale, vec!["hexa-workflow/SKILL.md".to_string()]);
+        assert_eq!(std::fs::read_to_string(&wf).unwrap(), "---\nname: hexa-workflow\n---\nold text\n");
+    }
+
+    #[test]
+    fn update_replaces_only_what_differs_and_leaves_the_projects_own_skills() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path().join("skills");
+        sync_into(&skills, false).unwrap();
+        let wf = skills.join("hexa-workflow/SKILL.md");
+        let current = std::fs::read_to_string(&wf).unwrap();
+        std::fs::write(&wf, "old").unwrap();
+        let own = skills.join("my-own/SKILL.md");
+        std::fs::create_dir_all(own.parent().unwrap()).unwrap();
+        std::fs::write(&own, "mine").unwrap();
+
+        let (written, stale) = sync_into(&skills, true).unwrap();
+        assert_eq!(written, vec!["hexa-workflow/SKILL.md".to_string()]);
+        assert!(stale.is_empty());
+        assert_eq!(std::fs::read_to_string(&wf).unwrap(), current);
+        assert_eq!(std::fs::read_to_string(&own).unwrap(), "mine", "a project's own skill is never touched");
+        let (written, _) = sync_into(&skills, true).unwrap();
+        assert!(written.is_empty(), "a second update is a no-op");
+    }
+
+    #[test]
+    fn the_workflow_skill_teaches_the_board_and_the_ledger() {
+        let wf = Assets::get_str("skills/hexa-workflow/SKILL.md").expect("embedded");
+        for verb in ["hexa adr board", "hexa agent list", "hexa agent register", "hexa dev build-keys"] {
+            assert!(wf.contains(verb), "hexa-workflow does not mention `{verb}`");
+        }
+        let section = Assets::get_str("templates/claude-md-hexa-section.md").expect("embedded");
+        for verb in ["hexa adr board", "hexa agent register", "hexa dev build-keys"] {
+            assert!(section.contains(verb), "the managed CLAUDE.md section does not mention `{verb}`");
+        }
     }
 
     #[test]
