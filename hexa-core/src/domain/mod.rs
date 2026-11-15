@@ -1,5 +1,6 @@
 //! Value objects shared across the workspace. Pure data, no I/O.
 
+pub mod adr_board;
 pub mod api_optimization;
 // Which steps install hexa's Claude Code mods (ADR-2610301129).
 pub mod claude_mods;

@@ -20,6 +20,8 @@ pub mod intent;
 pub mod claude_mods;
 // The task ledger and the lease rules agents are held to (ADR-2611051850).
 pub mod ledger;
+// What an ADR says it has built: units, evidence, state, drift (ADR-2611151030).
+pub mod adr_board;
 // State port contract (IStatePort + focused sub-traits + DTOs). Relocated from
 // hexa-nexus where it was an anomaly — port traits belong in hexa-core with the
 // rest (ADR-2606071340 P1). Implemented by the STDB/SQLite adapters.

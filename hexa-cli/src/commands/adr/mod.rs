@@ -1,3 +1,4 @@
+pub mod board;
 pub mod doctor;
 
 use std::path::{Path, PathBuf};
@@ -21,6 +22,28 @@ pub enum AdrAction {
         /// without replacement, or Superseded without backlink.
         #[arg(long)]
         json: bool,
+    },
+    /// Every ADR, how far each is built (from evidence, not status), who is on
+    /// it, and where other checkouts differ (ADR-2611151030).
+    Board {
+        /// JSON (the default when stdout is not a terminal)
+        #[arg(long)]
+        json: bool,
+        /// A table, even when stdout is not a terminal
+        #[arg(long)]
+        text: bool,
+        /// Also write a self-contained static page to FILE
+        #[arg(long, value_name = "FILE")]
+        html: Option<PathBuf>,
+        /// Read another checkout of this repository too (repeatable)
+        #[arg(long, value_name = "DIR")]
+        also: Vec<PathBuf>,
+        /// Board another product's repository, as its own section (repeatable)
+        #[arg(long, value_name = "DIR")]
+        product: Vec<PathBuf>,
+        /// Exit 1 when any ADR's status is behind its evidence
+        #[arg(long)]
+        strict: bool,
     },
     /// Search ADRs by keyword
     Search {
@@ -137,6 +160,7 @@ pub async fn run(action: AdrAction) -> anyhow::Result<()> {
     match action {
         AdrAction::List => list().await,
         AdrAction::Gates { ci, dry_run } => run_gates(ci, dry_run).await,
+        AdrAction::Board { json, text, html, also, product, strict } => board::run(json, text, html, also, product, strict).await,
         AdrAction::Accept { adr_id, rationale } => set_adr_status(&adr_id, "Accepted", None, &rationale).await,
         AdrAction::Complete { adr_id, rationale, force } => complete_adr(&adr_id, &rationale, force).await,
         AdrAction::Supersede { adr_id, by, rationale } => supersede_adr(&adr_id, &by, &rationale).await,
