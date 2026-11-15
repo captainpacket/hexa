@@ -23,6 +23,9 @@ if [ "${1:-}" = "--phase" ]; then PHASE="${2:-}"; fi
 case "$PHASE" in 1|2) ;; *) echo "usage: $0 [--phase 1|2]" >&2; exit 2;; esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# CI builds this tree's binary at target/ci/hexa before it runs the ADR gates; use it rather than
+# build a second copy. It never exists in a local checkout unless CI put it there.
+if [ -z "${HEXA_BIN:-}" ] && [ -x "$ROOT/target/ci/hexa" ]; then HEXA_BIN="$ROOT/target/ci/hexa"; fi
 if [ -z "${HEXA_BIN:-}" ]; then
   export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target/gate-build-keys}"  # under target/: hexa analyze skips a directory of that name
   (cd "$ROOT" && cargo build -q -p hexa-cli) || { echo "FAIL build: cargo build -p hexa-cli failed"; exit 1; }
@@ -147,4 +150,8 @@ check "13 hexa dev ci runs it only when build_keys.enabled"                  2 c
 echo "---"
 [ "$RAN" -gt 0 ] || { echo "FAIL: no check ran"; exit 1; }
 echo "$((RAN-FAILED)) of $RAN checks pass"
+# The summary in the form `hexa adr gates` reads (TAP's `# tests`, `# pass`, `# fail`), so the reader
+# counts the checks itself and fails a run that counted none, instead of this gate opting out with
+# `## Gate (uncounted)`.
+echo "# tests $RAN"; echo "# pass $((RAN-FAILED))"; echo "# fail $FAILED"
 [ "$FAILED" -eq 0 ]
