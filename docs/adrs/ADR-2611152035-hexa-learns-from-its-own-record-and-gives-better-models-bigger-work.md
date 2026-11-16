@@ -62,6 +62,8 @@ hexa keeps what each run teaches, uses it on the next run, and sizes the work it
 
 ## Implementation
 
+**Gate:** `cargo test -p hexa-exec --test harden_reads_lessons` covers §4: the hunt, fix and build prompts carry the lessons that bear on the target, and a fix is told to fix the whole class. It grows as the other items land.
+
 | Phase | Description | Gate |
 |---|---|---|
 | P1 | ADR-2610221834 built: worktrees, test-first, red-green landing, operator's tree untouched | its own tests; a run with a dirty operator tree leaves that tree and branch byte-identical |

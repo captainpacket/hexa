@@ -83,7 +83,7 @@ MCP is reconsidered after two weeks of `observe-pre` data with items 1–4 in pl
 
 ## Implementation
 
-**Gate:** `cargo test -p hexa-exec --test do_commit_scope --test do_gate && cargo test -p hexa-cli --test skills_name_real_commands`. It grows as each item below lands: the harden and hook tests are added when their branches merge.
+**Gate:** `cargo test -p hexa-exec --test do_commit_scope --test do_gate --test harden_concurrent --test harden_false_greens --test build_refuses_unsafe_work && cargo test -p hexa-cli --test skills_name_real_commands --test hook_pre_bash`.
 
 Gate first. Each item ships with a failing test written before the change:
 

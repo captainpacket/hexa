@@ -24,7 +24,7 @@ async fn harden(dir: &Path, frontier: Arc<Fake>) -> ReviewReport {
 }
 
 fn gates(gate: &str, fast: Option<&str>) -> HardenGates {
-    HardenGates { gate: gate.to_string(), fast_gate: fast.map(str::to_string), batch: None, baseline: false }
+    HardenGates { gate: gate.to_string(), fast_gate: fast.map(str::to_string), batch: None, baseline: false, lessons: Vec::new() }
 }
 
 // ── (a) refuse to start ──────────────────────────────────────────────────────

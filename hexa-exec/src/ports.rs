@@ -277,3 +277,9 @@ pub trait ForgeHosts: Send + Sync {
 pub trait TargetLock: Send + Sync {
     fn acquire(&self, t: &hexa_core::ports::forge::ForgeTarget, wait: std::time::Duration) -> Result<Box<dyn Send>, String>;
 }
+
+/// The identity hexa commits under (ADR-2606071323 §4). The frontier adapter
+/// gives it to every claude it starts, and harden folds back only commits
+/// made as it (ADR-2611160730 §1): one value, shared through the port.
+pub const HEXA_GIT_NAME: &str = "hexa-factory";
+pub const HEXA_GIT_EMAIL: &str = "factory@hexa.local";

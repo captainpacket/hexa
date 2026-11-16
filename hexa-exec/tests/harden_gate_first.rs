@@ -180,6 +180,7 @@ async fn pass(w: &World, frontier: Arc<FakeFrontier>, gate: &str, baseline: bool
         fast_gate: None,
         batch: None,
         baseline,
+        lessons: Vec::new(),
     };
     run_review_gated(
         frontier,

@@ -21,7 +21,7 @@ use hexa_exec::ports::{Frontier, FrontierError};
 const VACUOUS: &str = "echo 'running 0 tests'; echo 'test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured'; true";
 
 fn gates(gate: &str, fast: Option<&str>, baseline: bool) -> HardenGates {
-    HardenGates { gate: gate.to_string(), fast_gate: fast.map(str::to_string), batch: None, baseline }
+    HardenGates { gate: gate.to_string(), fast_gate: fast.map(str::to_string), batch: None, baseline, lessons: Vec::new() }
 }
 
 #[tokio::test]

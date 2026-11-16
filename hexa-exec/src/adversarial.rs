@@ -1030,8 +1030,8 @@ const RESCUE_DIR: &str = ".hexa/harden-rescue";
 
 /// The identity hexa commits under (ADR-2606071323 §4): `commit_result` and
 /// hexa-git's cherry-pick both use it.
-const HEXA_NAME: &str = "hexa-factory";
-const HEXA_EMAIL: &str = "factory@hexa.local";
+const HEXA_NAME: &str = crate::ports::HEXA_GIT_NAME;
+const HEXA_EMAIL: &str = crate::ports::HEXA_GIT_EMAIL;
 
 /// The lock's file name, in the worktree's own git dir.
 const RUN_LOCK: &str = "hexa-harden.lock";
@@ -1448,12 +1448,12 @@ pub async fn run_review_with(
     repo_root: &Path,
     reporter: Reporter,
 ) -> ReviewReport {
-    let gates = HardenGates { gate: gate.to_string(), fast_gate: None, batch: None, baseline: true };
+    let gates = HardenGates { gate: gate.to_string(), fast_gate: None, batch: None, baseline: true, lessons: Vec::new() };
     review(frontier, None, target, &gates, repo_root, reporter).await
 }
 
 /// The gates a harden pass answers to (ADR-2610160756 §1).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct HardenGates {
     /// The full gate: what ships must pass it.
     pub gate: String,
@@ -1466,6 +1466,32 @@ pub struct HardenGates {
     /// Run the full gate once on the tree as it is before the hunt, and stop
     /// when it is red (ADR-2611151645 §1 to §3). `false` is `--no-baseline`.
     pub baseline: bool,
+    /// What the project has learned, `(key, text)`, read through the memory
+    /// port by the caller (ADR-2611152035 §4). The hunt and the fix prompts
+    /// carry the ones that bear on the target. Empty: nothing is said.
+    pub lessons: Vec<(String, String)>,
+}
+
+/// The lessons a prompt carries for `target` (ADR-2611152035 §4): the ones
+/// that name the target's path or file name first, then the rest by recency,
+/// at most eight. Empty when nothing was learned.
+pub fn lessons_block(lessons: &[(String, String)], target: &str) -> String {
+    if lessons.is_empty() {
+        return String::new();
+    }
+    let name = Path::new(target).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let names_target = |(k, v): &&(String, String)| {
+        let text = format!("{k} {v}");
+        text.contains(target) || (!name.is_empty() && text.contains(&name))
+    };
+    let mut chosen: Vec<&(String, String)> = lessons.iter().filter(names_target).collect();
+    chosen.extend(lessons.iter().filter(|l| !names_target(l)));
+    chosen.truncate(8);
+    let mut out = String::from("\n\n## Lessons this project has learned (most relevant to the target first)\n");
+    for (k, v) in chosen {
+        out.push_str(&format!("- [{k}] {}\n", v.chars().take(400).collect::<String>()));
+    }
+    out
 }
 
 /// [`run_review`] under `gates`: with a fast gate, each fix is gated fast,
@@ -1504,6 +1530,7 @@ async fn review(
     reporter: Reporter,
 ) -> ReviewReport {
     let gate = gates.gate.as_str();
+    let lessons = lessons_block(&gates.lessons, target);
     let mut report = ReviewReport::default();
     // One pass per worktree, on a branch, on a tree with no tracked change of
     // anyone's: the pass commits, reverts and resets files, and cannot tell
@@ -1584,8 +1611,8 @@ async fn review(
              and hunt ONLY for this failure class: {focus}. Report exclusively REAL bugs you can \
              point to in the actual code — do NOT invent issues; if the code is correct on this \
              lens, return an empty list. Do NOT modify any files. Output ONLY a JSON object: \
-             {{\"findings\":[{{\"title\":\"...\",\"location\":\"file:line or fn\",\"description\":\"the concrete failure\",\"lens\":\"{key}\"}}]}}",
-            target = target, focus = lens.focus, key = lens.key
+             {{\"findings\":[{{\"title\":\"...\",\"location\":\"file:line or fn\",\"description\":\"the concrete failure\",\"lens\":\"{key}\"}}]}}{lessons}",
+            target = target, focus = lens.focus, key = lens.key, lessons = lessons
         );
         let root = repo_root.to_path_buf();
         let code = code.clone();
@@ -1721,8 +1748,12 @@ async fn review(
         let prompt = format!(
             "Fix this CONFIRMED bug in the code under `{target}`, then add a regression test that \
              fails without the fix. Make a minimal, correct change. Do not commit; hexa gates and \
-             commits each fix. Bug:\ntitle: {title}\nlocation: {loc}\ndescription: {desc}",
-            target = target, title = f.title, loc = f.location, desc = f.description
+             commits each fix. Bug:\ntitle: {title}\nlocation: {loc}\ndescription: {desc}{lessons}{class}",
+            target = target, title = f.title, loc = f.location, desc = f.description, lessons = lessons,
+            class = if lessons.is_empty() { "" } else {
+                "\nIf this bug is an instance of one of these lessons, fix the whole class under the target \
+                 (every place the same mistake is made), not only this instance, and test the class."
+            }
         );
         // Only the frontier can edit files; a completion has no way to
         // (ADR-2609131702 §1). And a reply is not an edit: the frontier
@@ -2362,7 +2393,7 @@ pub async fn run_build(
     timeout_secs: u64,
     retries: u32,
 ) -> BuildReport {
-    run_build_with(frontier, challenge, target, gate, n_designs, repo_root, timeout_secs, retries, silent()).await
+    run_build_with(frontier, challenge, target, gate, n_designs, repo_root, timeout_secs, retries, silent(), &[]).await
 }
 
 /// [`run_build`], reporting each phase as it happens.
@@ -2377,7 +2408,9 @@ pub async fn run_build_with(
     timeout_secs: u64,
     retries: u32,
     reporter: Reporter,
+    lessons: &[(String, String)],
 ) -> BuildReport {
+    let lessons = lessons_block(lessons, target);
     let mut report = BuildReport::default();
     // The same start as harden's: one run per worktree, on a branch, on a
     // tree with no tracked change of anyone's (ADR-2611160730 §1).
@@ -2410,7 +2443,7 @@ pub async fn run_build_with(
         let prompt = format!(
             "You are a senior systems engineer. Propose a concrete design for this challenge:\n{challenge}\n\n\
              Your design PRIORITY: {prio}\n\nBe specific about the data model, the key algorithms, the \
-             concurrency/atomicity strategy, and the main risks. Output your design as clear prose (no code yet)."
+             concurrency/atomicity strategy, and the main risks. Output your design as clear prose (no code yet).{lessons}"
         );
         let root = repo_root.to_path_buf();
         let f = frontier.clone();
@@ -2497,7 +2530,7 @@ pub async fn run_build_with(
         "Implement the following spec as code under `{target}`. Write the full implementation AND a \
          comprehensive test suite per the spec's test plan. Then run the gate command `{gate}` and ITERATE \
          — fix compile errors and failing tests — until the gate exits 0. Do not stop until the gate passes.\n\n\
-         CHALLENGE:\n{challenge}\n\nSPEC:\n{spec}"
+         CHALLENGE:\n{challenge}\n\nSPEC:\n{spec}{lessons}"
     );
     if let Err(e) = claude_run_retry(&*frontier, &build_prompt, repo_root, timeout_secs.saturating_mul(4), retries).await {
         build.note(format!("build agent error: {e}"));

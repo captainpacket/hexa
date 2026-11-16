@@ -210,7 +210,7 @@ impl Scratch {
 
     /// [`Scratch::harden`], with each finding's title given.
     async fn harden_titled(&self, fixes: Vec<Fix>, titles: Vec<String>, fast_gate: Option<String>) -> ReviewReport {
-        let gates = HardenGates { gate: self.full(), fast_gate, batch: None, baseline: false };
+        let gates = HardenGates { gate: self.full(), fast_gate, batch: None, baseline: false, lessons: Vec::new() };
         run_review_gated(FakeFrontier::new(fixes, titles), hexa_exec::default_git_history(), TARGET, &gates, &self.dir).await
     }
 
@@ -456,7 +456,7 @@ async fn an_uncommitted_fast_gated_fix_is_not_covered_by_the_last_green_gate() {
     let s = Scratch::new();
     std::fs::create_dir_all(s.dir.join("tests")).unwrap();
     std::fs::write(s.dir.join("tests/bug_2.txt"), "operator draft\n").unwrap();
-    let gates = HardenGates { gate: s.full(), fast_gate: Some(s.fast()), batch: Some(1), baseline: false };
+    let gates = HardenGates { gate: s.full(), fast_gate: Some(s.fast()), batch: Some(1), baseline: false, lessons: Vec::new() };
     let report = run_review_gated(
         FakeFrontier::new(vec![Fix::Good, Fix::Poisons], titles(&[1, 2])),
         hexa_exec::default_git_history(),

@@ -150,6 +150,7 @@ pub async fn run_build(args: BuildArgs) -> anyhow::Result<()> {
         args.timeout,
         args.retries,
         reporter("build", &repo_root),
+        &hexa_exec::direct_exec::fetch_lessons(&hexa_exec::memory()).await,
     )
     .await;
     running_done(&repo_root);
@@ -163,6 +164,24 @@ pub async fn run_build(args: BuildArgs) -> anyhow::Result<()> {
     );
     for n in &b.notes {
         println!("  {} {}", "·".dimmed(), n.dimmed());
+    }
+
+    if let Some(why) = &b.stopped {
+        record.finish("failed");
+        anyhow::bail!("build stopped and touched nothing: {why}");
+    }
+
+    if args.harden && b.build_ok {
+        println!("{} adversarial pass", "⬡".cyan());
+        let gates = hexa_exec::adversarial::HardenGates {
+            gate: args.gate.clone(),
+            baseline: true,
+            lessons: hexa_exec::direct_exec::fetch_lessons(&hexa_exec::memory()).await,
+            ..Default::default()
+        };
+        let r = hexa_exec::adversarial::run_review_gated_with(hexa_exec::frontier_agent(), hexa_exec::default_git_history(), &args.target, &gates, &repo_root, reporter("harden", &repo_root)).await;
+        running_done(&repo_root);
+        print_review(&r, "    ");
     }
 
     // The receipt, written by the run that produced the code rather than
@@ -191,12 +210,6 @@ pub async fn run_build(args: BuildArgs) -> anyhow::Result<()> {
         Err(e) => eprintln!("  {} could not write provenance: {e}", "⚠".yellow()),
     }
 
-    if args.harden && b.build_ok {
-        println!("{} adversarial pass", "⬡".cyan());
-        let r = hexa_exec::adversarial::run_review_with(hexa_exec::frontier_agent(), &args.target, &args.gate, &repo_root, reporter("harden", &repo_root)).await;
-        running_done(&repo_root);
-        print_review(&r, "    ");
-    }
     // `Ok` here means the pipeline ran; whether the build passed its gate is
     // `build_ok`, and a record that said "passed" for a FAILED build would lie.
     record.finish(if b.build_ok { "passed" } else { "failed" });
@@ -340,6 +353,8 @@ pub async fn run_harden(args: HardenArgs) -> anyhow::Result<()> {
         fast_gate: args.fast_gate.clone(),
         batch: args.batch,
         baseline: !args.no_baseline,
+        // What this project has learned reaches the hunt and the fix (ADR-2611152035 §4).
+        lessons: hexa_exec::direct_exec::fetch_lessons(&hexa_exec::memory()).await,
     };
     let mut record = record;
     let report = hexa_exec::adversarial::run_review_gated_with(
@@ -366,6 +381,12 @@ pub async fn run_harden(args: HardenArgs) -> anyhow::Result<()> {
             base.secs,
             base.shown()
         );
+    }
+    // A pass that refused to start, or stopped part-way to protect someone
+    // else's work, failed: say why in its own words (ADR-2611160730 §1).
+    if let Some(why) = &report.stopped {
+        record.finish("failed");
+        anyhow::bail!("{}", if report.lenses == 0 { format!("harden refused to start: {why}") } else { format!("harden stopped: {why}") });
     }
     // A pass that reviewed nothing is not a pass: `hexa harden && ship`
     // would otherwise proceed on code no reviewer read (ADR-2609131646 §2).
