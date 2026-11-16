@@ -12,7 +12,7 @@
           {
             "type": "command",
             "command": "hexa hook session-start",
-            "timeout": 10000
+            "timeout": 10
           }
         ]
       }
@@ -23,7 +23,7 @@
           {
             "type": "command",
             "command": "hexa hook session-end",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       }
@@ -35,7 +35,7 @@
           {
             "type": "command",
             "command": "hexa hook pre-edit",
-            "timeout": 5000
+            "timeout": 5
           }
         ]
       },
@@ -45,7 +45,7 @@
           {
             "type": "command",
             "command": "hexa hook pre-bash",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       },
@@ -55,7 +55,7 @@
           {
             "type": "command",
             "command": "hexa hook pre-agent",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       },
@@ -64,8 +64,7 @@
           {
             "type": "command",
             "command": "hexa hook observe-pre",
-            "blocking": false,
-            "timeout": 500
+            "timeout": 1
           }
         ]
       }
@@ -77,18 +76,7 @@
           {
             "type": "command",
             "command": "hexa hook post-edit",
-            "timeout": 5000
-          }
-        ]
-      },
-      {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "hexa analyze --file \"$TOOL_INPUT_PATH\" --quiet",
-            "blocking": false,
-            "timeout": 10000
+            "timeout": 5
           }
         ]
       },
@@ -97,8 +85,7 @@
           {
             "type": "command",
             "command": "hexa hook observe-post",
-            "blocking": false,
-            "timeout": 500
+            "timeout": 1
           }
         ]
       }
@@ -109,18 +96,7 @@
           {
             "type": "command",
             "command": "hexa hook observe-stop",
-            "blocking": false,
-            "timeout": 500
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "hexa analyze --violations-only --exit-code",
-            "blocking": true,
-            "timeout": 30000
+            "timeout": 1
           }
         ]
       }
@@ -131,7 +107,7 @@
           {
             "type": "command",
             "command": "hexa hook subagent-start",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       }
@@ -142,7 +118,7 @@
           {
             "type": "command",
             "command": "hexa hook subagent-stop",
-            "timeout": 3000
+            "timeout": 3
           }
         ]
       }
@@ -153,15 +129,14 @@
           {
             "type": "command",
             "command": "hexa hook route",
-            "timeout": 8000
+            "timeout": 8
           }
         ]
       }
     ]
   },
   "permissions": {
-    "allow": [
-    ],
+    "allow": [],
     "deny": [
       "Read(./.env)",
       "Read(./.env.*)"

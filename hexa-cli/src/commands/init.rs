@@ -53,7 +53,8 @@ pub struct InitArgs {
     #[arg(long)]
     pub no_claude_md: bool,
 
-    /// Force overwrite existing .hexa/ config
+    /// Re-run on an initialized project. Merges into the existing config: the
+    /// project id, inference settings, analyze excludes and your own hooks are kept
     #[arg(short, long)]
     pub force: bool,
 
@@ -66,6 +67,8 @@ pub struct InitArgs {
 }
 
 pub async fn run(args: InitArgs) -> Result<()> {
+    // The directory exists before anything asks git where it sits.
+    create_dir_if_missing(Path::new(&args.path))?;
     let target = PathBuf::from(&args.path)
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(&args.path));
@@ -105,25 +108,39 @@ pub async fn run(args: InitArgs) -> Result<()> {
         target.display().to_string().bold()
     );
 
+    // Asked before anything is written: is the target already inside a repo?
+    // A repo that encloses it, not just `target/.git`: `init apps/sub` inside
+    // a repo nested a second one.
+    let enclosing_repo = enclosing_git_root(&target);
+
+    // Every file init writes, relative to `target`: the first commit holds
+    // these and nothing else.
+    let mut written: Vec<PathBuf> = Vec::new();
+
     // ── 1a. .hexa/project.json ─────────────────────────────────────
-    create_project_json(&target, &project_name)?;
+    create_project_json(&target, &project_name, args.name.is_some())?;
+    written.push(".hexa/project.json".into());
 
     // ── 1c. .hexa/ADR-rules.toml (enforcement rules) ───────────────
     create_adr_rules_toml(&target)?;
+    written.push(".hexa/ADR-rules.toml".into());
 
     // ── 1d. the task ledger is runtime state: keep it out of git (ADR-2611051850)
     crate::commands::task_ledger::ensure_ignored(&target)
         .context("Failed to write .hexa/.gitignore")?;
+    written.push(".hexa/.gitignore".into());
 
     // ── 3. .claude/settings.json (hooks → hexa hook <event>) ──────
     create_claude_settings(&target)?;
     if args.strict {
         apply_strict_permissions(&target)?;
     }
+    written.push(".claude/settings.json".into());
 
     // ── 4. CLAUDE.md ──────────────────────────────────────────────
     if !args.no_claude_md {
         create_claude_md(&target, &project_name)?;
+        written.push("CLAUDE.md".into());
     }
 
     // ── 5. docs/adrs/ ─────────────────────────────────────────────
@@ -131,32 +148,40 @@ pub async fn run(args: InitArgs) -> Result<()> {
 
     // ── 6. Scaffold (optional) ────────────────────────────────────
     if args.scaffold {
-        create_scaffold(&target, &args.lang, &project_name)?;  // count reported inside
+        written.extend(scaffold_files(&target, &args.lang, &project_name)?);
     }
 
     // ── 6b. .gitignore, before the first commit (ADR-2610281552 §3) ─
-    // A new project's first commit holds its source, not its build output
-    // or one checkout's session state. Lines already there are kept.
+    // A new project's first commit holds its source, not its build output,
+    // one checkout's session state, or a secret. Lines already there are kept.
     let ignore = target.join(".gitignore");
     let existing = std::fs::read_to_string(&ignore).ok();
-    if let Some(text) = hexa_core::ports::project_floor::merged_gitignore(existing.as_deref(), &args.lang) {
+    let merged = hexa_core::ports::project_floor::merged_gitignore(existing.as_deref(), &args.lang);
+    let base = merged.as_deref().or(existing.as_deref());
+    let with_secrets = merged_secret_ignores(base);
+    if let Some(text) = with_secrets.or(merged) {
         std::fs::write(&ignore, text)?;
         println!("  {} .gitignore", "\u{2713}".green());
     }
+    written.push(".gitignore".into());
 
-    // ── 6a. git init + initial commit ─────────────────────────────
-    // Every example under hexa/examples/ is its own git repo; scaffolded projects
-    // weren't, so `hexa swarm build`'s post-gate auto-commit (adversarial.rs) and
-    // `hexa do run`'s evidence-gated commits had nowhere to land. Non-fatal: a
-    // missing git binary or an already-initialized repo just skips silently.
-    let git_committed = ensure_git_initialized_and_committed(&target, &project_name);
-
-    // ── 7. Write the embedded templates (skills, agents, hooks) ──
-    // These are baked into this binary by rust-embed. `hexa init` used to ask
-    // the daemon for them over /api/projects/init — and the daemon served a
-    // copy it had re-embedded from the same source tree. Extraction never
-    // overwrites, so an operator's edits survive a re-init.
+    // ── 7. Write the embedded templates (skills, hooks) ───────────
+    // Baked into this binary by rust-embed. Before any commit, so the skills
+    // are not left untracked. Extraction never overwrites, so an operator's
+    // edits survive a re-init.
     let templates = extract_templates(&target);
+    written.extend(shipped_template_paths(&target));
+
+    // ── 8. git ────────────────────────────────────────────────────
+    // A directory in no repository gets one, and a first commit of exactly
+    // the files above, so `hexa do run`'s evidence-gated commits have
+    // somewhere to land. Inside an existing repository nothing is staged or
+    // committed: what is already there, and what is untracked (a `.env`, a
+    // file in progress), is the user's. Non-fatal either way.
+    let git_outcome = match &enclosing_repo {
+        Some(root) => GitOutcome::ExistingRepo(root.clone()),
+        None => init_repo_and_commit(&target, &project_name, &written),
+    };
 
     // ── Summary ───────────────────────────────────────────────────
     println!();
@@ -170,29 +195,27 @@ pub async fn run(args: InitArgs) -> Result<()> {
     if args.scaffold {
         println!("  {} src/ (hexagonal layers)", "\u{2713}".green());
     }
-    if git_committed {
-        println!("  {} git init + initial commit", "\u{2713}".green());
+    match &git_outcome {
+        GitOutcome::Committed => println!("  {} git init + initial commit", "\u{2713}".green()),
+        GitOutcome::ExistingRepo(root) => {
+            println!(
+                "  {} not committed: {} is already a git repository. Review with `git status` and commit what you want.",
+                "\u{2022}".dimmed(),
+                root.display()
+            );
+        }
+        GitOutcome::Skipped(why) => println!("  {} no initial commit: {why}", "\u{2717}".yellow()),
     }
 
     match &templates {
         Ok(created) => {
-            let skills = created.iter().filter(|f| f.contains("/skills/")).count();
-            let agents = created.iter().filter(|f| f.contains("/agents/")).count();
-            if skills + agents > 0 {
-                println!("  {} .claude/skills/ ({} skills)", "\u{2713}".green(), skills);
-                println!("  {} .claude/agents/ ({} agents)", "\u{2713}".green(), agents);
+            let skills = created.iter().filter(|f| f.starts_with(".claude/skills/")).count();
+            if skills > 0 {
+                println!("  {} .claude/skills/ ({} files)", "\u{2713}".green(), skills);
             }
         }
         Err(e) => {
-            println!(
-                "  {} skills/agents: nexus unavailable ({})",
-                "\u{2717}".yellow(),
-                e
-            );
-            println!(
-                "    {} Start nexus first, then re-run: hexa init --force",
-                "\u{2022}".dimmed()
-            );
+            println!("  {} skills: not written ({})", "\u{2717}".yellow(), e);
         }
     }
 
@@ -219,29 +242,73 @@ pub async fn run(args: InitArgs) -> Result<()> {
 
 // ── File generators ──────────────────────────────────────────────────
 
-fn create_project_json(target: &Path, name: &str) -> Result<()> {
+/// Write `.hexa/project.json`, or merge into the one that is there.
+///
+/// `--force` used to rewrite the file with a fresh id, losing the configured
+/// models and `analyze.exclude`. Now an existing file keeps every key it has;
+/// only a missing key is filled in, `hexVersion` is brought current, and
+/// `name` changes only when `--name` was given. A file that is not a JSON
+/// object is refused, not replaced.
+fn create_project_json(target: &Path, name: &str, name_given: bool) -> Result<()> {
     let hexa_dir = target.join(".hexa");
     create_dir_if_missing(&hexa_dir)?;
 
     let project_json = hexa_dir.join("project.json");
-    let id = Uuid::new_v4().to_string();
-    let now = chrono::Utc::now().to_rfc3339();
-
-    let content = serde_json::json!({
-        "id": id,
-        "name": name,
-        "createdAt": now,
-        "hexVersion": env!("CARGO_PKG_VERSION"),
-        "lifecycle_enforcement": "mandatory",
-        // Paths `hexa analyze` skips, relative to the project root. Vendored
-        // code, generated output and template data go here, not in the tool.
-        "analyze": { "exclude": [] },
+    let existing = match fs::read_to_string(&project_json) {
+        Ok(text) => Some(
+            serde_json::from_str::<serde_json::Value>(&text)
+                .ok()
+                .filter(|v| v.is_object())
+                .with_context(|| {
+                    format!("{} is not a JSON object; fix it before init merges into it", project_json.display())
+                })?,
+        ),
+        Err(_) => None,
+    };
+    let content = merge_project_json(existing, name, name_given, || {
+        (Uuid::new_v4().to_string(), chrono::Utc::now().to_rfc3339())
     });
-
     fs::write(&project_json, serde_json::to_string_pretty(&content)?)
         .context("Failed to write .hexa/project.json")?;
 
     Ok(())
+}
+
+/// The project.json to write: `existing` with only missing keys filled in.
+/// `fresh` mints the id and creation time, and is called only when needed.
+fn merge_project_json(
+    existing: Option<serde_json::Value>,
+    name: &str,
+    name_given: bool,
+    fresh: impl FnOnce() -> (String, String),
+) -> serde_json::Value {
+    let mut v = existing.unwrap_or_else(|| serde_json::json!({}));
+    let has = |v: &serde_json::Value, k: &str| v.get(k).is_some_and(|x| !x.is_null());
+    if !has(&v, "id") || !has(&v, "createdAt") {
+        let (id, now) = fresh();
+        if !has(&v, "id") {
+            v["id"] = serde_json::json!(id);
+        }
+        if !has(&v, "createdAt") {
+            v["createdAt"] = serde_json::json!(now);
+        }
+    }
+    if name_given || !has(&v, "name") {
+        v["name"] = serde_json::json!(name);
+    }
+    v["hexVersion"] = serde_json::json!(env!("CARGO_PKG_VERSION"));
+    if !has(&v, "lifecycle_enforcement") {
+        v["lifecycle_enforcement"] = serde_json::json!("mandatory");
+    }
+    // Paths `hexa analyze` skips, relative to the project root. Vendored
+    // code, generated output and template data go here, not in the tool.
+    if !v["analyze"].is_object() {
+        v["analyze"] = serde_json::json!({});
+    }
+    if !has(&v["analyze"], "exclude") {
+        v["analyze"]["exclude"] = serde_json::json!([]);
+    }
+    v
 }
 
 /// Load the embedded settings template (ADR-2026-03-22-1522).
@@ -260,23 +327,30 @@ pub fn create_claude_settings(target: &Path) -> Result<()> {
     let template: serde_json::Value = serde_json::from_str(&settings_template())
         .context("Failed to parse embedded hexa-claude-settings.json template")?;
 
-    // If settings.json exists, merge template fields in rather than overwriting
-    let mut settings: serde_json::Value = if settings_path.exists() {
-        let existing = fs::read_to_string(&settings_path)?;
-        serde_json::from_str(&existing).unwrap_or_else(|_| serde_json::json!({}))
-    } else {
-        serde_json::json!({})
+    // If settings.json exists, merge template fields in rather than
+    // overwriting. A file that is not JSON is refused, not replaced.
+    let mut settings: serde_json::Value = match fs::read_to_string(&settings_path) {
+        Ok(text) if !text.trim().is_empty() => serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .filter(|v| v.is_object())
+            .with_context(|| {
+                format!("{} is not a JSON object; fix it before init merges into it", settings_path.display())
+            })?,
+        _ => serde_json::json!({}),
     };
 
-    // Overwrite hooks, statusline, announcements from template
+    // Hooks merge per event: the user's entries stay (init used to replace
+    // the whole object and delete them); hexa's are added where missing.
     if let Some(hooks) = template.get("hooks") {
-        settings["hooks"] = hooks.clone();
+        merge_template_hooks(&mut settings, hooks);
     }
-    if let Some(status_line) = template.get("statusLine") {
-        settings["statusLine"] = status_line.clone();
-    }
-    if let Some(announcements) = template.get("companyAnnouncements") {
-        settings["companyAnnouncements"] = announcements.clone();
+    // The status line and announcements are set only when there are none.
+    for key in ["statusLine", "companyAnnouncements"] {
+        if settings.get(key).is_none() {
+            if let Some(v) = template.get(key) {
+                settings[key] = v.clone();
+            }
+        }
     }
 
     // Set permissions only if not already configured (don't clobber user customization)
@@ -290,6 +364,67 @@ pub fn create_claude_settings(target: &Path) -> Result<()> {
         .context("Failed to write .claude/settings.json")?;
 
     Ok(())
+}
+
+/// Hook commands hexa's template once installed and no longer does. Each is
+/// broken, so init removes an entry running exactly one of these:
+/// - Claude Code sets no `$TOOL_INPUT_PATH` (hook input is JSON on stdin), so
+///   the first analyzed the whole directory on every edit and always exited 0.
+/// - The second failed every turn in a project with no source files yet.
+const RETIRED_HOOK_COMMANDS: &[&str] = &[
+    "hexa analyze --file \"$TOOL_INPUT_PATH\" --quiet",
+    "hexa analyze --violations-only --exit-code",
+];
+
+/// The command strings of every hook in one event's entries.
+fn hook_commands(entries: &[serde_json::Value]) -> std::collections::BTreeSet<String> {
+    entries
+        .iter()
+        .filter_map(|e| e.get("hooks").and_then(|h| h.as_array()))
+        .flatten()
+        .filter_map(|h| h.get("command").and_then(|c| c.as_str()).map(str::to_string))
+        .collect()
+}
+
+/// Merge the template's hooks into `settings["hooks"]`, per event.
+///
+/// Every entry already there is kept, except a hook running one of
+/// [`RETIRED_HOOK_COMMANDS`]. A template hook is added only when no entry of
+/// that event already runs the same command, so a second run changes
+/// nothing. Events the template does not name are untouched.
+fn merge_template_hooks(settings: &mut serde_json::Value, template_hooks: &serde_json::Value) {
+    let Some(template) = template_hooks.as_object() else { return };
+    if !settings["hooks"].is_object() {
+        settings["hooks"] = serde_json::json!({});
+    }
+    let hooks = settings["hooks"].as_object_mut().expect("just made an object");
+    for (event, template_entries) in template {
+        let Some(template_entries) = template_entries.as_array() else { continue };
+        let mut entries: Vec<serde_json::Value> =
+            hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        // Drop retired hexa hooks; an entry left with none is dropped too.
+        entries.retain_mut(|e| {
+            let Some(inner) = e.get_mut("hooks").and_then(|h| h.as_array_mut()) else { return true };
+            let before = inner.len();
+            inner.retain(|h| !h.get("command").and_then(|c| c.as_str()).is_some_and(|c| RETIRED_HOOK_COMMANDS.contains(&c)));
+            !(before > 0 && inner.is_empty())
+        });
+        for t in template_entries {
+            let present = hook_commands(&entries);
+            let Some(inner) = t.get("hooks").and_then(|h| h.as_array()) else { continue };
+            let missing: Vec<serde_json::Value> = inner
+                .iter()
+                .filter(|h| !h.get("command").and_then(|c| c.as_str()).is_some_and(|c| present.contains(c)))
+                .cloned()
+                .collect();
+            if !missing.is_empty() {
+                let mut entry = t.clone();
+                entry["hooks"] = serde_json::Value::Array(missing);
+                entries.push(entry);
+            }
+        }
+        hooks.insert(event.clone(), serde_json::Value::Array(entries));
+    }
 }
 
 /// What `hexa init --strict` denies and allows (ADR-2611160730 §4): source
@@ -427,6 +562,11 @@ pub fn scaffold_gate(lang: &str) -> Option<&'static str> {
 /// Existing files are never overwritten, so re-running `hexa init --scaffold`
 /// on a live project is safe.
 pub(crate) fn create_scaffold(target: &Path, lang: &str, project_name: &str) -> Result<usize> {
+    scaffold_files(target, lang, project_name).map(|w| w.len())
+}
+
+/// [`create_scaffold`], returning the files written, relative to `target`.
+fn scaffold_files(target: &Path, lang: &str, project_name: &str) -> Result<Vec<PathBuf>> {
     let Some(gate) = scaffold_gate(lang) else {
         anyhow::bail!(
             "unknown --lang '{}'; expected one of: {}",
@@ -437,7 +577,7 @@ pub(crate) fn create_scaffold(target: &Path, lang: &str, project_name: &str) -> 
 
     let prefix = format!("scaffold/{lang}/");
     let vars = ScaffoldVars::from_name(project_name);
-    let mut written = 0usize;
+    let mut written: Vec<PathBuf> = Vec::new();
     // Counted separately from `written`, because "every file was already there"
     // and "this language ships no templates" are opposite conditions that both
     // leave `written` at zero. Reporting the first as the second sent a reader
@@ -463,16 +603,16 @@ pub(crate) fn create_scaffold(target: &Path, lang: &str, project_name: &str) -> 
             .ok_or_else(|| anyhow::anyhow!("scaffold asset {path} is not embedded"))?;
         fs::write(&dest, vars.render(&body))
             .with_context(|| format!("writing {}", dest.display()))?;
-        written += 1;
+        written.push(PathBuf::from(rel));
     }
 
     if found == 0 {
         anyhow::bail!("no scaffold assets embedded for --lang {lang}");
     }
-    if written == 0 {
-        return Ok(0);
+    if written.is_empty() {
+        return Ok(written);
     }
-    println!("  {} {} files ({}) — gate: {}", "\u{2713}".green(), written, lang, gate);
+    println!("  {} {} files ({}) — gate: {}", "\u{2713}".green(), written.len(), lang, gate);
     Ok(written)
 }
 
@@ -537,75 +677,142 @@ fn create_dir_if_missing(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Git-init the scaffolded project (if not already a repo) and make an initial
-/// commit, so every hexa-managed project starts under version control — matching the
-/// convention of every example in hexa/examples/. Uses the commit-local factory
-/// identity (ADR-2606071323 §4: attributable, never masquerades as the operator).
-/// Returns true iff a commit was actually made. Entirely non-fatal: a missing git
-/// binary, an already-initialized repo, or nothing to commit are all silent no-ops —
-/// scaffolding itself already succeeded by the time this runs.
-fn ensure_git_initialized_and_committed(target: &Path, project_name: &str) -> bool {
-    if !target.join(".git").exists() {
-        match std::process::Command::new("git")
-            .args(["init", "-q"])
-            .current_dir(target)
-            .output()
-        {
-            Ok(out) if out.status.success() => {}
-            Ok(out) => {
-                tracing::warn!(
-                    stderr = %String::from_utf8_lossy(&out.stderr).trim(),
-                    "git init failed (non-fatal)"
-                );
-                return false;
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "git not found — skipping git init (non-fatal)");
-                return false;
-            }
-        }
+/// The `.gitignore` lines that keep secrets out of a commit: every `.env*`,
+/// except the `.env.example` the security rules ask for.
+const SECRET_IGNORES: &[&str] = &[".env*", "!.env.example"];
+
+/// `existing` with each missing [`SECRET_IGNORES`] line appended once, or
+/// `None` when nothing is missing.
+///
+/// A `.gitignore` that already has a line about `.env` (`.env`, `/.env.local`,
+/// `!.env.example`, …) states its own policy and is left as it is: ADR-2610281552
+/// S22 holds init to leaving a complete `.gitignore` byte-for-byte unchanged.
+fn merged_secret_ignores(existing: Option<&str>) -> Option<String> {
+    let text = existing.unwrap_or("");
+    let names_env = text.lines().any(|l| {
+        let l = l.trim().trim_start_matches('!').trim_start_matches('/');
+        l.starts_with(".env")
+    });
+    if names_env {
+        return None;
+    }
+    let missing: Vec<&str> =
+        SECRET_IGNORES.iter().copied().filter(|l| !text.lines().any(|x| x.trim() == *l)).collect();
+    if missing.is_empty() {
+        return None;
+    }
+    let mut out = text.to_string();
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    for l in missing {
+        out.push_str(l);
+        out.push('\n');
+    }
+    Some(out)
+}
+
+/// The root of the git repository that contains `dir`, if any. `None` also
+/// when git is missing: init then tries `git init`, which says so.
+fn enclosing_git_root(dir: &Path) -> Option<PathBuf> {
+    let out = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(dir)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let root = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!root.is_empty()).then(|| PathBuf::from(root))
+}
+
+/// What init did with git.
+enum GitOutcome {
+    /// A new repository and a first commit of the files init wrote.
+    Committed,
+    /// The target was already in this repository; nothing staged or committed.
+    ExistingRepo(PathBuf),
+    /// No commit, and why.
+    Skipped(String),
+}
+
+/// `git init` a directory that is in no repository, and commit exactly
+/// `paths` (relative to `target`) as the first commit.
+///
+/// Explicit pathspecs, never `add -A`: a `.env` or a file the user had in the
+/// directory before init is not init's to commit. Uses the commit-local
+/// factory identity (ADR-2606071323 §4: attributable, never masquerades as
+/// the operator). Non-fatal: init already succeeded by the time this runs.
+fn init_repo_and_commit(target: &Path, project_name: &str, paths: &[PathBuf]) -> GitOutcome {
+    let git = |args: &[&str]| std::process::Command::new("git").args(args).current_dir(target).output();
+    match git(&["init", "-q"]) {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => return GitOutcome::Skipped(format!("git init failed: {}", String::from_utf8_lossy(&out.stderr).trim())),
+        Err(e) => return GitOutcome::Skipped(format!("git not found ({e})")),
     }
 
-    let add = std::process::Command::new("git")
-        .args(["add", "-A"])
-        .current_dir(target)
-        .output();
-    if !matches!(&add, Ok(out) if out.status.success()) {
-        return false;
+    let mut pathspec: Vec<String> = paths
+        .iter()
+        .filter(|p| target.join(p).is_file())
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    pathspec.sort();
+    pathspec.dedup();
+    if pathspec.is_empty() {
+        return GitOutcome::Skipped("nothing to commit".into());
+    }
+    let mut add = vec!["add", "--"];
+    add.extend(pathspec.iter().map(String::as_str));
+    match git(&add) {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => return GitOutcome::Skipped(format!("git add failed: {}", String::from_utf8_lossy(&out.stderr).trim())),
+        Err(e) => return GitOutcome::Skipped(format!("git add failed ({e})")),
     }
 
     let msg = format!(
         "Initial hexa scaffold for {project_name}\n\nCo-Authored-By: hexa-factory <noreply@hexa.local>"
     );
-    match std::process::Command::new("git")
-        .args([
-            "-c", "user.name=hexa-factory",
-            "-c", "user.email=factory@hexa.local",
-            "commit", "-q", "-m", &msg,
-        ])
-        .current_dir(target)
-        .output()
-    {
-        Ok(out) => out.status.success(), // false covers "nothing to commit" — fine, non-fatal
-        Err(e) => {
-            tracing::warn!(error = %e, "git not found — skipping initial commit (non-fatal)");
-            false
-        }
+    match git(&["-c", "user.name=hexa-factory", "-c", "user.email=factory@hexa.local", "commit", "-q", "-m", &msg]) {
+        Ok(out) if out.status.success() => GitOutcome::Committed,
+        Ok(out) => GitOutcome::Skipped(format!("git commit failed: {}", String::from_utf8_lossy(&out.stderr).trim())),
+        Err(e) => GitOutcome::Skipped(format!("git commit failed ({e})")),
     }
 }
 
-/// Write the embedded `skills/`, `agents/` and `hooks/` templates into
-/// `.claude/`, returning the paths created.
+/// The embedded template prefixes and the `.claude/` directory each goes to.
+const TEMPLATE_DIRS: &[(&str, &str)] = &[("skills/", "skills"), ("hooks/", "hooks")];
+
+/// Write the embedded `skills/` and `hooks/` templates into `.claude/`,
+/// returning the paths created, relative to `target`.
 ///
 /// Never overwrites: an existing file is a customisation, not a stale copy.
+/// The five skills that once shipped as flat files Claude Code never loaded
+/// have their old copies removed once the directory form is in place.
 fn extract_templates(target: &Path) -> std::io::Result<Vec<String>> {
     use crate::assets::Assets;
     let claude = target.join(".claude");
     let mut created = Vec::new();
-    for (prefix, dir) in [("skills/", "skills"), ("hooks/", "hooks")] {
-        created.extend(Assets::extract_to(prefix, &claude.join(dir))?);
+    for (prefix, dir) in TEMPLATE_DIRS {
+        created.extend(Assets::extract_to(prefix, &claude.join(dir))?.into_iter().map(|f| format!(".claude/{dir}/{f}")));
     }
+    crate::commands::skill::remove_legacy_flat_skills(&claude.join("skills"))?;
     Ok(created)
+}
+
+/// Every shipped template file present in `target/.claude/`, relative to
+/// `target`: what the first commit carries of them.
+fn shipped_template_paths(target: &Path) -> Vec<PathBuf> {
+    crate::assets::Assets::iter()
+        .filter_map(|path| {
+            TEMPLATE_DIRS.iter().find_map(|(prefix, dir)| {
+                let rel = path.strip_prefix(prefix)?;
+                let rel = rel.strip_suffix(".tmpl").unwrap_or(rel);
+                Some(PathBuf::from(format!(".claude/{dir}/{rel}")))
+            })
+        })
+        .filter(|p| target.join(p).is_file())
+        .collect()
 }
 
 #[cfg(test)]
@@ -624,6 +831,35 @@ mod scaffold_tests {
             serde_json::json!(["Read(./.env)", "Edit(src/**)", "Write(src/**)"])
         );
         assert_eq!(s["permissions"]["allow"], serde_json::json!(["Bash(hexa do *)"]));
+    }
+
+    #[test]
+    fn a_retired_hexa_hook_is_dropped_and_a_users_hook_with_it_is_kept() {
+        let mut s = serde_json::json!({"hooks": {"Stop": [
+            {"hooks": [{"type": "command", "command": "hexa analyze --violations-only --exit-code"}]},
+            {"hooks": [{"type": "command", "command": "hexa analyze --violations-only --exit-code"}, {"type": "command", "command": "mine"}]}
+        ]}});
+        let template = serde_json::json!({"Stop": [{"hooks": [{"type": "command", "command": "hexa hook observe-stop"}]}]});
+        merge_template_hooks(&mut s, &template);
+        assert_eq!(
+            s["hooks"]["Stop"],
+            serde_json::json!([
+                {"hooks": [{"type": "command", "command": "mine"}]},
+                {"hooks": [{"type": "command", "command": "hexa hook observe-stop"}]}
+            ])
+        );
+        let once = s.clone();
+        merge_template_hooks(&mut s, &template);
+        assert_eq!(s, once, "a second merge changes nothing");
+    }
+
+    #[test]
+    fn secrets_are_ignored_once_and_the_example_is_not() {
+        let text = merged_secret_ignores(Some("target/")).expect("lines added");
+        assert_eq!(text, "target/\n.env*\n!.env.example\n");
+        assert_eq!(merged_secret_ignores(Some(&text)), None);
+        assert_eq!(merged_secret_ignores(Some("*.log\n.env\n")), None, "a stated .env policy is the user's");
+        assert!(merged_secret_ignores(None).is_some());
     }
 
     #[test]
