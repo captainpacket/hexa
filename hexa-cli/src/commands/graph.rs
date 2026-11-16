@@ -123,7 +123,8 @@ pub struct ConsumersArgs {
     /// Max consumers listed per category.
     #[arg(long, default_value_t = 50)]
     pub max_each: usize,
-    /// Emit JSON `{ target, safe_to_remove, imported_by, used_by }`.
+    /// Emit JSON `{ target, safe_to_remove, imported_by, used_by, declared_in,
+    /// stale, newer_files }`.
     #[arg(long)]
     pub json: bool,
 }
@@ -177,7 +178,20 @@ fn graph_path(root: &Path) -> PathBuf {
     root.join(OUT_DIR).join(OUT_FILE)
 }
 
+/// Load the graph and warn on stderr when the source has moved past it.
 fn load_graph(path: &str) -> anyhow::Result<KnowledgeGraph> {
+    Ok(load_graph_checked(path)?.0)
+}
+
+/// Load the graph, warn when it is stale, and return the newer files too.
+fn load_graph_checked(path: &str) -> anyhow::Result<(KnowledgeGraph, Vec<String>)> {
+    let graph = read_graph(path)?;
+    let newer = newer_than_graph(path, STALE_LIMIT)?;
+    warn_if_stale(&newer);
+    Ok((graph, newer))
+}
+
+fn read_graph(path: &str) -> anyhow::Result<KnowledgeGraph> {
     let root = resolve_root(path)?;
     let out_path = graph_path(&root);
     let raw = std::fs::read_to_string(&out_path).map_err(|e| {
@@ -189,6 +203,34 @@ fn load_graph(path: &str) -> anyhow::Result<KnowledgeGraph> {
     KnowledgeGraph::from_json(&raw)
         .map_err(|e| anyhow::anyhow!("corrupt {}: {e}", out_path.display()))
 }
+
+/// Source files changed since the graph was written, at most `limit`. Empty
+/// when the graph's age cannot be read, so a missing mtime never invents
+/// staleness.
+fn newer_than_graph(path: &str, limit: usize) -> anyhow::Result<Vec<String>> {
+    let root = resolve_root(path)?;
+    let Ok(written) = std::fs::metadata(graph_path(&root)).and_then(|m| m.modified()) else {
+        return Ok(Vec::new());
+    };
+    Ok(hexa_graph::newer_sources(&root, written, limit))
+}
+
+/// Tell the reader, on stderr, that the graph predates the source it describes.
+fn warn_if_stale(newer: &[String]) {
+    if newer.is_empty() {
+        return;
+    }
+    eprintln!(
+        "{} the graph is older than {} source file(s) ({}{}): its answer may be wrong. \
+         Rebuild it: `hexa graph build`",
+        "warning:".yellow().bold(),
+        if newer.len() >= STALE_LIMIT { format!("{}+", newer.len()) } else { newer.len().to_string() },
+        newer.iter().take(3).cloned().collect::<Vec<_>>().join(", "),
+        if newer.len() > 3 { ", …" } else { "" },
+    );
+}
+
+const STALE_LIMIT: usize = 20;
 
 fn write_graph(out_path: &Path, graph: &KnowledgeGraph) -> anyhow::Result<()> {
     if let Some(parent) = out_path.parent() {
@@ -418,7 +460,7 @@ async fn context(a: ContextArgs) -> anyhow::Result<()> {
 /// before deleting" (ADR-2026-04-05-0900) is a deterministic hexa verb instead
 /// of a manual grep.
 fn consumers(a: ConsumersArgs) -> anyhow::Result<()> {
-    let graph = load_graph(&a.path)?;
+    let (graph, newer) = load_graph_checked(&a.path)?;
     let bundle = hexa_graph::context::context_for(
         &graph,
         &a.target,
@@ -434,6 +476,9 @@ fn consumers(a: ConsumersArgs) -> anyhow::Result<()> {
     let importers: Vec<String> = b.imported_by.clone();
     let users: Vec<String> =
         b.used_by.iter().map(|u| format!("{} (uses {})", u.file, u.entity)).collect();
+    // A `mod x;` line is where a module is wired in, not a caller of it: it is
+    // listed, and it does not block the verdict.
+    let declared_in: Vec<String> = b.declared_in.clone();
     let safe = importers.is_empty() && users.is_empty();
 
     if a.json {
@@ -444,6 +489,9 @@ fn consumers(a: ConsumersArgs) -> anyhow::Result<()> {
                 "safe_to_remove": safe,
                 "imported_by": importers,
                 "used_by": users,
+                "declared_in": declared_in,
+                "stale": !newer.is_empty(),
+                "newer_files": newer,
             })
         );
         return Ok(());
@@ -456,6 +504,9 @@ fn consumers(a: ConsumersArgs) -> anyhow::Result<()> {
             "\n  {} no inbound importers or entity consumers in the graph.",
             "SAFE TO REMOVE —".green().bold()
         );
+        for f in &declared_in {
+            println!("  {} {} (remove its `mod` line too)", "declared in".dimmed(), f);
+        }
         println!(
             "  {}",
             "Confirm with `cargo check --workspace` after cutting any wiring.".dimmed()
@@ -473,6 +524,9 @@ fn consumers(a: ConsumersArgs) -> anyhow::Result<()> {
             for u in &users {
                 println!("    • {}", u);
             }
+        }
+        for f in &declared_in {
+            println!("  {} {}", "declared in".dimmed(), f);
         }
         println!(
             "\n  {}",

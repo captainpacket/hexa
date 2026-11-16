@@ -50,6 +50,9 @@ pub enum EdgeKind {
     Defines,
     /// File → file it imports.
     Imports,
+    /// File → module file it declares with Rust `mod x;`. Not a use: the
+    /// declaring file is where a module is wired in, not a consumer of it.
+    Declares,
     /// File/entity → entity it references by name.
     References,
     /// Caller → callee (reserved for future call-graph work).
@@ -65,6 +68,7 @@ impl EdgeKind {
         match self {
             EdgeKind::Defines => "defines",
             EdgeKind::Imports => "imports",
+            EdgeKind::Declares => "declares",
             EdgeKind::References => "references",
             EdgeKind::Calls => "calls",
             EdgeKind::Mentions => "mentions",
