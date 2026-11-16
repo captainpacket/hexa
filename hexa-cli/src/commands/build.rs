@@ -32,13 +32,14 @@ use std::path::{Path, PathBuf};
 pub struct BuildArgs {
     /// The challenge: a plain-language description of the system to build.
     pub challenge: String,
-    /// Directory to build into (repo-relative).
+    /// Directory to build into (repo-relative; a path outside the repository
+    /// is refused).
     #[arg(long)]
     pub target: String,
     /// Ground-truth gate: a shell command that must exit 0.
     #[arg(long)]
     pub gate: String,
-    /// Number of divergent designs (2-4).
+    /// Number of divergent designs (2-4; anything else is refused).
     #[arg(long, default_value_t = 3)]
     pub designs: usize,
     /// After building, run the adversarial hunt-and-fix pass (the full harness).
@@ -118,6 +119,10 @@ fn first_blocker(found: &[hexa_infer::Found], verb: &str) -> Option<String> {
 /// `hexa build` — diverge → red-team → synthesize → build, optionally chaining
 /// the adversarial pass for the full pipeline.
 pub async fn run_build(args: BuildArgs) -> anyhow::Result<()> {
+    // Refused here, before a detached child, a run record or the loop's gate:
+    // a run that cannot do what was asked must not start spending.
+    hexa_exec::adversarial::check_build_args(&args.target, args.designs, &std::env::current_dir()?)
+        .map_err(anyhow::Error::msg)?;
     if args.detach {
         return detach("build", &args.target, Some(&args.gate));
     }

@@ -2467,6 +2467,71 @@ const DESIGN_PRIORITIES: &[&str] = &[
     "performance-first: throughput and low overhead, without sacrificing correctness",
 ];
 
+/// Check `hexa build`'s arguments before anything is spent: `n_designs` within
+/// the design priorities there are (2 to 4), and `target` inside the
+/// repository at `repo_root`. Each refusal names its flag.
+///
+/// `--designs 9` used to be cut to 4 without a word, and `--target ../escape`
+/// was accepted, though the help says repo-relative, and started inference.
+pub fn check_build_args(target: &str, n_designs: usize, repo_root: &Path) -> Result<(), String> {
+    let max = DESIGN_PRIORITIES.len();
+    if !(2..=max).contains(&n_designs) {
+        return Err(format!(
+            "--designs {n_designs} is out of range: give 2 to {max}, one design per competing priority; nothing was run"
+        ));
+    }
+    if !target_in_repo(target, repo_root) {
+        return Err(format!(
+            "--target {target} is outside the repository at {}: give a repo-relative directory; nothing was run",
+            repo_root.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Whether `target` (repo-relative, or absolute) names a path inside
+/// `repo_root`: lexically, with no `..` climbing out, and through any symlink
+/// on the part of it that exists.
+fn target_in_repo(target: &str, repo_root: &Path) -> bool {
+    use std::path::Component;
+    if target.trim().is_empty() {
+        return false;
+    }
+    let root = std::fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
+    let t = Path::new(target);
+    let joined = if t.is_absolute() { t.to_path_buf() } else { repo_root.join(t) };
+    // Lexical: resolve `.` and `..` without touching the disk.
+    let mut lexical = std::path::PathBuf::new();
+    for c in joined.components() {
+        match c {
+            Component::ParentDir => {
+                if !lexical.pop() {
+                    return false;
+                }
+            }
+            Component::CurDir => {}
+            other => lexical.push(other.as_os_str()),
+        }
+    }
+    // Through symlinks: canonicalize the deepest part that exists.
+    let mut existing = lexical.as_path();
+    let mut rest = Vec::new();
+    while !existing.exists() {
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                existing = parent;
+            }
+            _ => break,
+        }
+    }
+    let mut resolved = std::fs::canonicalize(existing).unwrap_or_else(|_| existing.to_path_buf());
+    for name in rest.iter().rev() {
+        resolved.push(name);
+    }
+    resolved.starts_with(&root)
+}
+
 /// Run the cooperative-design half of the harness: diverge (N designs from competing
 /// priorities) → red-team each → synthesize one spec → build to the gate. Pairs with
 /// [`run_review`] for the full cooperative+adversarial pipeline.
@@ -2499,6 +2564,12 @@ pub async fn run_build_with(
 ) -> BuildReport {
     let lessons = lessons_block(lessons, target);
     let mut report = BuildReport::default();
+    if let Err(why) = check_build_args(target, n_designs, repo_root) {
+        reporter(Progress { phase: "refused", message: why.clone(), elapsed: Duration::ZERO });
+        report.notes.push(why.clone());
+        report.stopped = Some(why);
+        return report;
+    }
     // The same start as harden's: one run per worktree, on a branch, on a
     // tree with no tracked change of anyone's (ADR-2611160730 §1).
     let (_lock, branch) = match begin_run(repo_root) {
@@ -2521,7 +2592,8 @@ pub async fn run_build_with(
     // Per file (`-uall`): a directory-level entry would hide an operator's
     // file inside the build's target directory.
     let dirty_before: std::collections::BTreeSet<String> = changed_files(repo_root).await.into_keys().collect();
-    let n = n_designs.clamp(2, DESIGN_PRIORITIES.len());
+    // In range: `check_build_args` refused anything else above.
+    let n = n_designs;
 
     // ── Phase 1: diverge — N designs from competing priorities ───────────────
     let diverge = Phase::start(&reporter, "diverge", format!("{} from competing priorities, in parallel", plural(n, "design")), HEARTBEAT);
