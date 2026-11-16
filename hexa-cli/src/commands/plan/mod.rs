@@ -1818,7 +1818,7 @@ fn slug_from_prompt(prompt: &str) -> String {
 /// The stub is a minimal JSON document capturing the original prompt,
 /// the tier classification, and a "pending-planner" status. The hook
 /// router auto-invokes this on T3-sized prompts; the draft surfaces in
-/// Claude Code context so the agent can pick it up via /hexa-feature-dev
+/// Claude Code context so the agent can pick it up via /hexa-workflow
 /// (or the user can approve/edit it manually).
 ///
 /// Scan every `docs/workplans/wp-*.json` for evidence drift and report
@@ -1998,16 +1998,17 @@ async fn draft_plan(prompt_parts: &[String], background: bool) -> anyhow::Result
     let dir = drafts_dir();
     std::fs::create_dir_all(&dir)?;
 
-    // Build a timestamped filename: draft-YYMMDDHHMM-<slug>.json
+    // draft-YYMMDDHHMM-<slug>-<suffix>.json, created with `create_new`. The
+    // name was the minute and four words, opened with `File::create`, so two
+    // sessions drafting the same prompt in the same minute wrote one file
+    // and the first draft was lost without a word.
     let ts = chrono::Local::now().format("%y%m%d%H%M").to_string();
     let slug = slug_from_prompt(trimmed);
-    let filename = format!("draft-{}-{}.json", ts, slug);
-    let path = dir.join(&filename);
+    let (path, filename, mut file) = create_unique_draft(&dir, &ts, &slug)?;
 
     // Draft stub: captures prompt, tier, origin, and pending status.
-    // Deliberately minimal — the planner agent will expand this into a
-    // full workplan when the user (or Claude Code) picks it up.
-    let draft_id = format!("draft-{}-{}", ts, slug);
+    // Deliberately minimal — it is expanded when someone picks it up.
+    let draft_id = filename.trim_end_matches(".json").to_string();
     let draft = serde_json::json!({
         "id": draft_id,
         "kind": "workplan-draft",
@@ -2017,27 +2018,55 @@ async fn draft_plan(prompt_parts: &[String], background: bool) -> anyhow::Result
         "origin": "auto-invoke",
         "prompt": trimmed,
         "next_steps": [
-            "Run /hexa-feature-dev to expand this draft into a full workplan",
+            "Run /hexa-workflow to take this through the gate-first loop: decide, gate, build, harden",
             format!("Or run `hexa plan drafts approve {}`", filename),
-            format!("Or run `hexa plan drafts clear --name {}`", filename.trim_end_matches(".json")),
+            format!("Or run `hexa plan drafts clear --name {}`", draft_id),
         ],
-        "notes": "This is a draft created by ADR-2026-04-11-0227 auto-invoke. It contains only the original prompt — no specs, steps, or tiers have been generated yet. The planner agent will fill these in when the draft is picked up."
+        "notes": "This is a draft created by ADR-2026-04-11-0227 auto-invoke. It contains only the original prompt — no specs, steps, or tiers have been generated yet."
     });
 
-    let mut file = std::fs::File::create(&path)?;
     file.write_all(serde_json::to_string_pretty(&draft)?.as_bytes())?;
 
-    if !background {
+    if background {
+        // The route hook reads the path from here; nothing else is printed.
+        println!("{}", path.display());
+    } else {
         println!(
             "{} draft created: {}",
             "\u{2713}".green(),
             path.display().to_string().cyan()
         );
-        println!("  {} run `/hexa-feature-dev` to expand into a full workplan", "\u{2192}".dimmed());
+        println!("  {} run `/hexa-workflow` to take it through the gate-first loop", "\u{2192}".dimmed());
         println!("  {} run `hexa plan drafts list` to see all drafts", "\u{2192}".dimmed());
     }
 
     Ok(())
+}
+
+/// Create a new draft file that no other writer holds: a short suffix from
+/// the clock and the pid, retried on a collision. Never opens an existing
+/// file.
+fn create_unique_draft(
+    dir: &std::path::Path,
+    ts: &str,
+    slug: &str,
+) -> anyhow::Result<(std::path::PathBuf, String, std::fs::File)> {
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0)
+        ^ std::process::id().rotate_left(16);
+    for attempt in 0u32..64 {
+        let suffix = format!("{:06x}", seed.wrapping_add(attempt.wrapping_mul(0x9e37_79b9)) & 0xff_ffff);
+        let filename = format!("draft-{ts}-{slug}-{suffix}.json");
+        let path = dir.join(&filename);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(f) => return Ok((path, filename, f)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    anyhow::bail!("hexa plan draft: no free draft name in {}", dir.display())
 }
 
 async fn drafts_dispatch(action: DraftsAction) -> anyhow::Result<()> {
@@ -2186,7 +2215,7 @@ async fn approve_draft(name: &str) -> anyhow::Result<()> {
         dst.display().to_string().cyan()
     );
     println!(
-        "  {} the draft still needs expansion into real specs + steps — run `/hexa-feature-dev` or edit the file directly",
+        "  {} the draft still needs expansion into real specs + steps — run `/hexa-workflow` or edit the file directly",
         "\u{2192}".dimmed()
     );
 
