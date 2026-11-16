@@ -1542,6 +1542,81 @@ pub async fn restore_unlisted(repo_root: &std::path::Path, paths: &[String]) -> 
 /// tracked in `HEAD` and missing after the run (a deletion the run made, recorded
 /// in the commit) — and nothing else new: an unlisted untracked file stays out
 /// (the concurrency guard). An `--also` path neither present nor tracked is skipped.
+/// `hexa do gate` (ADR-2611160730 §3): gate the change already in the tree and
+/// commit ONLY `files`. No model is called: the agent wrote the patch.
+///
+/// Refuses before running anything when no file is named, a path escapes the
+/// repository, a file is a credential, a named file has no change, or a sealed
+/// test or spec record was touched. Then the evidence runs; only a real pass
+/// (`Passed`, or `Uncounted` when declared) commits. A failing or vacuous gate
+/// commits nothing and leaves the patch exactly where it is, for the agent to
+/// fix. Returns the new commit's id.
+pub async fn gate_patch(
+    repo_root: &std::path::Path,
+    files: &[String],
+    evidence: &str,
+    message: &str,
+    uncounted: bool,
+) -> Result<String, String> {
+    let Some((first, rest)) = files.split_first() else {
+        return Err("name the files the change is in: --files <path>…".to_string());
+    };
+    validate_also_paths(files)?;
+    refuse_credentials(first, rest)?;
+    let paths: Vec<String> = files.iter().map(|p| normalize_also(p)).collect();
+    let dirty = dirty_paths(repo_root).await;
+    let unchanged: Vec<&str> = paths.iter().filter(|p| !dirty.contains(p)).map(String::as_str).collect();
+    if !unchanged.is_empty() {
+        return Err(format!("nothing to commit in {}: no change against HEAD", unchanged.join(", ")));
+    }
+    let broken = broken_seals(repo_root);
+    if !broken.is_empty() {
+        return Err(format!(
+            "refused: sealed test(s) or spec record(s) changed: {}. A sealed test changes through the spec, never in a fix \
+             (ADR-2610221540 §6); nothing committed",
+            broken.join(", ")
+        ));
+    }
+    let (passed, output) = run_evidence(evidence, repo_root).await;
+    let verdict = evidence_verdict(passed, &output, uncounted);
+    if !verdict.passes() {
+        let tail: String = {
+            let lines: Vec<&str> = output.lines().collect();
+            lines[lines.len().saturating_sub(40)..].join("\n")
+        };
+        return Err(format!("{}\nnothing committed; the change is left in the tree", evidence_failure(evidence, &verdict, &tail)));
+    }
+    let add = tokio::process::Command::new("git")
+        .args(["add", "-A", "--"])
+        .args(&paths)
+        .current_dir(repo_root)
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !add.status.success() {
+        return Err(format!("git add: {}", String::from_utf8_lossy(&add.stderr)));
+    }
+    let how = if uncounted { "uncounted: its exit status alone decided" } else { "counted" };
+    let msg = format!("{}\n\nGate: {evidence} ({how}; hexa do gate, ADR-2611160730 §3)", message.trim());
+    let commit = tokio::process::Command::new("git")
+        .args(["commit", "-q", "-m", &msg, "--"])
+        .args(&paths)
+        .current_dir(repo_root)
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !commit.status.success() {
+        return Err(format!("git commit: {}", String::from_utf8_lossy(&commit.stderr)));
+    }
+    let head = tokio::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(repo_root)
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&head.stdout).trim().to_string())
+}
+
 /// The tracked files the operator had already changed before the run, in the
 /// target's package, that the old commit sweep would have carried into the
 /// agent's commit: not the target, not named with `--also`, not untracked
