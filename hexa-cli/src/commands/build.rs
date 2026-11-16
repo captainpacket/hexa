@@ -408,6 +408,8 @@ fn print_review(report: &hexa_exec::adversarial::ReviewReport, indent: &str) {
             "✓".green()
         } else if report.uncommitted.contains(&f.title) {
             "◐".yellow()
+        } else if report.test_only.contains(&f.title) {
+            "◌".yellow()
         } else {
             "•".yellow()
         };

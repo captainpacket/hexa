@@ -179,6 +179,12 @@ pub struct ReviewReport {
     /// Fixed findings whose new test was never shown red without the fix:
     /// committed, and reported `fixed (untested)` (ADR-2611160730 §5).
     pub untested: Vec<String>,
+    /// Candidates merged into an earlier one from another lens: the same
+    /// location and the same title once normalized. Verified and fixed once.
+    pub duplicates: usize,
+    /// Findings whose fix changed only test files: the defect is still
+    /// there, so they are not fixed. Reverted, never committed.
+    pub test_only: Vec<String>,
 }
 
 /// One batch of fast-gated fixes and what its full gate said
@@ -227,6 +233,8 @@ impl Default for ReviewReport {
             red_without_fix: None,
             stopped: None,
             untested: Vec::new(),
+            duplicates: 0,
+            test_only: Vec::new(),
         }
     }
 }
@@ -290,12 +298,24 @@ impl ReviewReport {
         } else {
             format!(", {} of them untested (no test shown red without the fix)", self.untested.len())
         };
+        let merged = if self.duplicates == 0 {
+            String::new()
+        } else {
+            format!(" ({} duplicate(s) merged)", self.duplicates)
+        };
+        let test_only = if self.test_only.is_empty() {
+            String::new()
+        } else {
+            format!(" · {} test only (changed no code, not fixed)", self.test_only.len())
+        };
         format!(
-            "{} candidate(s) → {} confirmed real → {} fixed (gate-passed){}{}{}{}{}",
+            "{} candidate(s){} → {} confirmed real → {} fixed (gate-passed){}{}{}{}{}{}",
             self.candidate,
+            merged,
             self.confirmed.len(),
             self.fixed.len(),
             untested,
+            test_only,
             held,
             scope,
             by,
@@ -1647,7 +1667,13 @@ async fn review(
             }
         }
     }
-    let candidates = std::mem::take(&mut report.confirmed);
+    let raw = std::mem::take(&mut report.confirmed);
+    let (candidates, merges) = merge_duplicates(raw);
+    report.duplicates = merges.len();
+    for m in &merges {
+        hunt.note(m.clone());
+        report.notes.push(m.clone());
+    }
     // An empty answer from a local reviewer is either good news or no news,
     // and one small call tells them apart (ADR-2609131907 §3). Only then:
     // the frontier has been observed finding real defects, and a pass with
@@ -1799,6 +1825,19 @@ async fn review(
                     report.notes.push(format!("no fix applied for '{}': the tree did not change — {}", f.title, first_line(&reply)));
                     continue;
                 }
+                // A change to tests alone leaves the defect where it was: it is
+                // not a fix, whatever the gate says of it.
+                if touched.iter().all(|p| is_test_path(p)) {
+                    revert_paths(repo_root, &touched, &before, &after, &mut report.notes).await;
+                    fix.note(format!("TEST ONLY — {}: changed no code", f.title));
+                    report.test_only.push(f.title.clone());
+                    report.notes.push(format!(
+                        "test only: the fix for '{}' changed only tests ({}), so the defect stands; reverted, not counted as fixed",
+                        f.title,
+                        touched.join(", ")
+                    ));
+                    continue;
+                }
                 // A fix may make a sealed test pass, never change it
                 // (ADR-2610221540 §6): refused before any gate, batched or not.
                 let broken = crate::direct_exec::broken_seals(repo_root);
@@ -1944,6 +1983,54 @@ async fn review(
     report.gate_run = true;
     final_gate.finish(if passed { "passed" } else { "FAILED" });
     report
+}
+
+/// A finding's location, compared loosely: case, whitespace and a leading
+/// `./` do not make two locations different.
+fn location_key(location: &str) -> String {
+    let squeezed: String = location.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_lowercase();
+    squeezed.trim_start_matches("./").to_string()
+}
+
+/// A finding's title, compared loosely: case and punctuation do not make two
+/// titles different, and neither does spacing.
+fn title_key(title: &str) -> String {
+    title
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Merge candidates that two or more lenses reported for one defect: the same
+/// location and the same title, once normalized. The first is kept, in lens
+/// order, and its `lens` names every lens that found it (`correctness+edges`).
+/// Returns the kept candidates and one note per merge.
+///
+/// A real pass found two bugs three times, had all five confirmed, and fixed
+/// each separately; verifying and fixing a duplicate spends a call on a fix
+/// that can only collide with the first one.
+fn merge_duplicates(candidates: Vec<Finding>) -> (Vec<Finding>, Vec<String>) {
+    let mut kept: Vec<(String, String, Finding)> = Vec::new();
+    let mut notes = Vec::new();
+    for f in candidates {
+        let key = (location_key(&f.location), title_key(&f.title));
+        match kept.iter_mut().find(|(l, t, _)| (l, t) == (&key.0, &key.1)) {
+            Some((_, _, first)) => {
+                let lens = if f.lens.is_empty() { "unnamed lens".to_string() } else { f.lens.clone() };
+                if !f.lens.is_empty() && !first.lens.split('+').any(|l| l == f.lens) {
+                    first.lens = if first.lens.is_empty() { f.lens.clone() } else { format!("{}+{}", first.lens, f.lens) };
+                }
+                notes.push(format!(
+                    "duplicate: '{}' ({lens}) at {} is '{}'; merged, verified once",
+                    f.title, f.location, first.title
+                ));
+            }
+            None => kept.push((key.0, key.1, f)),
+        }
+    }
+    (kept.into_iter().map(|(_, _, f)| f).collect(), notes)
 }
 
 /// Record what the red-first check showed for a committed fix (§5).
