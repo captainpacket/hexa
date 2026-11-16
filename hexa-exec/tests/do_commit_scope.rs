@@ -90,22 +90,80 @@ fn committed(dir: &Path) -> Vec<String> {
 async fn a_root_manifest_does_not_sweep_pre_run_untracked_files_into_the_commit() {
     let tmp = repo();
     let dir = tmp.path();
-    // Present before the run: a token, a draft, and the operator's tracked edit.
+    // Present before the run: a token and a draft, both untracked.
     std::fs::write(dir.join(".runner"), "token\n").unwrap();
     std::fs::create_dir_all(dir.join("docs/drafts")).unwrap();
     std::fs::write(dir.join("docs/drafts/a.md"), "draft\n").unwrap();
-    std::fs::write(dir.join("src/helper.ts"), "// helper, operator edit\n").unwrap();
 
     let t = task("src/lib.ts", "true", &[]);
     let (r, _, _) = claude_attempts(&deps(vec![("src/lib.ts", "// lib v2\n")]), &t, dir, false).await;
 
     assert!(r.ok, "{:?}", r.error);
-    // The tracked, in-package pre-run edit still rides along (supporting file) ...
-    assert_eq!(committed(dir), vec!["src/helper.ts", "src/lib.ts"]);
-    // ... the untracked ones do not.
+    assert_eq!(committed(dir), vec!["src/lib.ts"]);
     let st = git(dir, &["status", "--porcelain", "-uall"]);
     assert!(st.contains("?? .runner"), "the token must stay untracked: {st}");
     assert!(st.contains("?? docs/drafts/a.md"), "an untracked draft must stay untracked: {st}");
+}
+
+/// ADR-2611160730 §2: a tracked file the operator had already changed is never
+/// swept into the agent's commit unasked. The run is refused BEFORE any
+/// inference, naming the file, and the operator's edit is left exactly as it was.
+#[tokio::test]
+async fn a_tracked_edit_made_before_the_run_refuses_the_run_and_is_left_alone() {
+    let tmp = repo();
+    let dir = tmp.path();
+    std::fs::write(dir.join("src/helper.ts"), "// helper, operator edit\n").unwrap();
+
+    let t = task("src/lib.ts", "true", &[]);
+    let (r, _, _) = claude_attempts(&deps(vec![("src/lib.ts", "// lib v2\n")]), &t, dir, false).await;
+
+    assert!(!r.ok, "a run over someone's uncommitted tracked edit must be refused");
+    let err = r.error.clone().unwrap_or_default();
+    assert!(err.contains("src/helper.ts"), "the refusal names the file: {err}");
+    assert!(err.contains("--also") && err.contains("--include-dirty"), "and says how to go on: {err}");
+    assert_eq!(git(dir, &["rev-list", "--count", "HEAD"]).trim(), "1", "nothing committed");
+    assert_eq!(std::fs::read_to_string(dir.join("src/lib.ts")).unwrap(), "// lib\n", "the agent never ran");
+    assert_eq!(std::fs::read_to_string(dir.join("src/helper.ts")).unwrap(), "// helper, operator edit\n");
+}
+
+#[tokio::test]
+async fn a_tracked_edit_named_with_also_rides_along() {
+    let tmp = repo();
+    let dir = tmp.path();
+    std::fs::write(dir.join("src/helper.ts"), "// helper, operator edit\n").unwrap();
+
+    let t = task("src/lib.ts", "true", &["src/helper.ts"]);
+    let (r, _, _) = claude_attempts(&deps(vec![("src/lib.ts", "// lib v2\n")]), &t, dir, false).await;
+
+    assert!(r.ok, "{:?}", r.error);
+    assert_eq!(committed(dir), vec!["src/helper.ts", "src/lib.ts"]);
+}
+
+#[tokio::test]
+async fn include_dirty_keeps_the_old_package_sweep_when_asked_for() {
+    let tmp = repo();
+    let dir = tmp.path();
+    std::fs::write(dir.join("src/helper.ts"), "// helper, operator edit\n").unwrap();
+
+    let mut t = task("src/lib.ts", "true", &[]);
+    t.include_dirty = true;
+    let (r, _, _) = claude_attempts(&deps(vec![("src/lib.ts", "// lib v2\n")]), &t, dir, false).await;
+
+    assert!(r.ok, "{:?}", r.error);
+    assert_eq!(committed(dir), vec!["src/helper.ts", "src/lib.ts"]);
+}
+
+#[tokio::test]
+async fn a_dirty_file_being_the_target_itself_is_not_a_rider() {
+    let tmp = repo();
+    let dir = tmp.path();
+    std::fs::write(dir.join("src/lib.ts"), "// lib, half done\n").unwrap();
+
+    let t = task("src/lib.ts", "true", &[]);
+    let (r, _, _) = claude_attempts(&deps(vec![("src/lib.ts", "// lib v2\n")]), &t, dir, false).await;
+
+    assert!(r.ok, "{:?}", r.error);
+    assert_eq!(committed(dir), vec!["src/lib.ts"]);
 }
 
 #[tokio::test]

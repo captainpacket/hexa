@@ -46,6 +46,12 @@ pub enum DoAction {
         /// (ADR-2611081151 §6). Without it, output no runner wrote fails.
         #[arg(long)]
         uncounted: bool,
+        /// Commit the tracked files you had already modified in the target's
+        /// package together with this change. Without it, such files refuse the
+        /// run before any change is made: name the ones the change needs with
+        /// --also, and commit or stash the rest (ADR-2611160730 §2).
+        #[arg(long = "include-dirty")]
+        include_dirty: bool,
     },
     /// List recent direct runs (task, evidence verdict, commit).
     Runs,
@@ -58,7 +64,7 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
     // the same binary.
 
     match action {
-        DoAction::Run { instruction, file, evidence, model, attempts, fast, max_steps, also, uncounted } => {
+        DoAction::Run { instruction, file, evidence, model, attempts, fast, max_steps, also, uncounted, include_dirty } => {
             if let Err(e) = hexa_exec::direct_exec::validate_also_paths(&also) {
                 anyhow::bail!("{e}");
             }
@@ -71,7 +77,7 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
             if uncounted {
                 crate::commands::loop_cmd::note_gate_uncounted(&evidence);
             }
-            let mut body = json!({ "instruction": instruction, "file": file, "evidence": evidence, "fast": fast, "isolate": false, "also": also, "uncounted": uncounted });
+            let mut body = json!({ "instruction": instruction, "file": file, "evidence": evidence, "fast": fast, "isolate": false, "also": also, "uncounted": uncounted, "include_dirty": include_dirty });
             if let Some(m) = model {
                 body["model"] = json!(m);
             }
