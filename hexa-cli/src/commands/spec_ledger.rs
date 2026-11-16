@@ -1,4 +1,4 @@
-//! `hexa spec check | accept | seal | verify` — an ADR's decisions, held to
+//! `hexa spec check | accept | seal | red | amend | verify` — an ADR's decisions, held to
 //! the spec that states them as behaviour (ADR-2610221540).
 //!
 //! The coverage rule is the domain's, reached through `hexa_core::ports::spec`.
@@ -291,6 +291,9 @@ pub fn accept(adr: &str, by: Option<&str>) -> anyhow::Result<()> {
     let root = std::env::current_dir()?;
     let a = find(&root, adr)?;
     let (text, mut spec) = load_text(&root, &a.id)?.ok_or_else(|| anyhow::anyhow!("{} has no spec to accept", a.id))?;
+    // A spec accepted here could never be sealed (ADR-2611161600 §2).
+    require_a_rust_project(&root, &a.id, "`hexa spec accept`")?;
+    require_committed(&root, &a.id)?;
 
     if !print_coverage(&a, &spec, is_alt(&text)) {
         anyhow::bail!("{}: the spec does not cover the decision; accept a complete one", a.id);
@@ -303,18 +306,20 @@ pub fn accept(adr: &str, by: Option<&str>) -> anyhow::Result<()> {
         },
         || std::env::var("USER").ok(),
     )?;
-    let previous = accepted_at_head(&root, &a.id);
+    let previous = last_accepted(&root, &a.id);
     if record_acceptance(&mut spec, by.clone(), previous.as_ref()) {
         let unbound: Vec<&str> = spec.specs.iter().filter(|s| s.test.is_none()).map(|s| s.id.as_str()).collect();
         if previous.is_some() && !unbound.is_empty() {
             println!(
                 "  {} {} changed where {} changed: those lose their tests, and the files that held them their seals; \
-                 every other scenario keeps its proof. Run `hexa spec tests {} --only {}`",
+                 every other scenario keeps its proof. Run `hexa spec tests {} --only {}`, or commit each amended test \
+                 failing and run `hexa spec red {} <commit> --test <scenario>=<file>.rs::<fn>`",
                 "!".yellow(),
                 a.id,
                 unbound.join(", "),
                 a.id,
-                unbound.join(",")
+                unbound.join(","),
+                a.id
             );
         } else {
             println!(
@@ -370,18 +375,67 @@ fn record_acceptance(spec: &mut Spec, by: String, previous: Option<&Spec>) -> bo
     changed && bound
 }
 
-/// The spec as last accepted and committed, if HEAD holds one whose
-/// acceptance still matches its content: what a re-acceptance compares
-/// against (ADR-2610281628 §1).
-fn accepted_at_head(root: &Path, id: &str) -> Option<Spec> {
-    let out = std::process::Command::new("git")
-        .args(["show", &format!("HEAD:{SPECS}/{id}.json")])
+/// The spec file's path from the repository root, as git names it.
+fn spec_rel(root: &Path, id: &str) -> String {
+    let p = spec_path(root, id);
+    p.strip_prefix(root).unwrap_or(&p).to_string_lossy().replace('\\', "/")
+}
+
+/// The spec at `rev`, if that commit holds it and it parses.
+fn spec_at(root: &Path, rev: &str, rel: &str) -> Option<Spec> {
+    let out = std::process::Command::new("git").args(["show", &format!("{rev}:{rel}")]).current_dir(root).output().ok()?;
+    serde_json::from_slice(&out.stdout).ok().filter(|_| out.status.success())
+}
+
+/// The commits that changed the spec file, newest first, at most `limit`.
+fn spec_revisions(root: &Path, rel: &str, limit: usize) -> Vec<String> {
+    std::process::Command::new("git")
+        .args(["log", "--format=%H", &format!("-{limit}"), "--", rel])
         .current_dir(root)
         .output()
-        .ok()?;
-    let spec: Spec = serde_json::from_slice(&out.stdout).ok().filter(|_| out.status.success())?;
-    acceptance_holds(&spec).ok()?;
-    Some(spec)
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// HEAD holds the spec and a person's acceptance of it as it stands there.
+fn accepted_at_head(root: &Path, id: &str) -> bool {
+    spec_at(root, "HEAD", &spec_rel(root, id)).is_some_and(|s| acceptance_holds(&s).is_ok())
+}
+
+/// The spec as last accepted in history: the newest committed version whose
+/// acceptance still matches its content. What a re-acceptance compares
+/// against (ADR-2610281628 §1). Not only HEAD's: an amendment commits the
+/// edited scenarios before a person re-accepts them (ADR-2611161600 §1),
+/// and that commit holds no acceptance that matches.
+fn last_accepted(root: &Path, id: &str) -> Option<Spec> {
+    let rel = spec_rel(root, id);
+    spec_revisions(root, &rel, 200).iter().find_map(|rev| spec_at(root, rev, &rel).filter(|s| acceptance_holds(s).is_ok()))
+}
+
+/// An acceptance binds text a commit holds (ADR-2611161600 §1). A spec that
+/// is untracked, or modified while HEAD holds no acceptance of it, is refused.
+/// A re-acceptance of an edited spec is not: its predecessor is in HEAD and
+/// only the changed scenarios lose their proof.
+fn require_committed(root: &Path, id: &str) -> anyhow::Result<()> {
+    let rel = spec_rel(root, id);
+    let git = |args: &[&str]| std::process::Command::new("git").args(args).current_dir(root).output();
+    let tracked = git(&["ls-files", "--error-unmatch", "--", &rel])?;
+    if !tracked.status.success() {
+        anyhow::bail!(
+            "{id}: accept refused: {rel} is untracked, so no commit holds the text being accepted. \
+             `git add {rel}` and `git commit` it, then accept"
+        );
+    }
+    let same = git(&["diff", "--quiet", "HEAD", "--", &rel])?;
+    if !same.status.success() && !accepted_at_head(root, id) {
+        anyhow::bail!(
+            "{id}: accept refused: {rel} is modified and HEAD holds no acceptance of it, so no commit holds the text \
+             being accepted. `git add {rel}` and `git commit` it, then accept"
+        );
+    }
+    Ok(())
 }
 
 /// Who accepts: `--by` if given (a blank one is refused, not replaced), else
@@ -480,7 +534,6 @@ pub async fn tests(
     red_at: Option<String>,
     replace: bool,
     because: Option<String>,
-    keep_red: bool,
 ) -> anyhow::Result<()> {
     let root = std::env::current_dir()?;
     let a = find(&root, adr)?;
@@ -505,7 +558,7 @@ pub async fn tests(
         }
         None
     };
-    let options = hexa_exec::spec_author::TestOptions { red_at, replace: replace.clone(), only: None, because: None, keep_red };
+    let options = hexa_exec::spec_author::TestOptions { red_at, replace: replace.clone(), only: None, because: None };
     let model = model_for(model, "t2")?;
     require_a_completion_path(&root, "`hexa spec tests`", &model)?;
     let path_env = gate_path(
@@ -518,13 +571,10 @@ pub async fn tests(
         Ok(g) => g,
         Err(e) => {
             // A generation refused for tests that already pass is the guard
-            // gap: say so, count it, and name the way to keep the red ones.
+            // gap: say so and count it.
             if e.contains("passes before the code exists") {
                 if let Some(g) = hexa_core::ports::guide::find("guard-test-is-a-mirror") {
                     super::gap::hit(&g, &root);
-                }
-                if options.red_at.is_none() && !options.keep_red && options.only.is_none() {
-                    eprintln!("  `--keep-red` keeps the tests that fail first and reports the passing ones as guards");
                 }
             }
             anyhow::bail!(e);
@@ -657,18 +707,15 @@ pub async fn reprove(
     );
     println!("{} {} {} on {}", "\u{2b21} spec tests".cyan().bold(), a.id, only.join(", "), model);
     let options =
-        hexa_exec::spec_author::TestOptions { red_at, replace: None, only: Some(only.to_vec()), because: because.clone(), keep_red: false };
+        hexa_exec::spec_author::TestOptions { red_at, replace: None, only: Some(only.to_vec()), because: because.clone() };
     let g = match hexa_exec::generate_spec_tests(&model, &root, &spec, Path::new(krate), &path_env, &options).await {
         Ok(g) => g,
         Err(e) => {
             // A generation refused for tests that already pass is the guard
-            // gap: say so, count it, and name the way to keep the red ones.
+            // gap: say so and count it.
             if e.contains("passes before the code exists") {
                 if let Some(g) = hexa_core::ports::guide::find("guard-test-is-a-mirror") {
                     super::gap::hit(&g, &root);
-                }
-                if options.red_at.is_none() && !options.keep_red && options.only.is_none() {
-                    eprintln!("  `--keep-red` keeps the tests that fail first and reports the passing ones as guards");
                 }
             }
             anyhow::bail!(e);
@@ -1319,28 +1366,14 @@ async fn prove_red(root: &Path, path_env: &str, a: &Adr, spec: &Spec) -> anyhow:
         // Under the ignored target/, beside the shared build. The path is this
         // run's own, so a concurrent `--prove` never removes it mid-test; a
         // stale one at this path (a reused pid) is removed first.
-        let wt = prove_worktree(&target, &sha);
-        let _ = std::process::Command::new("git")
-            .args(["worktree", "remove", "--force"])
-            .arg(&wt)
-            .current_dir(root)
-            .output();
-        let add = std::process::Command::new("git")
-            .args(["worktree", "add", "-q", "--detach"])
-            .arg(&wt)
-            .arg(&sha)
-            .current_dir(root)
-            .output()?;
-        if !add.status.success() {
-            unproven += scenarios.len();
-            println!(
-                "  {} {} red commit {sha} cannot be checked out: {}",
-                "\u{2717}".red(),
-                a.id,
-                String::from_utf8_lossy(&add.stderr).trim()
-            );
-            continue;
-        }
+        let wt = match checkout_at(root, &target, &sha) {
+            Ok(wt) => wt,
+            Err(e) => {
+                unproven += scenarios.len();
+                println!("  {} {} red commit {sha} cannot be checked out: {e}", "\u{2717}".red(), a.id);
+                continue;
+            }
+        };
         // A test proved red at a commit from before it was written
         // (`--red-at`, ADR-2610281628 §3) is checked there as written: the
         // file is added to that tree, as the red check added it.
@@ -1377,13 +1410,174 @@ async fn prove_red(root: &Path, path_env: &str, a: &Adr, spec: &Spec) -> anyhow:
                 println!("  {} {} {} {}", "\u{2717}".red(), a.id, sid, what);
             }
         }
-        let _ = std::process::Command::new("git")
-            .args(["worktree", "remove", "--force"])
-            .arg(&wt)
-            .current_dir(root)
-            .output();
+        remove_checkout(root, &wt);
     }
     Ok(unproven)
+}
+
+/// `hexa spec red <ADR> <commit> [--test <S>=<file>::<fn>]…` — record the
+/// commit a test was red at, only after watching it fail there. Each `--test`
+/// binds a pending scenario: one a re-acceptance left without a test because
+/// a person changed it. With none, every tested scenario lacking a red commit
+/// is checked. A test file whose seal the re-acceptance dropped gets back the
+/// seal its last record held, so the edit since is reviewed through
+/// `hexa spec amend` (gap `spec-amend-scenario-path`).
+pub async fn red(adr: &str, commit: &str, tests: &[String]) -> anyhow::Result<()> {
+    let root = std::env::current_dir()?;
+    let a = find(&root, adr)?;
+    let id = a.id.as_str();
+    let (read, mut spec) = load_text(&root, id)?.ok_or_else(|| anyhow::anyhow!("{id} has no spec"))?;
+    if let Err(why) = acceptance_holds(&spec) {
+        anyhow::bail!("{id}: {why}. A red commit is recorded against an accepted spec");
+    }
+    let git = |args: &[&str]| -> Option<String> {
+        let o = std::process::Command::new("git").args(args).current_dir(&root).output().ok()?;
+        o.status.success().then(|| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    let sha = git(&["rev-parse", "--verify", "--quiet", &format!("{commit}^{{commit}}")])
+        .ok_or_else(|| anyhow::anyhow!("{id}: {commit} is not a commit"))?;
+    if git(&["merge-base", "--is-ancestor", &sha, "HEAD"]).is_none() {
+        anyhow::bail!("{id}: {commit} is not an ancestor of HEAD: a red commit is one this branch grew from");
+    }
+    let short = git(&["rev-parse", "--short", &sha]).unwrap_or_else(|| sha.clone());
+
+    // What is checked: each scenario named, with the test it is bound to.
+    let mut targets: Vec<(String, String, bool)> = Vec::new();
+    for t in tests {
+        let (sid, r) = t
+            .split_once('=')
+            .map(|(a, b)| (a.trim(), b.trim()))
+            .ok_or_else(|| anyhow::anyhow!("{id}: --test {t}: expected <scenario>=<file>.rs::<fn>"))?;
+        let s = spec
+            .specs
+            .iter()
+            .find(|s| s.id == sid)
+            .ok_or_else(|| anyhow::anyhow!("{id}: {sid} is not a scenario of this spec"))?;
+        if let Some(have) = &s.test {
+            anyhow::bail!(
+                "{id}: {sid} already has its test, {have}. A scenario's test changes through the spec: a person \
+                 re-accepts the changed scenario, which leaves it pending"
+            );
+        }
+        let Some((file, _)) = test_ref(r).filter(|(_, f)| !f.is_empty() && !f.ends_with("::")) else {
+            anyhow::bail!("{id}: --test {t}: {r} is not <file>.rs::<fn>");
+        };
+        if !Path::new(file).iter().any(|c| c == "tests") {
+            anyhow::bail!("{id}: {file} is not under a tests/ directory; a scenario's test is sealed, so it lives there");
+        }
+        if targets.iter().any(|(s, _, _)| s == sid) {
+            anyhow::bail!("{id}: {sid} is named twice");
+        }
+        targets.push((sid.to_string(), r.to_string(), true));
+    }
+    if tests.is_empty() {
+        targets = spec
+            .specs
+            .iter()
+            .filter(|s| s.red_commit(&spec).is_none())
+            .filter_map(|s| s.test.clone().map(|t| (s.id.clone(), t, false)))
+            .collect();
+        if targets.is_empty() {
+            anyhow::bail!(
+                "{id}: nothing to record: every tested scenario has a red commit. Bind a pending one with --test <scenario>=<file>.rs::<fn>"
+            );
+        }
+    }
+
+    println!("{} {id} at {short}: each named test must fail there", "\u{2b21} spec red".cyan().bold());
+    let path_env = gate_path(
+        std::env::var_os("HOME").map(PathBuf::from).as_deref(),
+        &std::env::var("PATH").unwrap_or_default(),
+        &|p| p.is_dir(),
+    );
+    let target = root.join("target/hexa-prove");
+    let wt = checkout_at(&root, &target, &sha).map_err(|e| anyhow::anyhow!("{id}: {short} cannot be checked out: {e}"))?;
+    let mut not_red: Vec<String> = Vec::new();
+    for (sid, r, _) in &targets {
+        // The commit must hold the test as written: nothing is copied in.
+        let why = match run_test_alone(&wt, &path_env, r, Some(&target)).await {
+            TestRun::Failed(_) => None,
+            TestRun::Broken { compile: true, .. } => None,
+            TestRun::Passed | TestRun::Ambiguous(_) => Some(format!("passes at {short}, so it was not written first")),
+            TestRun::Broken { compile: false, tail } => {
+                Some(format!("never ran at {short}: {}", tail.lines().last().unwrap_or("")))
+            }
+            TestRun::NotFound(w) => Some(format!("not at {short}: {w}")),
+            TestRun::Vacuous => Some(format!("ran 0 tests at {short}")),
+            TestRun::NotProvenHere(w) => Some(format!("not proven here at {short}: {w}")),
+        };
+        match why {
+            None => println!("  {} {id} {sid} red at {short} — {}", "\u{2713}".green(), r.dimmed()),
+            Some(w) => {
+                println!("  {} {id} {sid} {w} — {r}", "\u{2717}".red());
+                not_red.push(format!("{sid} {w}"));
+            }
+        }
+    }
+    remove_checkout(&root, &wt);
+    if !not_red.is_empty() {
+        anyhow::bail!("{id}: nothing recorded: {}", not_red.join("; "));
+    }
+
+    let mut files: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for (sid, r, bind) in &targets {
+        if let Some(s) = spec.specs.iter_mut().find(|s| &s.id == sid) {
+            if *bind {
+                s.test = Some(r.clone());
+            }
+            s.red = Some(short.clone());
+        }
+        if let Some((f, _)) = test_ref(r) {
+            files.insert(f.to_string());
+        }
+    }
+    let unsealed: Vec<String> = files.into_iter().filter(|f| !spec.sealed.contains_key(f)).collect();
+    for f in &unsealed {
+        match last_seal(&root, id, f) {
+            Some(hash) => {
+                let now = std::fs::read(root.join(f)).ok().map(|b| sha256_hex(&b));
+                println!("  {} {id} seal of {f} put back at {}…, its last record", "\u{2713}".green(), &hash[..hash.len().min(12)]);
+                if now.as_deref() != Some(hash.as_str()) {
+                    println!(
+                        "  {} {f} changed since that seal: review and record the edit with `hexa spec amend {id} --file {f} --reason \"<why>\"`",
+                        "!".yellow()
+                    );
+                }
+                spec.sealed.insert(f.clone(), hash);
+            }
+            None => println!("  {} {f} has never been sealed: `hexa spec seal {id}`", "!".yellow()),
+        }
+    }
+    save_unchanged(&root, &spec, &read)?;
+    println!("\n  Commit {}.", spec_rel(&root, id));
+    Ok(())
+}
+
+/// The hash the newest committed version of the spec recorded for `file`.
+fn last_seal(root: &Path, id: &str, file: &str) -> Option<String> {
+    let rel = spec_rel(root, id);
+    spec_revisions(root, &rel, 200).iter().find_map(|rev| spec_at(root, rev, &rel).and_then(|s| s.sealed.get(file).cloned()))
+}
+
+/// A detached worktree of `sha` under `target`, at a path no other run uses.
+fn checkout_at(root: &Path, target: &Path, sha: &str) -> Result<PathBuf, String> {
+    let wt = prove_worktree(target, sha);
+    remove_checkout(root, &wt);
+    let add = std::process::Command::new("git")
+        .args(["worktree", "add", "-q", "--detach"])
+        .arg(&wt)
+        .arg(sha)
+        .current_dir(root)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !add.status.success() {
+        return Err(String::from_utf8_lossy(&add.stderr).trim().to_string());
+    }
+    Ok(wt)
+}
+
+fn remove_checkout(root: &Path, wt: &Path) {
+    let _ = std::process::Command::new("git").args(["worktree", "remove", "--force"]).arg(wt).current_dir(root).output();
 }
 
 /// A worktree path no other live run uses: the red sha alone is shared by

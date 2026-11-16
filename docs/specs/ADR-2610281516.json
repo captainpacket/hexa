@@ -14,7 +14,7 @@
     "sha256": "cdaef0dffb4b9a31c700de5e9f364c637eaa75a985b9707c916c36a39f9b9a30"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2610281516_spec.rs": "876765e5dc7cb33a7bd1ff4b3b8f17dc06b6e009aae26bc921537917584617d9"
+    "hexa-cli/tests/adr_2610281516_spec.rs": "cba4e268edf763a67e5ced7275ffca9802579ca6d91599cffbe7e730936fd88a"
   },
   "red": "02c6cea",
   "specs": [
@@ -325,6 +325,15 @@
       "from": "5d44c3e50c21b2ad8c1f9d219538fc0512a60911fefea17cd32a32a8672727c6",
       "reason": "add the lint header hexa gives generated test files, #![allow(unused, clippy::all)], so CI clippy -D warnings passes; no test changed",
       "to": "876765e5dc7cb33a7bd1ff4b3b8f17dc06b6e009aae26bc921537917584617d9"
+    },
+    {
+      "at": "2026-11-16T15:32:52.141429+00:00",
+      "base_commit": "20aefdef6b30b8e47b0506cd61380bab0de1af3e",
+      "by": "gary (run by Claude on gary's instruction)",
+      "file": "hexa-cli/tests/adr_2610281516_spec.rs",
+      "from": "876765e5dc7cb33a7bd1ff4b3b8f17dc06b6e009aae26bc921537917584617d9",
+      "reason": "fixture: the draft is committed before it is accepted (ADR-2611161600 §1, §4)",
+      "to": "cba4e268edf763a67e5ced7275ffca9802579ca6d91599cffbe7e730936fd88a"
     }
   ]
 }

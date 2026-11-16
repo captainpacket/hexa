@@ -105,6 +105,16 @@ fn write_spec(root: &Path, scenarios: &[String], extra: &str) {
         ),
     )
     .unwrap();
+    // An acceptance binds committed text (ADR-2611161600 §1): the spec is
+    // committed as written, before anyone accepts it.
+    let spec = format!("docs/specs/{}.json", id());
+    for args in [
+        &["add", "--", spec.as_str()][..],
+        &["-c", "user.name=t", "-c", "user.email=t@x", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "spec"][..],
+    ] {
+        let ok = Command::new("git").args(args).current_dir(root).output().expect("git runs").status.success();
+        assert!(ok, "git {args:?}");
+    }
 }
 
 fn project(status: &str, n: usize) -> tempfile::TempDir {

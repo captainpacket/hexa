@@ -1,10 +1,12 @@
-//! `keep_red`: when some generated tests already pass before the code, the
+//! When some generated tests already pass before the code, the
 //! ones that fail first are kept and the passing ones are reported as guards.
 //!
-//! By default a green test refuses the whole generation (ADR-2610221540 S15,
-//! sealed in a_spec_is_drafted_and_its_tests_generated_red.rs). That threw
-//! away every test that did fail first. `keep_red` is the explicit opt-in.
-//! The helpers are copied from that sealed file, which cannot be extended.
+//! Refusing the whole generation for a green test threw away every test that
+//! did fail first. Keeping the red ones is the default for red at HEAD
+//! (ADR-2611161600 §3); with an earlier red commit a green test still
+//! refuses it (ADR-2610281442 §3).
+//! The helpers are copied from a_spec_is_drafted_and_its_tests_generated_red.rs,
+//! which is sealed and cannot be extended.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -136,8 +138,9 @@ const TESTS_RED: &str = "```rust\n\
 /// S4: five does not stay five\n#[test]\nfn five_does_not_stay_five() { assert_ne!(fx::double(5), 5); }\n```";
 
 
+/// No option set: red at HEAD, the default.
 fn options() -> hexa_exec::spec_author::TestOptions {
-    hexa_exec::spec_author::TestOptions { keep_red: true, ..Default::default() }
+    hexa_exec::spec_author::TestOptions::default()
 }
 
 #[tokio::test]
@@ -178,6 +181,23 @@ async fn keep_red_still_refuses_a_generation_whose_every_test_is_green() {
         .await
         .unwrap_err();
     assert!(err.contains("passes") && err.contains("nothing kept"), "a file of guards tests nothing: {err}");
+    assert!(!r.join("tests/adr_2701010000_spec.rs").exists(), "nothing is left in the tree");
+    assert_eq!(git(&r, &["rev-parse", "HEAD"]), head, "nothing is committed");
+}
+
+#[tokio::test]
+async fn a_green_test_still_refuses_the_generation_when_red_is_proved_at_a_named_commit() {
+    let (_t, r) = repo();
+    let spec = accepted(&r);
+    let guard = TESTS_RED.replace("assert_ne!(fx::double(1), 1)", "let _ = 1");
+    let (double, _) = Double::new(&[guard]);
+    let path_env = std::env::var("PATH").unwrap_or_default();
+    let head = git(&r, &["rev-parse", "HEAD"]);
+    let opts = hexa_exec::spec_author::TestOptions { red_at: Some(head.clone()), ..Default::default() };
+    let err = hexa_exec::spec_author::generate_tests_with(&double, "a-local-model", &r, &spec, Path::new("."), &path_env, &opts)
+        .await
+        .unwrap_err();
+    assert!(err.contains("passes"), "a green test refuses a generation proved at an earlier commit: {err}");
     assert!(!r.join("tests/adr_2701010000_spec.rs").exists(), "nothing is left in the tree");
     assert_eq!(git(&r, &["rev-parse", "HEAD"]), head, "nothing is committed");
 }

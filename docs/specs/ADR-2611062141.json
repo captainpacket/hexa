@@ -14,7 +14,7 @@
     "sha256": "741dd6f2916620e2dd281ad2db7570b9e79d1e31eaba1f6046c86742e2807f8a"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611062141_spec.rs": "4bde805b1cc82150160c55861a7ca1686bbbd0c37d5f483865f7ea3f13e8df41"
+    "hexa-cli/tests/adr_2611062141_spec.rs": "0246e4ff0cee293e0f7571ffbe88e74c14317c291907fbf52773530321ad4544"
   },
   "red": "40df867",
   "specs": [
@@ -317,6 +317,17 @@
       "when": "The user runs `hexa spec seal ADR-X`.",
       "then": "Seal refuses, and `sealed[file]` in the spec JSON is unchanged. Pointing to amend does not make seal re-seal the file.",
       "test": "hexa-cli/tests/adr_2611062141_spec.rs::part_3::s25_seal_still_refuses_to_reseal_changed_file"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-16T15:32:52.419419+00:00",
+      "base_commit": "40df8677c657b327e119c30f69641d2b49519251",
+      "by": "gary (run by Claude on gary's instruction)",
+      "file": "hexa-cli/tests/adr_2611062141_spec.rs",
+      "from": "4bde805b1cc82150160c55861a7ca1686bbbd0c37d5f483865f7ea3f13e8df41",
+      "reason": "fixture: the repositories carry a Cargo.toml, since spec accept refuses a project without one (ADR-2611161600 §2, §4)",
+      "to": "0246e4ff0cee293e0f7571ffbe88e74c14317c291907fbf52773530321ad4544"
     }
   ]
 }

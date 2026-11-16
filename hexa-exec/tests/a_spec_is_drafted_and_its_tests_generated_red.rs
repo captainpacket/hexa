@@ -194,19 +194,27 @@ async fn tests_that_fail_first_are_committed_and_their_commit_is_red() {
 }
 
 #[tokio::test]
-async fn a_generation_with_a_test_green_before_the_code_is_rejected() {
+async fn a_test_green_before_the_code_is_rejected_and_the_red_ones_kept() {
     let (_t, r) = repo();
     let spec = accepted(&r);
     let vacuous = TESTS_RED.replace("assert_ne!(fx::double(1), 1)", "let _ = 1");
     let (double, _) = Double::new(&[vacuous]);
     let path_env = std::env::var("PATH").unwrap_or_default();
     let head = git(&r, &["rev-parse", "HEAD"]);
-    let err = hexa_exec::spec_author::generate_tests(&double, "a-local-model", &r, &spec, Path::new("."), &path_env)
+    let g = hexa_exec::spec_author::generate_tests(&double, "a-local-model", &r, &spec, Path::new("."), &path_env)
         .await
-        .unwrap_err();
-    assert!(err.contains("S2") && err.contains("passes"), "a test green before the code tests nothing: {err}");
-    assert!(!r.join("tests/adr_2701010000_spec.rs").exists(), "nothing is left in the tree");
-    assert_eq!(git(&r, &["rev-parse", "HEAD"]), head, "nothing is committed");
+        .expect("the tests that fail are kept");
+    assert!(
+        g.guards.iter().any(|w| w.contains("S2") && w.contains("passes")),
+        "a test green before the code is rejected as testing nothing: {:?}",
+        g.guards
+    );
+    assert!(!g.refs.contains_key("S2"), "its scenario stays pending: {:?}", g.refs);
+    assert_eq!(g.refs.len(), 3, "the tests that fail are kept: {:?}", g.refs);
+    let body = std::fs::read_to_string(r.join(&g.file)).unwrap();
+    assert!(!body.contains("fn one_does_not_stay_one("), "the green test is not in the kept file:\n{body}");
+    assert_ne!(git(&r, &["rev-parse", "HEAD"]), head, "the red tests are committed");
+    assert_eq!(g.red, git(&r, &["rev-parse", "--short", "HEAD"]));
 }
 
 
