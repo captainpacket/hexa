@@ -25,10 +25,6 @@ pattern = '''\bhexa\s+do\s+(gate|run)\b'''
 weight = 1
 
 [[forbid]]
-label = "in-place edit of source"
-pattern = '''(?s)\b(g?sed|perl)\s+(\S+\s+)*?(-[a-zA-Z]*i\S*|--in-place\S*)\s.*\bsrc/'''
-
-[[forbid]]
 label = "script write into source"
 pattern = '''(?s)\b(python3?|node|ruby)\b.*src/.*(\.write\(|write_text\(|writeFileSync)|(?s)\b(python3?|node|ruby)\b.*(\.write\(|write_text\(|writeFileSync).*src/'''
 

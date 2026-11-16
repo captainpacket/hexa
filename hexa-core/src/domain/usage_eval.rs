@@ -532,7 +532,8 @@ pub fn score(s: &Scenario, t: &Transcript, outcome: Option<bool>, is_match: &dyn
     }
     let total: f64 = expected.iter().map(|h| h.weight).sum();
     let got: f64 = expected.iter().filter(|h| h.matched).map(|h| h.weight).sum();
-    let process = if total > 0.0 { got / total } else { 1.0 };
+    // `+ 0.0` turns the -0.0 an empty sum gives into 0.0, so nothing matched reads "0.00"
+    let process = if total > 0.0 { got / total + 0.0 } else { 1.0 };
 
     Score {
         outcome,
@@ -625,5 +626,27 @@ mod tests {
             budget_usd: 1.0,
         };
         assert!(s.validate().unwrap_err().contains("names no earlier entry"));
+    }
+
+    /// A run that matched nothing scores 0, not -0: Rust sums an empty run of floats to
+    /// -0.0, which the report printed as "-0.00".
+    #[test]
+    fn nothing_matched_scores_a_plain_zero() {
+        let s = Scenario {
+            prompt: "p".into(),
+            setup: vec![],
+            expect_verbs: vec![Expect { id: None, pattern: Some("never-matches".into()), text: None, weight: 1.0, before_first_edit: false, after: None }],
+            forbid: vec![],
+            outcome: "true".into(),
+            outcome_fails_at_start: false,
+            source: src(),
+            gate_pattern: None,
+            max_turns: 1,
+            budget_usd: 1.0,
+        };
+        let t = parse_transcript("{\"type\":\"system\"}\n").unwrap();
+        let sc = score(&s, &t, Some(true), &|_, _| false);
+        assert_eq!(sc.process, 0.0);
+        assert!(sc.process.is_sign_positive(), "a plain zero, not -0.0: {}", format!("{:.2}", sc.process));
     }
 }
