@@ -1018,11 +1018,13 @@ pub async fn generate_tests_with(
                         Err(Rejection::Final(why))
                     }
                     Ok(RedCheck::Rejected { green, .. }) if green.is_empty() => Ok(red_commit),
-                    // A test green before the code refuses the generation,
-                    // naming it (ADR-2610221540 S15), and always when red is
-                    // proved at an earlier commit (ADR-2610281442 §3).
-                    // `--keep-red` at HEAD keeps the red ones instead.
-                    Ok(RedCheck::Rejected { green, .. }) if base.is_some() || !options.keep_red => {
+                    // A test green before the code is rejected as testing
+                    // nothing (ADR-2610221540 S15). Proved at an earlier
+                    // commit, or re-proving named scenarios, it refuses the
+                    // generation (ADR-2610281442 §3); at HEAD the red ones
+                    // are kept and it is set aside as a guard
+                    // (ADR-2611161600 §3).
+                    Ok(RedCheck::Rejected { green, .. }) if base.is_some() => {
                         Err(Rejection::Final(green.into_iter().map(|(_, r)| r).collect()))
                     }
                     Ok(RedCheck::Rejected { green, .. }) => Err(Rejection::Green(green)),
@@ -1266,11 +1268,6 @@ pub struct TestOptions {
     pub only: Option<Vec<String>>,
     /// Why they are re-proved; the writer is told.
     pub because: Option<String>,
-    /// Keep the tests that fail first when others already pass, rather than
-    /// refusing the generation: the passing ones are left out and reported
-    /// as guards, their scenarios pending. Off by default, where a green
-    /// test refuses the whole generation (ADR-2610221540 S15).
-    pub keep_red: bool,
 }
 
 #[derive(Debug, Clone)]
