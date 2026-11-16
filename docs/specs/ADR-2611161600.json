@@ -6,6 +6,10 @@
     "by": "gary",
     "sha256": "5598bf838b349d0df7408b1473e5ce6ac2dfb8bdb7bde941e896a2789a896b8c"
   },
+  "sealed": {
+    "hexa-cli/tests/a_verb_reports_only_the_success_it_earned.rs": "71fd053cdb0b43aaaaf8d339e327e9f335754960796d99ec3bc5682cef7c859d",
+    "hexa-cli/tests/an_amended_spec_keeps_its_unchanged_proof.rs": "96e97e93027df65605c7b08ca171d7c213305328437384f30fd886dee3c02ea4"
+  },
   "specs": [
     {
       "id": "S01",
@@ -27,7 +31,9 @@
       "description": "An untracked spec is refused",
       "given": "a spec file git does not track",
       "when": "`hexa spec accept <ADR>` runs",
-      "then": "it exits non-zero, says the spec is untracked, names `git add` and `git commit` as the step to take, and leaves the spec file unchanged"
+      "then": "it exits non-zero, says the spec is untracked, names `git add` and `git commit` as the step to take, and leaves the spec file unchanged",
+      "test": "hexa-cli/tests/a_verb_reports_only_the_success_it_earned.rs::spec_accept_refuses_an_untracked_spec_and_names_the_commit_to_make",
+      "red": "de4be6f"
     },
     {
       "id": "S03",
@@ -38,7 +44,9 @@
       "description": "A modified spec HEAD holds no acceptance of is refused",
       "given": "a tracked spec file edited in the working tree, where HEAD's version carries no acceptance that matches it",
       "when": "`hexa spec accept <ADR>` runs",
-      "then": "it exits non-zero, says the spec is modified, names `git commit`, and leaves the spec file unchanged"
+      "then": "it exits non-zero, says the spec is modified, names `git commit`, and leaves the spec file unchanged",
+      "test": "hexa-cli/tests/a_verb_reports_only_the_success_it_earned.rs::spec_accept_refuses_a_modified_spec_that_head_holds_no_acceptance_of",
+      "red": "de4be6f"
     },
     {
       "id": "S04",
@@ -60,7 +68,9 @@
       "description": "Accept is refused with no Cargo.toml",
       "given": "a project with a spec and no Cargo.toml at its root",
       "when": "`hexa spec accept <ADR>` runs",
-      "then": "it exits non-zero with the same message as `spec draft`, naming Cargo.toml and that tests are generated for Rust only, and leaves the spec file unchanged"
+      "then": "it exits non-zero with the same message as `spec draft`, naming Cargo.toml and that tests are generated for Rust only, and leaves the spec file unchanged",
+      "test": "hexa-cli/tests/a_verb_reports_only_the_success_it_earned.rs::spec_accept_refuses_a_project_with_no_cargo_toml",
+      "red": "de4be6f"
     },
     {
       "id": "S06",
@@ -82,7 +92,9 @@
       "description": "At HEAD the red tests are kept and the green ones set aside as guards",
       "given": "an accepted spec and a generation in which one test passes before the code and the others fail",
       "when": "`hexa spec tests <ADR>` runs with no option, proving red at HEAD",
-      "then": "the failing tests are committed and their commit is red, the passing test is left out of the file and reported as a guard, and its scenario stays pending"
+      "then": "the failing tests are committed and their commit is red, the passing test is left out of the file and reported as a guard, and its scenario stays pending",
+      "test": "hexa-cli/tests/a_verb_reports_only_the_success_it_earned.rs::spec_tests_keeps_the_red_tests_by_default_and_has_no_keep_red_flag",
+      "red": "de4be6f"
     },
     {
       "id": "S08",
@@ -115,7 +127,9 @@
       "description": "The amended fixtures are recorded and verify",
       "given": "the specs of ADR-2610221540, ADR-2610281516 and ADR-2611062141 after their fixtures commit the spec before accepting it and the ADR-2611062141 fixture carries a Cargo.toml",
       "when": "`hexa spec verify` runs on each",
-      "then": "every scenario passes, none is pending, and each changed sealed file's seal is carried by a recorded amendment"
+      "then": "every scenario passes, none is pending, and each changed sealed file's seal is carried by a recorded amendment",
+      "test": "hexa-cli/tests/an_amended_spec_keeps_its_unchanged_proof.rs::spec_red_records_a_commit_at_which_the_named_tests_fail_and_the_amended_spec_verifies",
+      "red": "de4be6f"
     },
     {
       "id": "S11",
