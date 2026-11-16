@@ -435,6 +435,9 @@ fn record_run_gate_in(
                     obj.insert("gate_uncounted".to_string(), serde_json::json!(false));
                 }
                 obj.insert("gate".to_string(), serde_json::json!(gate));
+                // When the gate was recorded or re-confirmed: the pre-edit and
+                // pre-bash hooks hold it to the current task (ADR-2611160730 §4).
+                obj.insert("gate_at".to_string(), serde_json::json!(chrono::Utc::now().to_rfc3339()));
                 obj.insert("stage".to_string(), serde_json::json!(stage));
                 if let Some(f) = fast_gate {
                     obj.insert("fast_gate".to_string(), serde_json::json!(f));
@@ -1061,7 +1064,17 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
             if command.is_empty() {
                 anyhow::bail!("a gate is a command; it cannot be empty");
             }
-            update_loop(&cwd, serde_json::json!({ "gate": command, "gate_uncounted": uncounted, "stage": "gate" }))
+            // `gate_at`: re-running this re-confirms the gate for the current
+            // task, which the hooks require (ADR-2611160730 §4).
+            update_loop(
+                &cwd,
+                serde_json::json!({
+                    "gate": command,
+                    "gate_uncounted": uncounted,
+                    "gate_at": chrono::Utc::now().to_rfc3339(),
+                    "stage": "gate"
+                }),
+            )
                 .map_err(|e| anyhow::anyhow!(e))?;
             println!("{} {}", "\u{2b21}".green(), status_line(&cwd));
             if uncounted {

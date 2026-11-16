@@ -49,6 +49,7 @@ pub async fn run(
         lang: lang.to_string(),
         no_claude_md: false,
         force: false,
+        strict: false,
     };
 
     // init::run prints its own progress; if the project is already initialized
