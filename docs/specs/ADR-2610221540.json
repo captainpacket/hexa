@@ -239,7 +239,7 @@
       "description": "A generated test that passes before any implementation is rejected",
       "given": "a generated test that asserts nothing about the port",
       "when": "`hexa spec tests` runs it against the unimplemented port",
-      "then": "the test is rejected as testing nothing",
+      "then": "the test is rejected as testing nothing, and the tests that fail are kept",
       "test": "hexa-exec/tests/a_spec_is_drafted_and_its_tests_generated_red.rs::a_generation_with_a_test_green_before_the_code_is_rejected",
       "red": "8c3d0cf"
     },
