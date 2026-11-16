@@ -17,7 +17,7 @@ natural language to a verb.
 | build a whole component by hand | `hexa build '<challenge>' --target <dir> --gate '<cmd>'` | Clean tree, and no one else committing here: it commits every file that changes while it runs |
 | eyeball a diff for bugs | `hexa harden <path> --gate '<cmd>'` | Clean tree, and no other session in this checkout: it resets and reverts as it fixes. Use a worktree |
 | assert "the architecture is fine" | `hexa analyze .` | None; it writes nothing |
-| delete code you *think* is dead | `hexa graph consumers <path>` | `hexa graph build` first: it reads the saved `graph-out/graph.json` |
+| delete code you *think* is dead | `hexa graph consumers <path>` | `hexa graph build` first: it reads the saved `.hexa/graph/graph.json` |
 | read a file before editing it blind | `hexa graph context <path>` | `hexa graph build` first, as above |
 | a lesson you will forget | `hexa memory store lesson:<topic> "<text>"` | None |
 | claim something about the repo | `hexa verify "<claim>"` | None; it reads only |

@@ -244,8 +244,7 @@ fn classify_intent(text: &str) -> TaskIntent {
         let provider = text
             .split_whitespace()
             .find(|w| {
-                w.starts_with("bazzite-")
-                    || configured.iter().any(|m| m.starts_with(*w) || w.starts_with(m.as_str()))
+                configured.iter().any(|m| m.starts_with(*w) || w.starts_with(m.as_str()))
             })
             .unwrap_or("");
         if !provider.is_empty() {
@@ -470,8 +469,8 @@ mod remote_tests {
 
     #[test]
     fn remote_detect_on_host_basic() {
-        let got = detect_on_host_suffix("nvidia-smi on bazzite");
-        assert_eq!(got, Some(("nvidia-smi".into(), "bazzite".into())));
+        let got = detect_on_host_suffix("nvidia-smi on gpu-box");
+        assert_eq!(got, Some(("nvidia-smi".into(), "gpu-box".into())));
     }
 
     #[test]
@@ -483,7 +482,7 @@ mod remote_tests {
     #[test]
     fn remote_detect_on_host_rejects_no_suffix() {
         assert_eq!(detect_on_host_suffix("run tests"), None);
-        assert_eq!(detect_on_host_suffix("on bazzite"), None); // no command
+        assert_eq!(detect_on_host_suffix("on gpu-box"), None); // no command
         assert_eq!(detect_on_host_suffix(""), None);
     }
 
@@ -572,7 +571,7 @@ mod remote_tests {
 
     #[test]
     fn classify_rejects_non_whitelisted_remote_command() {
-        let intent = classify_intent("rm -rf / on bazzite");
+        let intent = classify_intent("rm -rf / on gpu-box");
         match intent {
             TaskIntent::Rejected { command, reason } => {
                 assert_eq!(command, "rm -rf /");
@@ -602,12 +601,12 @@ mod remote_tests {
         // and the trusted_hosts list includes the target. Done by constructing
         // the variant directly rather than touching the FS.
         let intent = TaskIntent::RemoteShell {
-            host: "bazzite".into(),
+            host: "gpu-box".into(),
             command: "nvidia-smi".into(),
-            description: "Run `nvidia-smi` on bazzite".into(),
+            description: "Run `nvidia-smi` on gpu-box".into(),
         };
         if let TaskIntent::RemoteShell { host, command, .. } = intent {
-            assert_eq!(host, "bazzite");
+            assert_eq!(host, "gpu-box");
             assert_eq!(command, "nvidia-smi");
         } else {
             panic!("expected RemoteShell variant");
