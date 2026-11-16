@@ -61,6 +61,11 @@ struct SessionState {
     /// Cleared on SessionEnd or when the user approves/clears the draft.
     #[serde(default)]
     pending_workplan_draft: Option<String>,
+    /// Overlaps with other live sessions already reported to this one, as
+    /// `session|file`. The route hook says each once; repeated on every
+    /// prompt it was noise the reader learned to skip.
+    #[serde(default)]
+    reported_overlaps: Vec<String>,
 }
 
 impl SessionState {
@@ -190,34 +195,38 @@ fn enforcement_mode(project_dir: &Path) -> &'static str {
 }
 
 /// ADR-2026-04-11-0227: Check whether auto-invoking the planner on T3
-/// work-intent prompts is enabled for this project.
+/// work-intent prompts is enabled for this project. Off unless set.
 ///
 /// Precedence (highest to lowest):
-/// 1. `HEXA_AUTO_PLAN` env var — `0` disables, anything else enables
+/// 1. `HEXA_AUTO_PLAN` env var — `0`/`false` disables, anything else enables
 /// 2. `workplan.auto_invoke.enabled` in `.hexa/project.json` — bool
-/// 3. Default: `true` (opt-out, not opt-in)
+/// 3. Default: off
 ///
-/// The env var is checked first so individual shells can disable without
-/// touching the project config file (useful for one-off debugging or for
-/// CI environments that want deterministic behavior).
+/// It was on by default. The drafts it wrote were stubs holding only the
+/// prompt; they piled up untracked in `docs/workplans/drafts/`, most of them
+/// sub-agent briefs, and nobody expanded them. A project that wants them
+/// asks.
 fn auto_plan_enabled(project_dir: &Path) -> bool {
-    // Env var takes precedence
     if let Ok(val) = std::env::var("HEXA_AUTO_PLAN") {
         return val != "0" && val.to_lowercase() != "false";
     }
-
-    // Then project config
     let project_json = project_dir.join(".hexa/project.json");
-    if let Ok(content) = std::fs::read_to_string(&project_json) {
-        if let Ok(project) = serde_json::from_str::<serde_json::Value>(&content) {
-            if let Some(enabled) = project["workplan"]["auto_invoke"]["enabled"].as_bool() {
-                return enabled;
-            }
-        }
-    }
+    std::fs::read_to_string(&project_json)
+        .ok()
+        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+        .and_then(|p| p["workplan"]["auto_invoke"]["enabled"].as_bool())
+        .unwrap_or(false)
+}
 
-    // Default: enabled
-    true
+/// A prompt one agent wrote for another: a sub-agent brief or a delegated
+/// task, or any prompt submitted inside a subagent. Not a person's intent,
+/// so never drafted as a workplan.
+fn is_agent_brief(prompt: &str, payload: &serde_json::Value) -> bool {
+    let head = prompt.trim_start().to_lowercase();
+    let from_subagent = ["agent_id", "agent_type"]
+        .iter()
+        .any(|k| payload.get(*k).and_then(|v| v.as_str()).is_some_and(|v| !v.is_empty()));
+    from_subagent || head.starts_with("act as the") || head.starts_with("delegated task")
 }
 
 #[derive(Subcommand)]
@@ -327,12 +336,15 @@ async fn session_start(project_dir: &Path) -> Result<()> {
     // context. stdout is picked up as session context — never skip this.
     println!("\n{}", fingerprint_block(id, project_dir, &name).await);
     println!("{}", crate::commands::loop_cmd::status_line(project_dir));
-    for l in crate::commands::loop_cmd::awareness_lines(project_dir) {
+    for l in awareness_lines(project_dir) {
         println!("  {l}");
     }
     let mut st = SessionState::load_or_new();
     st.project = crate::commands::loop_cmd::project_name(project_dir);
     st.name = session_key();
+    // The block is printed once per session, here. The route hook reads
+    // this and stays quiet about it.
+    st.fingerprint_generated_at = Some(chrono::Utc::now().to_rfc3339());
     let _ = st.save();
 
     // Check for architecture violations
@@ -748,8 +760,8 @@ async fn pre_edit(project_dir: &Path) -> Result<()> {
                 return Ok(());
             }
 
-            // Existing hexa boundary check
-            validate_boundary_edit(project_dir, file_path)?;
+            // The layer rules, on what the edit would leave.
+            validate_boundary_edit(project_dir, file_path, &input).await?;
 
             // ADR-2609131408: another live session has edited this file.
             // Say so before the edit; never block — coordination is the
@@ -871,20 +883,29 @@ async fn pre_bash() -> Result<()> {
 
     if let Ok(input) = serde_json::from_str::<serde_json::Value>(&tool_input) {
         if let Some(command) = input["command"].as_str() {
-            // ADR-050: Detect destructive operations
-            let destructive = is_destructive_command(command);
-            if destructive {
-                if let Some(state) = SessionState::load() {
-                    let in_ship_phase = state.phase.as_deref() == Some("SHIP");
-                    if !in_ship_phase && state.workplan_id.is_some() {
-                        // ADR-2026-03-22-1939 P3: use println not eprintln so Claude sees the warning
-                        println!(
-                            "{} Destructive command outside SHIP phase: `{}`",
-                            "\u{26a0}".yellow(),
-                            truncate_cmd(command, 60)
+            // ADR-050: destructive operations, whoever runs them. The warning
+            // was printed to stdout, and only while a legacy workplan id was
+            // set, so `git push --force` and `reset --hard` passed in silence.
+            let cwd = hook_payload()["cwd"]
+                .as_str()
+                .filter(|c| !c.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+            let found = destructive_ops(command, &cwd);
+            if !found.is_empty() {
+                let project_dir = std::env::var("CLAUDE_PROJECT_DIR").map(PathBuf::from).unwrap_or_else(|_| cwd.clone());
+                let shown = truncate_cmd(command, 80);
+                if let Some(op) = found.iter().find(|o| o.protected) {
+                    if enforcement_mode(&project_dir) == "mandatory" {
+                        eprintln!(
+                            "\u{26d4} {} refused: it rewrites the shared history of {}. `{shown}`. Push a branch and open a pull request instead.",
+                            op.what, op.branch
                         );
+                        std::process::exit(2);
                     }
                 }
+                let what: Vec<&str> = found.iter().map(|o| o.what).collect();
+                eprintln!("\u{26a0}\u{fe0f} destructive command ({}): `{shown}`", what.join(", "));
             }
 
             // ADR-2611160730 §4: a Bash command that writes project source is
@@ -951,88 +972,6 @@ fn source_gate_check(project_dir: &Path, targets: &[PathBuf], mode: &str, what: 
     }
 }
 
-/// ADR-2026-03-30-1200: Refresh the architecture fingerprint when key project files have changed.
-///
-/// Key files: docs/adrs/*.md, docs/workplans/*.json, go.mod, Cargo.toml, package.json.
-/// The last generation timestamp is cached in session state
-/// on every prompt. When stale, regenerates silently (best-effort) and prints the updated
-/// fingerprint block to stdout so Claude Code picks it up as fresh context.
-async fn refresh_fingerprint_if_stale(project_dir: &Path) -> Result<()> {
-    // Only run when a project id is known
-    let project_json = project_dir.join(".hexa/project.json");
-    if !project_json.exists() {
-        return Ok(());
-    }
-    let content = std::fs::read_to_string(&project_json)?;
-    let project: serde_json::Value = serde_json::from_str(&content)?;
-    let project_id = match project["id"].as_str() {
-        Some(id) if !id.is_empty() => id.to_string(),
-        _ => return Ok(()),
-    };
-
-    // Load the last known fingerprint generation time from session state
-    let last_generated: Option<std::time::SystemTime> = SessionState::load()
-        .and_then(|s| s.fingerprint_generated_at)
-        .and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok())
-        .map(|dt| std::time::UNIX_EPOCH + std::time::Duration::from_secs(dt.timestamp() as u64));
-
-    // Check modification times of key project files
-    let key_globs: &[&str] = &["docs/adrs", "docs/workplans", "go.mod", "Cargo.toml", "package.json"];
-    let mut latest_mtime: Option<std::time::SystemTime> = None;
-
-    for rel in key_globs {
-        let full = project_dir.join(rel);
-        if full.is_file() {
-            if let Ok(meta) = std::fs::metadata(&full) {
-                if let Ok(mtime) = meta.modified() {
-                    if latest_mtime.is_none_or(|prev| mtime > prev) {
-                        latest_mtime = Some(mtime);
-                    }
-                }
-            }
-        } else if full.is_dir() {
-            // Check all files one level deep in the directory
-            if let Ok(entries) = std::fs::read_dir(&full) {
-                for entry in entries.flatten() {
-                    if let Ok(meta) = entry.metadata() {
-                        if let Ok(mtime) = meta.modified() {
-                            if latest_mtime.is_none_or(|prev| mtime > prev) {
-                                latest_mtime = Some(mtime);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Determine if regeneration is needed:
-    // - No fingerprint generated yet in this session, OR
-    // - A key file is newer than the last generation
-    let needs_refresh = match (last_generated, latest_mtime) {
-        (None, _) => true,
-        (Some(gen), Some(mtime)) => mtime > gen,
-        (Some(_), None) => false,
-    };
-
-    if !needs_refresh {
-        return Ok(());
-    }
-
-    // Best-effort regeneration — never block or fail the hook.
-    let name = project_dir
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
-    println!("\n{}", fingerprint_block(&project_id, project_dir, &name).await);
-    if let Some(mut state) = SessionState::load() {
-        state.fingerprint_generated_at = Some(chrono::Utc::now().to_rfc3339());
-        let _ = state.save();
-    }
-
-    Ok(())
-}
-
 /// The architecture fingerprint for this project, as an injection block.
 ///
 /// Falls back to the minimal in-process block if extraction fails, because
@@ -1063,175 +1002,215 @@ async fn route(project_dir: &Path) -> Result<()> {
     if std::env::var_os("HEXA_INTERNAL").is_some() {
         return Ok(());
     }
-    let tool_input = tool_input_json();
+    let input: serde_json::Value = serde_json::from_str(&tool_input_json()).unwrap_or(serde_json::Value::Null);
+    // Claude Code sends the prompt as `prompt`; older hook shims sent `content`.
+    let prompt = input["prompt"].as_str().or_else(|| input["content"].as_str());
     // A host's own notification — a finished background task, a monitor
     // event — arrives on the prompt channel and is not a person asking for
     // work. One was sized as a feature and drafted as a workplan
     // (ADR-2609131611).
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&tool_input) {
-        if let Some(text) = v["prompt"].as_str().or_else(|| v["content"].as_str()) {
-            if is_host_notification(text) {
-                return Ok(());
-            }
-        }
+    if prompt.is_some_and(is_host_notification) {
+        return Ok(());
     }
 
-    // ADR-2026-03-30-1200: Refresh architecture fingerprint if key project files have changed
-    let _ = refresh_fingerprint_if_stale(project_dir).await;
+    let mut state = SessionState::load_or_new();
 
-    if let Ok(input) = serde_json::from_str::<serde_json::Value>(&tool_input) {
-        // Claude Code sends the prompt as `prompt`; older hook shims sent `content`.
-        if let Some(content) = input["prompt"].as_str().or_else(|| input["content"].as_str()) {
-            let lower = content.to_lowercase();
-
-            // Detect hexa-relevant intents and provide context hints
-            let hints = classify_prompt(&lower);
-            if !hints.is_empty() {
-                println!("[HEX] {}", hints.join(", "));
+    // The project block is session-start's, printed once. It was printed
+    // here too, on every prompt whose key files had changed — which, with
+    // a draft written per feature-sized prompt, was nearly every prompt.
+    // Only a session whose start hook never ran gets it here, once.
+    if state.fingerprint_generated_at.is_none() {
+        if let Some((id, name)) = project_identity(project_dir) {
+            println!("{}", fingerprint_block(&id, project_dir, &name).await);
+            println!("[HEX] {}", crate::commands::loop_cmd::status_line(project_dir));
+            for l in awareness_lines(project_dir) {
+                println!("[HEX] {l}");
             }
+        }
+        state.fingerprint_generated_at = Some(chrono::Utc::now().to_rfc3339());
+    }
 
-            // ADR-2026-04-11-0227: Three-tier work-intent classifier.
-            //
-            // Replaces the old passive-warning path with active tier dispatch:
-            //   T1Todo      → silent, let Claude's TodoWrite handle it
-            //   T2MiniPlan  → one-line suggestion, no auto-invocation
-            //   T3Workplan  → auto-invoke `hexa plan draft --background`
-            //                 to create a draft stub + surface it in context
-            {
-                let mut state = SessionState::load_or_new();
-                // Every prompt is sized, whatever else is in flight. pre-edit
-                // reads the size of the *last* prompt; a stale T3 would block
-                // the typo fix that follows a feature.
-                let tier = classify_work_intent(&lower);
-                state.last_tier = Some(
-                    match tier {
-                        Tier::T1Todo => "T1",
-                        Tier::T2MiniPlan => "T2",
-                        Tier::T3Workplan => "T3",
-                    }
-                    .to_string(),
-                );
-                let _ = state.save();
-                if state.workplan_id.is_none() && state.pending_workplan_draft.is_none() {
-                    let mode = enforcement_mode(project_dir);
-                    let auto_plan_enabled = auto_plan_enabled(project_dir);
+    // What changed and matters, after that: another live session touching a
+    // file this one touched, said once per file.
+    for l in new_overlaps(project_dir, &mut state.reported_overlaps) {
+        println!("[HEX] {l}");
+    }
 
-                    // P2.2: Archive stale task.json when on main with a new T2/T3 task.
-                    // Worktree branches have a valid task.json — only archive on main.
-                    if matches!(tier, Tier::T2MiniPlan | Tier::T3Workplan) {
-                        println!("[HEX] {}", crate::commands::loop_cmd::status_line(project_dir));
-                        for l in crate::commands::loop_cmd::awareness_lines(project_dir) {
-                            println!("[HEX] {l}");
-                        }
-                        let task_json = project_dir.join(".hexa/task.json");
-                        if task_json.exists() {
-                            let on_main = std::process::Command::new("git")
-                                .args(["rev-parse", "--abbrev-ref", "HEAD"])
-                                .output()
-                                .ok()
-                                .and_then(|o| {
-                                    if o.status.success() {
-                                        Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .map(|branch| branch == "main")
-                                .unwrap_or(false);
+    let Some(content) = prompt else {
+        let _ = state.save();
+        return Ok(());
+    };
+    let lower = content.to_lowercase();
 
-                            if on_main {
-                                let history_dir = project_dir.join(".hexa/task-history");
-                                let _ = std::fs::create_dir_all(&history_dir);
-                                let ts = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
-                                let dest = history_dir.join(format!("{}.json", ts));
-                                if let Err(e) = std::fs::rename(&task_json, &dest) {
-                                    eprintln!("hexa: failed to archive task.json: {}", e);
-                                } else {
-                                    eprintln!("hexa: archived stale task.json → .hexa/task-history/{}.json", ts);
-                                }
-                            }
-                        }
-                    }
+    let hints = route_hints(&lower);
+    if !hints.is_empty() {
+        println!("[HEX] Relevant: {}", hints.join("; "));
+    }
 
-                    match tier {
-                        Tier::T1Todo => {
-                            // No action — let the host agent handle it.
-                            // Confirmatory replies fall through silently.
-                        }
-                        Tier::T2MiniPlan => {
-                            // One-line suggestion, no auto-invocation — and
-                            // only while no gate is recorded for work in
-                            // flight. The status line above already says
-                            // where a recorded loop stands; repeating the
-                            // instruction on every prompt after it is noise.
-                            if !gate_in_flight(project_dir) {
-                                println!(
-                                    "[HEX] a change with a shape. Write the gate first (the command that must exit 0), record it with `hexa loop gate '<cmd>'`, build to it, then `hexa analyze .`"
-                                );
-                            }
-                        }
-                        Tier::T3Workplan => {
-                            // Feature-sized intent. In advisory+enabled mode, auto-invoke
-                            // `hexa plan draft` in the background. In mandatory mode,
-                            // also auto-invoke but still require user approval before
-                            // running coders (existing enforcement chain does this).
-                            if auto_plan_enabled {
-                                match spawn_plan_draft(content) {
-                                    Ok(draft_path) => {
-                                        println!(
-                                            "[HEX] feature-sized task. Design (`hexa design brainstorm \"<idea>\"`, optional) \u{2192} Decide (ADR in docs/adrs/, `hexa loop adr <ID>`) \u{2192} Gate (`hexa loop gate '<cmd>'`, before the code) \u{2192} Build \u{2192} Harden \u{2192} `hexa analyze .`; drafting a workplan in the background"
-                                        );
-                                        println!(
-                                            "[HEX] draft: {} (run `hexa plan drafts list` to see it, `hexa plan drafts approve <name>` to keep it)",
-                                            draft_path
-                                        );
-                                        state.pending_workplan_draft = Some(draft_path);
-                                        let _ = state.save();
-                                    }
-                                    Err(e) => {
-                                        // Fall back to the old warning/block behavior if spawn fails
-                                        if mode == "mandatory" {
-                                            eprintln!(
-                                                "BLOCKED: Cannot proceed without an active workplan. Run: hexa plan create <name> (draft spawn failed: {})",
-                                                e
-                                            );
-                                            std::process::exit(2);
-                                        } else {
-                                            println!(
-                                                "WARNING: No active workplan. Consider: hexa plan create <name> (draft spawn failed: {})",
-                                                e
-                                            );
-                                        }
-                                    }
-                                }
-                            } else if mode == "mandatory" {
-                                // Auto-plan disabled but enforcement is mandatory — keep old behavior
-                                eprintln!(
-                                    "BLOCKED: Cannot proceed without an active workplan. Run: hexa plan create <name>"
-                                );
-                                std::process::exit(2);
-                            } else {
-                                // Auto-plan disabled, advisory mode — keep old warning
-                                println!(
-                                    "WARNING: No active workplan for this work. Consider: hexa plan create <name>"
-                                );
-                            }
-                        }
-                    }
+    // ADR-2026-04-11-0227: every prompt is sized. pre-edit reads the size
+    // of the *last* prompt; a stale T3 would block the typo fix that
+    // follows a feature.
+    let tier = classify_work_intent(&lower);
+    state.last_tier = Some(tier.as_str().to_string());
+
+    if matches!(tier, Tier::T2MiniPlan | Tier::T3Workplan) {
+        archive_stale_task_json(project_dir);
+    }
+
+    if tier == Tier::T3Workplan {
+        // A feature-sized prompt with no gate recorded: the one thing worth
+        // saying before the work starts. With a gate in flight, nothing.
+        if !gate_in_flight(project_dir) {
+            println!(
+                "[HEX] feature-sized task and no loop gate recorded. Design (`hexa design brainstorm \"<idea>\"`, optional) \u{2192} Decide (ADR in docs/adrs/, `hexa loop adr <ID>`) \u{2192} Gate (`hexa loop gate '<cmd>'`, before the code) \u{2192} Build \u{2192} Harden \u{2192} `hexa analyze .`"
+            );
+        }
+        let drafting = auto_plan_enabled(project_dir)
+            && state.workplan_id.is_none()
+            && state.pending_workplan_draft.is_none()
+            && !is_agent_brief(content, hook_payload());
+        if drafting {
+            match spawn_plan_draft(project_dir, content) {
+                Ok(draft_path) => {
+                    println!(
+                        "[HEX] workplan draft: {draft_path} (`hexa plan drafts approve <name>` keeps it, `hexa plan drafts clear --name <name>` drops it)"
+                    );
+                    state.pending_workplan_draft = Some(draft_path);
                 }
+                Err(e) => eprintln!("hexa: workplan draft failed: {e}"),
             }
         }
     }
 
+    let _ = state.save();
     Ok(())
 }
 
-/// ADR-2026-04-11-0227: Spawn `hexa plan draft` in the background with the user prompt.
-///
-/// Returns the path of the created draft file on success. The draft is
-/// a minimal stub quarantined to `docs/workplans/drafts/` — no worktrees,
-/// no specs, no coder dispatch. The user (or Claude Code) picks it up
-/// via `/hexa-feature-dev` or `hexa plan drafts approve`.
+/// The project's id and name from `.hexa/project.json`, if it is a hexa project.
+fn project_identity(project_dir: &Path) -> Option<(String, String)> {
+    let text = std::fs::read_to_string(project_dir.join(".hexa/project.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let id = v["id"].as_str().unwrap_or("?").to_string();
+    let name = v["name"]
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| crate::commands::loop_cmd::project_name(project_dir));
+    Some((id, name))
+}
+
+/// P2.2: archive a stale `.hexa/task.json` when on main with a new T2/T3
+/// task. Worktree branches have a valid task.json — only archive on main.
+fn archive_stale_task_json(project_dir: &Path) {
+    let task_json = project_dir.join(".hexa/task.json");
+    if !task_json.exists() {
+        return;
+    }
+    let on_main = std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(project_dir)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .is_some_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "main");
+    if !on_main {
+        return;
+    }
+    let history_dir = project_dir.join(".hexa/task-history");
+    let _ = std::fs::create_dir_all(&history_dir);
+    let ts = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+    match std::fs::rename(&task_json, history_dir.join(format!("{ts}.json"))) {
+        Ok(()) => eprintln!("hexa: archived stale task.json → .hexa/task-history/{ts}.json"),
+        Err(e) => eprintln!("hexa: failed to archive task.json: {e}"),
+    }
+}
+
+/// Most files named in one awareness or overlap line.
+const FILES_SHOWN: usize = 5;
+
+/// A touched-file entry worth showing another session: a path inside this
+/// repository. `touch` records a file inside the project relative to it and
+/// anything else absolute, so an absolute path is outside — a scratch
+/// script, another checkout. Build output and temp folders are never a
+/// boundary either.
+fn is_repo_file(f: &str) -> bool {
+    const NOISE: [&str; 6] = ["tmp", "temp", "scratchpad", "target", "node_modules", ".."];
+    !f.is_empty()
+        && !f.starts_with('/')
+        && !f.starts_with('~')
+        && !f.split('/').any(|seg| NOISE.contains(&seg))
+}
+
+fn short_id(id: &str) -> &str {
+    id.get(..8).unwrap_or(id)
+}
+
+fn files_list(files: &[&str]) -> String {
+    let shown: Vec<&str> = files.iter().take(FILES_SHOWN).copied().collect();
+    let more = files.len().saturating_sub(FILES_SHOWN);
+    format!("{}{}", shown.join(", "), if more > 0 { format!(" +{more}") } else { String::new() })
+}
+
+/// One line per other *live* session, with the repository files it has
+/// touched. Ended sessions are history, and a scratch path is nobody's
+/// boundary; both filled the session-start block with hundreds of
+/// characters no one could act on.
+fn awareness_lines(project_dir: &Path) -> Vec<String> {
+    crate::commands::loop_cmd::others(project_dir)
+        .into_iter()
+        .filter(|o| o.alive)
+        .map(|o| {
+            let files: Vec<&str> = o.files.iter().rev().map(String::as_str).filter(|f| is_repo_file(f)).collect();
+            let touched = if files.is_empty() { String::new() } else { format!(" · touched {}", files_list(&files)) };
+            let gate: String = if o.gate.chars().count() > 80 {
+                format!("{}\u{2026}", o.gate.chars().take(80).collect::<String>())
+            } else {
+                o.gate.clone()
+            };
+            let run = o.running.as_ref().map(|r| format!(" · {r}")).unwrap_or_default();
+            format!("also here: session {}{run} · stage {} · ADR {} · gate {gate}{touched}", short_id(&o.session), o.stage, o.adr)
+        })
+        .collect()
+}
+
+/// Overlaps not yet reported: for each other live session, the repository
+/// files both it and this session have touched. Each `session|file` pair is
+/// added to `reported`, so it is said once.
+fn new_overlaps(project_dir: &Path, reported: &mut Vec<String>) -> Vec<String> {
+    let mine: Vec<String> = crate::commands::loop_cmd::read_loop(project_dir)
+        .and_then(|st| st.get("files").and_then(|f| f.as_array()).cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|f| f.as_str().map(str::to_string))
+        .filter(|f| is_repo_file(f))
+        .collect();
+    if mine.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    for o in crate::commands::loop_cmd::others(project_dir).into_iter().filter(|o| o.alive) {
+        let fresh: Vec<&str> = o
+            .files
+            .iter()
+            .rev()
+            .map(String::as_str)
+            .filter(|f| mine.iter().any(|m| m == f))
+            .filter(|f| !reported.contains(&format!("{}|{f}", o.session)))
+            .collect();
+        if fresh.is_empty() {
+            continue;
+        }
+        lines.push(format!(
+            "session {} (live · stage {} · ADR {}) has also touched {}. Coordinate before overlapping.",
+            short_id(&o.session),
+            o.stage,
+            o.adr,
+            files_list(&fresh)
+        ));
+        reported.extend(fresh.iter().map(|f| format!("{}|{f}", o.session)));
+    }
+    lines
+}
+
 /// Text the host generated to tell the session something happened, rather
 /// than a person asking for work.
 fn is_host_notification(text: &str) -> bool {
@@ -1251,62 +1230,120 @@ fn gate_in_flight(project_dir: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn spawn_plan_draft(prompt: &str) -> Result<String> {
-    // We run `hexa plan draft --background <prompt>` synchronously here
-    // (not via detached spawn) because we need the resulting draft path
-    // to surface in the hook output. The draft command itself is fast:
-    // it just writes a JSON stub. There's no LLM call on this path.
-    let hexa_bin = std::env::current_exe()
-        .unwrap_or_else(|_| PathBuf::from("hexa"));
-
+/// ADR-2026-04-11-0227: run `hexa plan draft --background <prompt>` in the
+/// project and return the path of the draft it wrote, which it prints. The
+/// path was found by taking the newest file in the drafts folder, which is
+/// another session's draft whenever two prompts land in the same moment.
+fn spawn_plan_draft(project_dir: &Path, prompt: &str) -> Result<String> {
+    let hexa_bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("hexa"));
     let output = std::process::Command::new(&hexa_bin)
         .args(["plan", "draft", "--background", prompt])
+        .current_dir(project_dir)
         .output()?;
-
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow::anyhow!(
-            "hexa plan draft failed: {}",
-            stderr.trim()
-        ));
+        return Err(anyhow::anyhow!("hexa plan draft failed: {}", stderr.trim()));
     }
-
-    // The draft filename is deterministic (ts + slug) but we re-derive
-    // it here by reading the newest file in docs/workplans/drafts/.
-    let drafts_dir = Path::new("docs/workplans/drafts");
-    let newest = std::fs::read_dir(drafts_dir)?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path().extension().and_then(|s| s.to_str()) == Some("json")
-        })
-        .max_by_key(|e| {
-            e.metadata()
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-        })
-        .map(|e| e.path().to_string_lossy().to_string())
-        .unwrap_or_else(|| "docs/workplans/drafts/".to_string());
-
-    Ok(newest)
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .rfind(|l| !l.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("hexa plan draft wrote no draft"))
 }
 
 // ── Boundary validation ──────────────────────────────────────────────
 
-fn validate_boundary_edit(project_dir: &Path, file_path: &str) -> Result<()> {
-    let rel = file_path
-        .strip_prefix(project_dir.to_string_lossy().as_ref())
-        .unwrap_or(file_path)
-        .trim_start_matches('/');
-
-    // Detect cross-adapter imports would need AST parsing (hexa analyze does this).
-    // Here we do a quick structural check: warn if editing composition-root
-    // from a context that suggests adapter work.
-    if rel.contains("adapters/primary/") || rel.contains("adapters/secondary/") {
-        // Adapters are fine to edit — just can't import each other
-    } else if rel.contains("domain/") {
-        // Domain should have zero external deps — flag if importing node_modules
+/// The file as the edit would leave it: a Write's `content`, or the file
+/// with each `old_string` → `new_string` of an Edit or MultiEdit applied in
+/// order. `None` when an `old_string` is not in the file: the tool refuses
+/// that edit itself, so there is nothing to judge.
+fn edit_result(before: &str, input: &serde_json::Value) -> Option<String> {
+    if let Some(c) = input["content"].as_str() {
+        return Some(c.to_string());
     }
+    let apply = |text: String, e: &serde_json::Value| -> Option<String> {
+        let old = e["old_string"].as_str()?;
+        let new = e["new_string"].as_str().unwrap_or("");
+        if old.is_empty() || !text.contains(old) {
+            return None;
+        }
+        Some(if e["replace_all"].as_bool() == Some(true) { text.replace(old, new) } else { text.replacen(old, new, 1) })
+    };
+    match input["edits"].as_array() {
+        Some(edits) => edits.iter().try_fold(before.to_string(), apply),
+        None => apply(before.to_string(), input),
+    }
+}
 
+/// Hold an edit to the analyzer's layer rules (`hexa analyze`'s, from
+/// hexa-analysis), on the content the edit would leave. Only an import the
+/// edit *adds* counts: a file that already breaks a rule can still be
+/// edited, and its old violations are `hexa analyze`'s to report. In
+/// mandatory mode a new violation is refused with exit 2, naming the rule
+/// and the line; in advisory mode it is a warning on stderr.
+///
+/// This had a branch per layer and nothing in any of them, and returned Ok
+/// for a domain file importing an adapter.
+async fn validate_boundary_edit(project_dir: &Path, file_path: &str, input: &serde_json::Value) -> Result<()> {
+    if !project_dir.join(".hexa/project.json").is_file() {
+        return Ok(());
+    }
+    let abs = if Path::new(file_path).is_absolute() { PathBuf::from(file_path) } else { project_dir.join(file_path) };
+    let Ok(rel) = abs.strip_prefix(project_dir) else { return Ok(()) };
+    let rel = rel.to_string_lossy().to_string();
+    let before = std::fs::read_to_string(&abs).unwrap_or_default();
+    let Some(after) = edit_result(&before, input) else { return Ok(()) };
+
+    let ast = hexa_analysis::default_ast();
+    let check = |src: String| {
+        let rel = rel.clone();
+        let ast = ast.clone();
+        async move { hexa_analysis::analyzer::source_violations(project_dir, &rel, &src, &*ast).await }
+    };
+    // The analyzer could not read the edit: say so, and let the edit
+    // through. `hexa analyze` grades the file once it is written.
+    let after_v = match check(after).await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("hexa: boundary check skipped for {rel}: {e}");
+            return Ok(());
+        }
+    };
+    if after_v.is_empty() {
+        return Ok(());
+    }
+    // Line numbers shift under an edit; an import is the same one when its
+    // rule and its target are.
+    let old: Vec<(String, String)> =
+        check(before).await.unwrap_or_default().into_iter().map(|v| (v.rule, v.edge.to_file)).collect();
+    let added: Vec<_> = after_v
+        .iter()
+        .filter(|v| !old.iter().any(|(rule, to)| *rule == v.rule && *to == v.edge.to_file))
+        .collect();
+    if added.is_empty() {
+        return Ok(());
+    }
+    let lines: Vec<String> = added
+        .iter()
+        .map(|v| {
+            format!(
+                "  {rel} line {}: {} (`{}`: {} \u{2192} {})",
+                v.edge.line, v.rule, v.edge.import_path, v.edge.from_layer, v.edge.to_layer
+            )
+        })
+        .collect();
+    let msg = format!(
+        "This edit adds {} layer violation{}:\n{}\nImport through a port instead; `hexa analyze .` shows the rules.",
+        added.len(),
+        if added.len() == 1 { "" } else { "s" },
+        lines.join("\n")
+    );
+    if enforcement_mode(project_dir) == "mandatory" {
+        eprintln!("\u{26d4} {msg}");
+        std::process::exit(2);
+    }
+    eprintln!("\u{26a0}\u{fe0f} {msg}");
     Ok(())
 }
 
@@ -1505,22 +1542,121 @@ async fn load_workplan_context(project_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Detect destructive bash commands (ADR-050).
-fn is_destructive_command(cmd: &str) -> bool {
-    let patterns = [
-        "git push --force",
-        "git push -f",
-        "git reset --hard",
-        "git clean -f",
-        "rm -rf",
-        "rm -r ",
-        "drop table",
-        "DROP TABLE",
-        "git branch -D",
-        "git checkout -- .",
-        "git restore .",
-    ];
-    patterns.iter().any(|p| cmd.contains(p))
+/// One destructive operation found in a shell command.
+#[derive(Debug, PartialEq)]
+struct DestructiveOp {
+    what: &'static str,
+    /// A force-push whose target is main or master.
+    protected: bool,
+    branch: String,
+}
+
+/// The destructive operations in `cmd`, a shell command line run in `cwd`:
+/// force-push, `reset --hard`, `clean -f`, `rm -rf` outside a temp folder,
+/// and `branch -D`. Each `&&`/`||`/`;`/`|` segment is read on its own, with
+/// git's global options (`-C <dir>`, `-c k=v`) skipped. A force-push names
+/// its target branch: a refspec's destination, or the current branch of the
+/// directory it runs in when it names none.
+fn destructive_ops(cmd: &str, cwd: &Path) -> Vec<DestructiveOp> {
+    let mut found = Vec::new();
+    let normalized = cmd.replace("&&", "\n").replace("||", "\n").replace([';', '|'], "\n");
+    for segment in normalized.lines() {
+        let toks: Vec<String> = segment
+            .split_whitespace()
+            .map(|t| t.trim_matches(|c| c == '"' || c == '\'').to_string())
+            .collect();
+        let mut i = 0;
+        while i < toks.len() && (matches!(toks[i].as_str(), "sudo" | "command" | "exec" | "time" | "env") || is_assignment(&toks[i])) {
+            i += 1;
+        }
+        let Some(prog) = toks.get(i) else { continue };
+        let args = &toks[i + 1..];
+        match prog.rsplit('/').next().unwrap_or(prog) {
+            "git" => {
+                let mut j = 0;
+                let mut dir = cwd.to_path_buf();
+                while j < args.len() && args[j].starts_with('-') {
+                    if matches!(args[j].as_str(), "-C" | "-c" | "--git-dir" | "--work-tree") {
+                        if args[j] == "-C" {
+                            if let Some(d) = args.get(j + 1) {
+                                dir = cwd.join(d);
+                            }
+                        }
+                        j += 2;
+                    } else {
+                        j += 1;
+                    }
+                }
+                let Some(sub) = args.get(j) else { continue };
+                let rest = &args[j + 1..];
+                let short_has = |c: char| rest.iter().any(|a| a.starts_with('-') && !a.starts_with("--") && a.contains(c));
+                match sub.as_str() {
+                    "push" => {
+                        let positional: Vec<&String> = rest.iter().filter(|a| !a.starts_with('-')).collect();
+                        let refspecs = positional.get(1..).unwrap_or(&[]);
+                        let force = short_has('f')
+                            || rest.iter().any(|a| a == "--force" || a.starts_with("--force-with-lease") || a == "--mirror")
+                            || refspecs.iter().any(|r| r.starts_with('+'));
+                        if !force {
+                            continue;
+                        }
+                        let dests: Vec<String> = if refspecs.is_empty() {
+                            vec![current_branch(&dir).unwrap_or_default()]
+                        } else {
+                            refspecs
+                                .iter()
+                                .map(|r| {
+                                    let d = r.trim_start_matches('+');
+                                    let d = d.rsplit(':').next().unwrap_or(d).trim_start_matches("refs/heads/");
+                                    if d == "HEAD" { current_branch(&dir).unwrap_or_default() } else { d.to_string() }
+                                })
+                                .collect()
+                        };
+                        let branch = dests.iter().find(|d| matches!(d.as_str(), "main" | "master")).cloned();
+                        found.push(DestructiveOp { what: "force-push", protected: branch.is_some(), branch: branch.unwrap_or_default() });
+                    }
+                    "reset" if rest.iter().any(|a| a == "--hard") => found.push(op("reset --hard")),
+                    "clean" if short_has('f') || rest.iter().any(|a| a == "--force") => found.push(op("clean -f")),
+                    "branch" if rest.iter().any(|a| a == "-D") || (rest.iter().any(|a| a == "--delete") && rest.iter().any(|a| a == "--force")) => {
+                        found.push(op("branch -D"))
+                    }
+                    _ => {}
+                }
+            }
+            "rm" => {
+                let flags: Vec<&String> = args.iter().filter(|a| a.starts_with('-')).collect();
+                let short = |c: &[char]| flags.iter().any(|f| !f.starts_with("--") && f.contains(c));
+                let recursive = short(&['r', 'R']) || flags.iter().any(|f| *f == "--recursive");
+                let force = short(&['f']) || flags.iter().any(|f| *f == "--force");
+                let targets: Vec<&String> = args.iter().filter(|a| !a.starts_with('-')).collect();
+                if recursive && force && targets.iter().any(|t| !is_temp_path(t)) {
+                    found.push(op("rm -rf"));
+                }
+            }
+            _ => {}
+        }
+    }
+    found
+}
+
+fn op(what: &'static str) -> DestructiveOp {
+    DestructiveOp { what, protected: false, branch: String::new() }
+}
+
+fn is_assignment(t: &str) -> bool {
+    t.split_once('=').is_some_and(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+}
+
+/// A path in a temp folder, where deleting is what the folder is for.
+fn is_temp_path(t: &str) -> bool {
+    let tmpdir = std::env::var("TMPDIR").unwrap_or_default();
+    ["/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/", "$TMPDIR", "${TMPDIR"].iter().any(|p| t.starts_with(p))
+        || (!tmpdir.is_empty() && t.starts_with(&tmpdir))
+}
+
+fn current_branch(dir: &Path) -> Option<String> {
+    let o = std::process::Command::new("git").args(["rev-parse", "--abbrev-ref", "HEAD"]).current_dir(dir).output().ok()?;
+    o.status.success().then(|| String::from_utf8_lossy(&o.stdout).trim().to_string())
 }
 
 /// Truncate a command string for display.
@@ -1552,26 +1688,74 @@ fn is_confirmatory_response(prompt: &str) -> bool {
 
 // ── Prompt classification ────────────────────────────────────────────
 
-fn classify_prompt(prompt: &str) -> Vec<&'static str> {
-    let mut hints = Vec::new();
+/// One route hint: shown when the prompt has one of `words` (and, when
+/// `with` is not empty, one of `with` too), each a whole word or phrase.
+/// `targets` are the verbs (`hexa …`) and skills (`/…`) the text names; a
+/// test runs each verb's `--help` and finds each skill in `assets/skills`.
+pub struct RouteHint {
+    pub words: &'static [&'static str],
+    pub with: &'static [&'static str],
+    pub text: &'static str,
+    pub targets: &'static [&'static str],
+}
 
-    if prompt.contains("scaffold") || prompt.contains("new project") || prompt.contains("init") {
-        hints.push("Relevant: hexa scaffold, hexa init");
-    }
-    if prompt.contains("architect") || prompt.contains("boundary") || prompt.contains("violation") {
-        hints.push("Relevant: hexa analyze");
-    }
-    if prompt.contains("adr") || prompt.contains("decision record") {
-        hints.push("Relevant: hexa adr list/search/status");
-    }
-    if prompt.contains("agent") || prompt.contains("parallel") || prompt.contains("coordinate") {
-        hints.push("Relevant: harness subagents with isolation: \"worktree\"; hexa dev worktree list|merge");
-    }
-    if prompt.contains("feature") && (prompt.contains("develop") || prompt.contains("implement") || prompt.contains("build")) {
-        hints.push("Relevant: /hexa-feature-dev");
-    }
+pub const ROUTE_HINTS: &[RouteHint] = &[
+    RouteHint {
+        words: &["scaffold", "new project", "init"],
+        with: &[],
+        text: "hexa scaffold or hexa init",
+        targets: &["hexa scaffold", "hexa init"],
+    },
+    RouteHint {
+        words: &["architecture", "architectural", "boundary", "boundaries", "layer violation", "layer violations", "hexagonal"],
+        with: &[],
+        text: "hexa analyze",
+        targets: &["hexa analyze"],
+    },
+    RouteHint {
+        words: &["adr", "adrs", "decision record", "decision records"],
+        with: &[],
+        text: "hexa adr list, hexa adr search",
+        targets: &["hexa adr list", "hexa adr search"],
+    },
+    RouteHint {
+        words: &["subagent", "subagents", "parallel", "worktree", "worktrees"],
+        with: &[],
+        text: "isolation: \"worktree\" on the Agent call; hexa worktree list",
+        targets: &["hexa worktree list"],
+    },
+    RouteHint {
+        words: &["feature"],
+        with: &["implement", "build", "develop", "add"],
+        text: "/hexa-workflow (the gate-first loop)",
+        targets: &["/hexa-workflow"],
+    },
+];
 
-    hints
+/// Most hints on the one `Relevant:` line.
+const MAX_HINTS: usize = 3;
+
+/// Is `needle` in `hay` as a whole word or phrase? Both lower case. A
+/// substring match fired the scaffold hint on "scaffolded" and the init
+/// hint on "definitely".
+fn contains_word(hay: &str, needle: &str) -> bool {
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    hay.match_indices(needle).any(|(i, m)| {
+        let before = hay[..i].chars().next_back();
+        let after = hay[i + m.len()..].chars().next();
+        !before.is_some_and(is_word) && !after.is_some_and(is_word)
+    })
+}
+
+/// The hints for a lower-cased prompt, at most [`MAX_HINTS`].
+fn route_hints(prompt: &str) -> Vec<&'static str> {
+    ROUTE_HINTS
+        .iter()
+        .filter(|h| h.words.iter().any(|w| contains_word(prompt, w)))
+        .filter(|h| h.with.is_empty() || h.with.iter().any(|w| contains_word(prompt, w)))
+        .map(|h| h.text)
+        .take(MAX_HINTS)
+        .collect()
 }
 
 // ── ADR-2026-04-11-0227: Three-tier work-intent classifier ─────────────────
@@ -1597,7 +1781,6 @@ pub enum Tier {
 }
 
 impl Tier {
-    #[allow(dead_code)]
     pub fn as_str(self) -> &'static str {
         match self {
             Tier::T1Todo => "T1",
@@ -2126,10 +2309,64 @@ mod tests {
     // ─ Existing helpers (sanity checks) ─
 
     #[test]
-    fn classify_prompt_hints() {
-        // Smoke test for the existing hint function.
-        assert!(!classify_prompt("please scaffold a new hexa project").is_empty());
-        assert!(classify_prompt("just a random question").is_empty());
+    fn route_hints_match_whole_words() {
+        // (prompt, the hint texts it must produce)
+        let table: &[(&str, &[&str])] = &[
+            ("please scaffold a new hexa project", &["hexa scaffold or hexa init"]),
+            ("the scaffolded files", &[]),
+            ("this is definitely fine", &[]),
+            ("run hexa init here", &["hexa scaffold or hexa init"]),
+            ("re-init the repo", &["hexa scaffold or hexa init"]),
+            ("check the architecture", &["hexa analyze"]),
+            ("the architect said so", &[]),
+            ("read ADR-081 first", &["hexa adr list, hexa adr search"]),
+            ("the gradr padre", &[]),
+            ("act as the implementation sub-agent", &[]),
+            ("run two subagents in parallel", &["isolation: \"worktree\" on the Agent call; hexa worktree list"]),
+            ("implement the feature", &["/hexa-workflow (the gate-first loop)"]),
+            ("featured articles to implement", &[]),
+            ("just a random question", &[]),
+        ];
+        for (prompt, want) in table {
+            assert_eq!(&route_hints(&prompt.to_lowercase()), want, "{prompt}");
+        }
+    }
+
+    #[test]
+    fn route_hints_are_capped_at_three() {
+        let all = "scaffold the architecture, read the adr, run parallel worktrees, implement the feature";
+        assert_eq!(route_hints(all).len(), MAX_HINTS);
+    }
+
+    #[test]
+    fn destructive_ops_are_read_per_segment() {
+        let cwd = std::env::temp_dir();
+        let whats = |c: &str| destructive_ops(c, &cwd).iter().map(|o| o.what).collect::<Vec<_>>();
+        assert_eq!(whats("git push --force origin feat"), ["force-push"]);
+        assert_eq!(whats("git -C ../x push -f origin feat"), ["force-push"]);
+        assert_eq!(whats("git push origin +feat"), ["force-push"]);
+        assert_eq!(whats("cargo test && git reset --hard origin/main"), ["reset --hard"]);
+        assert_eq!(whats("git clean -fdx"), ["clean -f"]);
+        assert_eq!(whats("sudo rm -rf ./build"), ["rm -rf"]);
+        assert_eq!(whats("rm -r -f build"), ["rm -rf"]);
+        assert_eq!(whats("git branch -D old"), ["branch -D"]);
+        for safe in ["git push origin feat", "git branch -d merged", "rm -rf /tmp/x", "rm -rf $TMPDIR/x", "git clean -n", "echo git push --force-ish", "grep -rf pattern"] {
+            assert!(whats(safe).iter().all(|w| *w != "force-push" && *w != "rm -rf" && *w != "clean -f"), "{safe}: {:?}", whats(safe));
+        }
+        let main = destructive_ops("git push -f origin HEAD:refs/heads/main", &cwd);
+        assert!(main[0].protected && main[0].branch == "main", "{main:?}");
+        assert!(!destructive_ops("git push -f origin mainline", &cwd)[0].protected);
+    }
+
+    #[test]
+    fn an_edit_result_applies_write_edit_and_multiedit() {
+        use serde_json::json as j;
+        assert_eq!(edit_result("a", &j!({"content": "b"})).as_deref(), Some("b"));
+        assert_eq!(edit_result("a a", &j!({"old_string": "a", "new_string": "b"})).as_deref(), Some("b a"));
+        assert_eq!(edit_result("a a", &j!({"old_string": "a", "new_string": "b", "replace_all": true})).as_deref(), Some("b b"));
+        assert_eq!(edit_result("a", &j!({"old_string": "z", "new_string": "b"})), None);
+        let multi = j!({"edits": [{"old_string": "a", "new_string": "b"}, {"old_string": "b", "new_string": "c"}]});
+        assert_eq!(edit_result("a", &multi).as_deref(), Some("c"));
     }
 
     #[test]

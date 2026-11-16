@@ -329,34 +329,157 @@ async fn extract_workspace_crates(root: &Path) -> Vec<String> {
     crates
 }
 
-/// Extract a short project objective from CLAUDE.md or README.md.
+/// A short project objective, from the project's own description.
 ///
-/// Looks for the first non-empty, non-heading line that describes what the project is.
+/// README's first prose paragraph, then the manifest's `description`
+/// (Cargo.toml, package.json), then CLAUDE.md prose outside the section hexa
+/// manages. CLAUDE.md is last and filtered: `hexa init` writes it, and its
+/// first long line is a rule ("ALWAYS read a file before editing it"), which
+/// was printed as the objective of every hexa project. Nothing good found is
+/// no objective.
 async fn extract_objective_from_docs(root: &Path) -> String {
-    // Try CLAUDE.md first — it has the most concise project description
-    for filename in &["CLAUDE.md", "README.md"] {
-        let path = root.join(filename);
-        if let Ok(content) = fs::read_to_string(&path).await {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                // Skip headings, blank lines, html comments, and code blocks
-                if trimmed.is_empty()
-                    || trimmed.starts_with('#')
-                    || trimmed.starts_with("<!--")
-                    || trimmed.starts_with("```")
-                    || trimmed.starts_with('>')
-                    || trimmed.len() < 20
-                {
-                    continue;
-                }
-                let obj: String = trimmed.chars().take(400).collect();
-                if !obj.is_empty() {
-                    return obj;
-                }
+    let read = |name: &str| std::fs::read_to_string(root.join(name)).ok();
+    if let Some(p) = read("README.md").as_deref().and_then(first_prose_paragraph) {
+        return p;
+    }
+    if let Some(d) = manifest_description(read("Cargo.toml").as_deref(), read("package.json").as_deref()) {
+        return d;
+    }
+    read("CLAUDE.md")
+        .as_deref()
+        .map(strip_hexa_managed)
+        .as_deref()
+        .and_then(first_prose_paragraph)
+        .unwrap_or_default()
+}
+
+/// The longest objective printed, in characters.
+const OBJECTIVE_CAP: usize = 300;
+
+/// The first paragraph of prose in a Markdown text: not a heading, list,
+/// table, quote, badge, HTML or code block. Joined onto one line, cut at the
+/// last sentence end within [`OBJECTIVE_CAP`].
+fn first_prose_paragraph(text: &str) -> Option<String> {
+    let mut in_code = false;
+    let mut para: Vec<&str> = Vec::new();
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            in_code = !in_code;
+            if !para.is_empty() {
+                break;
             }
+            continue;
+        }
+        if in_code {
+            continue;
+        }
+        if t.is_empty() {
+            if !para.is_empty() {
+                break;
+            }
+            continue;
+        }
+        if is_not_prose(t) {
+            if !para.is_empty() {
+                break;
+            }
+            continue;
+        }
+        para.push(t);
+    }
+    let joined = para.join(" ");
+    if joined.chars().count() < 20 {
+        return None;
+    }
+    Some(cap_at_sentence(&joined, OBJECTIVE_CAP))
+}
+
+fn is_not_prose(t: &str) -> bool {
+    let list_number = t.split_once(['.', ')']).is_some_and(|(n, rest)| {
+        !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) && (rest.is_empty() || rest.starts_with(' '))
+    });
+    t.starts_with('#')
+        || t.starts_with('>')
+        || t.starts_with('|')
+        || t.starts_with('<')
+        || t.starts_with("- ")
+        || t.starts_with("* ")
+        || t.starts_with("+ ")
+        || t.starts_with("[![")
+        || t.starts_with("![")
+        || t.starts_with("---")
+        || t.starts_with("===")
+        || list_number
+}
+
+fn cap_at_sentence(s: &str, cap: usize) -> String {
+    if s.chars().count() <= cap {
+        return s.to_string();
+    }
+    let head: String = s.chars().take(cap).collect();
+    match head.rfind(". ") {
+        Some(i) if i > 20 => head[..=i].to_string(),
+        _ => format!("{}\u{2026}", head.trim_end()),
+    }
+}
+
+/// CLAUDE.md without the section between hexa's refresh markers.
+fn strip_hexa_managed(text: &str) -> String {
+    let mut out = Vec::new();
+    let mut managed = false;
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with("<!-- hexa:") && t.contains(":start") {
+            managed = true;
+            continue;
+        }
+        if t.starts_with("<!-- hexa:") && t.contains(":end") {
+            managed = false;
+            continue;
+        }
+        if !managed {
+            out.push(line);
         }
     }
-    String::new()
+    out.join("\n")
+}
+
+/// `description` from the package (or workspace package) table of a
+/// Cargo.toml, else from a package.json.
+fn manifest_description(cargo_toml: Option<&str>, package_json: Option<&str>) -> Option<String> {
+    let from_cargo = cargo_toml.and_then(|text| {
+        let mut table = String::new();
+        for line in text.lines() {
+            let t = line.trim();
+            if t.starts_with('[') {
+                table = t.trim_matches(['[', ']']).trim().to_string();
+                continue;
+            }
+            if table != "package" && table != "workspace.package" {
+                continue;
+            }
+            let Some((k, v)) = t.split_once('=') else { continue };
+            if k.trim() != "description" {
+                continue;
+            }
+            let v = v.trim();
+            if let Some(inner) = v.strip_prefix('"').and_then(|r| r.strip_suffix('"')) {
+                return Some(inner.to_string());
+            }
+        }
+        None
+    });
+    let from_pkg = || {
+        package_json
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok())
+            .and_then(|v| v.get("description").and_then(|d| d.as_str()).map(str::to_string))
+    };
+    from_cargo
+        .or_else(from_pkg)
+        .map(|d| d.trim().to_string())
+        .filter(|d| d.chars().count() >= 10)
+        .map(|d| cap_at_sentence(&d, OBJECTIVE_CAP))
 }
 
 // ── Output type inference ─────────────────────────────────────────────────────
@@ -401,13 +524,18 @@ fn infer_output_type(objective: &str, language: &str, framework: &str, root: &Pa
 fn derive_default_constraints(architecture_style: &str, output_type: &str, language: &str, framework: &str) -> Vec<String> {
     // Hexagonal architecture always gets boundary rules — they're the defining constraints
     if architecture_style == "hexagonal" {
-        return vec![
+        let mut rules = vec![
             "domain/ imports nothing outside domain/".to_string(),
             "ports/ may only import from domain/".to_string(),
             "adapters/ may only import from ports/ (never other adapters)".to_string(),
             "composition-root is the ONLY file that imports adapters".to_string(),
-            "All relative imports MUST use .js extensions (NodeNext)".to_string(),
         ];
+        // A module-resolution rule of TypeScript's. Printed for a Rust or Go
+        // project it is a rule that cannot apply, read as one that does.
+        if matches!(language, "typescript" | "javascript") {
+            rules.push("All relative imports MUST use .js extensions (NodeNext)".to_string());
+        }
+        return rules;
     }
     match output_type {
         "cli" => vec![
@@ -461,35 +589,93 @@ async fn extract_adr_summaries(root: &Path) -> Vec<AdrSummary> {
             .to_string();
 
         if let Ok(content) = fs::read_to_string(path).await {
-            let summary = extract_decision_first_sentence(&content);
-            summaries.push(AdrSummary { id, summary });
+            let summary = adr_summary(&content);
+            if !summary.is_empty() {
+                summaries.push(AdrSummary { id, summary });
+            }
         }
     }
 
     summaries
 }
 
-/// Extract the first sentence from the ## Decision section of an ADR.
-fn extract_decision_first_sentence(content: &str) -> String {
+/// The longest ADR summary printed, in characters.
+const ADR_SUMMARY_CAP: usize = 120;
+
+/// One line that says what an ADR decided: its title, else the bold first
+/// clause of its first decision, else that decision's first sentence. Never
+/// a bare list number: the summary was cut at the first ". ", which in a
+/// numbered decision list is the "1." itself, and every such ADR printed as
+/// `ADR-<id>: 1.`.
+fn adr_summary(content: &str) -> String {
+    if let Some(title) = adr_title(content) {
+        return cap_at_sentence(&title, ADR_SUMMARY_CAP);
+    }
+    decision_clause(content).map(|d| cap_at_sentence(&d, ADR_SUMMARY_CAP)).unwrap_or_default()
+}
+
+/// The `# ` heading without its id: "# ADR-<id>: Hooks print signal" →
+/// "Hooks print signal". A heading that is only the id is no title.
+fn adr_title(content: &str) -> Option<String> {
+    let h = content.lines().map(str::trim).find(|l| l.starts_with("# "))?;
+    let mut rest = h.trim_start_matches('#').trim();
+    if rest.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("adr-")) {
+        rest = rest.trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '-');
+    }
+    let rest = rest.trim_start_matches(|c: char| c == ':' || c == '\u{2014}' || c == '\u{2013}' || c == '-' || c.is_whitespace());
+    let rest = rest.trim();
+    (rest.chars().any(|c| c.is_alphabetic())).then(|| rest.to_string())
+}
+
+/// The first decision in `## Decision`: its bold lead clause if it has one,
+/// else its first sentence, with any list marker removed.
+fn decision_clause(content: &str) -> Option<String> {
     let mut in_decision = false;
     for line in content.lines() {
         if line.trim_start().starts_with("## Decision") {
             in_decision = true;
             continue;
         }
-        if in_decision {
-            if line.starts_with("## ") {
-                break; // next section
+        if !in_decision {
+            continue;
+        }
+        if line.starts_with("## ") {
+            break;
+        }
+        let t = strip_list_marker(line.trim());
+        if t.is_empty() {
+            continue;
+        }
+        if let Some(bold) = t.strip_prefix("**").and_then(|r| r.split_once("**")).map(|(b, _)| b.trim()) {
+            if bold.chars().any(|c| c.is_alphabetic()) {
+                return Some(bold.to_string());
             }
-            let trimmed = line.trim();
-            if trimmed.is_empty() { continue; }
-            // Take up to first sentence end or 120 chars
-            let sentence: String = trimmed.chars().take(200).collect();
-            let end = sentence.find(". ").map(|i| i + 1).unwrap_or(sentence.len());
-            return sentence[..end].to_string();
+        }
+        let end = t.find(". ").map(|i| i + 1).unwrap_or(t.len());
+        let sentence = t[..end].trim();
+        if sentence.chars().any(|c| c.is_alphabetic()) {
+            return Some(sentence.to_string());
         }
     }
-    String::new()
+    None
+}
+
+/// `1. x`, `2) x`, `- x`, `* x` → `x`.
+fn strip_list_marker(t: &str) -> &str {
+    if let Some(r) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) {
+        return r.trim_start();
+    }
+    let digits = t.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digits > 0 {
+        let r = &t[digits..];
+        if let Some(r) = r.strip_prefix(". ").or_else(|| r.strip_prefix(") ")) {
+            return r.trim_start();
+        }
+        if r == "." || r == ")" {
+            return "";
+        }
+    }
+    t
 }
 
 // ── Token budget enforcement ──────────────────────────────────────────────────
@@ -607,7 +793,67 @@ mod tests {
     #[test]
     fn decision_sentence_extraction() {
         let adr = "# ADR-001\n\n## Context\n\nSome context.\n\n## Decision\n\nWe will use hexagonal architecture. More details follow.\n\n## Consequences\n\n...";
-        assert_eq!(extract_decision_first_sentence(adr), "We will use hexagonal architecture.");
+        assert_eq!(adr_summary(adr), "We will use hexagonal architecture.");
+    }
+
+    // ── The objective is the project's, never hexa's template ──
+
+    const MANAGED: &str = "# p\n\n## Behavioral Rules\n\n- ALWAYS read a file before editing it\n- NEVER commit secrets, credentials, or .env files\n\n<!-- hexa:claude-md:start -->\n## hexa\n\nhexa is one binary. There is no daemon, no database, and no dashboard.\n<!-- hexa:claude-md:end -->\n";
+
+    #[test]
+    fn the_readme_first_paragraph_skips_headings_badges_and_code() {
+        let readme = "# p\n\n[![ci](x)](y)\n\n```bash\ncargo run\n```\n\nA tiny ledger that records\nwho paid whom.\n\nMore.\n";
+        assert_eq!(first_prose_paragraph(readme).as_deref(), Some("A tiny ledger that records who paid whom."));
+    }
+
+    #[test]
+    fn a_rules_list_and_the_managed_section_are_never_an_objective() {
+        assert_eq!(first_prose_paragraph(&strip_hexa_managed(MANAGED)), None);
+        assert_eq!(first_prose_paragraph("- ALWAYS read a file before editing it\n1. Do the thing that is long enough\n"), None);
+    }
+
+    #[test]
+    fn the_manifest_description_is_read_from_the_package_table_only() {
+        let cargo = "[workspace]\nmembers = []\n\n[workspace.package]\ndescription = \"A multi-agent harness\"\n";
+        assert_eq!(manifest_description(Some(cargo), None).as_deref(), Some("A multi-agent harness"));
+        let dep = "[package]\nname = \"p\"\n\n[dependencies.x]\ndescription = \"not this one at all\"\n";
+        assert_eq!(manifest_description(Some(dep), None), None);
+        assert_eq!(manifest_description(None, Some("{\"description\":\"A web thing for people\"}")).as_deref(), Some("A web thing for people"));
+    }
+
+    #[test]
+    fn a_long_objective_is_cut_at_a_sentence() {
+        let long = format!("{} Second sentence that runs on.", "word ".repeat(70).trim());
+        let p = first_prose_paragraph(&format!("{long}. {}", "x ".repeat(100))).unwrap();
+        assert!(p.chars().count() <= OBJECTIVE_CAP + 1, "{p}");
+    }
+
+    // ── An ADR summary says what was decided ──
+
+    #[test]
+    fn an_adr_summary_is_never_a_bare_list_number() {
+        let cases = [
+            ("# ADR-081: Hooks print signal, not noise\n\n## Decision\n\n1. **Print once.** More.\n", "Hooks print signal, not noise"),
+            ("# ADR-080\n\n## Decision\n\n1. **Secrets are encrypted at rest.** On every host.\n", "Secrets are encrypted at rest."),
+            ("# ADR-079 \u{2014} Use a ledger\n", "Use a ledger"),
+            ("# ADR-078\n\n## Decision\n\n1.\n2. We pick sqlite. Because.\n", "We pick sqlite."),
+            ("# ADR-077\n\n## Decision\n\n1.\n", ""),
+        ];
+        for (adr, want) in cases {
+            assert_eq!(adr_summary(adr), want, "{adr}");
+        }
+    }
+
+    // ── A rule is printed only where it applies ──
+
+    #[test]
+    fn the_nodenext_rule_is_only_for_typescript_and_javascript() {
+        let has = |lang: &str| {
+            derive_default_constraints("hexagonal", "framework", lang, "none").iter().any(|c| c.contains("NodeNext"))
+        };
+        assert!(has("typescript") && has("javascript"));
+        assert!(!has("rust") && !has("go") && !has("unknown"));
+        assert!(derive_default_constraints("hexagonal", "framework", "rust", "none").iter().any(|c| c.starts_with("domain/")));
     }
 
     #[test]
