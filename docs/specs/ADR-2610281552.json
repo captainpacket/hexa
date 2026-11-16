@@ -180,7 +180,7 @@
       "description": "Rust ignores target/ and the session state.",
       "given": "lang = `rust`",
       "when": "`gitignore_lines(\"rust\")` is called",
-      "then": "the result holds exactly `target/`, `.hexa/loop.json` and `.hexa/loop.lock`",
+      "then": "the result holds exactly `target/`, `.hexa/loop.json`, `.hexa/loop.lock`, `.env*` and `!.env.example`",
       "test": "hexa-cli/tests/adr_2610281552_spec.rs::s14_rust_gitignore_lines"
     },
     {
@@ -192,7 +192,7 @@
       "description": "TS ignores node_modules/, dist/ and the session state.",
       "given": "lang = `ts`",
       "when": "`gitignore_lines(\"ts\")` is called",
-      "then": "the result holds exactly `node_modules/`, `dist/`, `.hexa/loop.json` and `.hexa/loop.lock`",
+      "then": "the result holds exactly `node_modules/`, `dist/`, `.hexa/loop.json`, `.hexa/loop.lock`, `.env*` and `!.env.example`",
       "test": "hexa-cli/tests/adr_2610281552_spec.rs::s15_ts_gitignore_lines"
     },
     {
@@ -204,7 +204,7 @@
       "description": "Go adds no build-output lines, only the session state.",
       "given": "lang = `go`",
       "when": "`gitignore_lines(\"go\")` is called",
-      "then": "the result holds exactly `.hexa/loop.json` and `.hexa/loop.lock`, and holds neither `target/` nor `node_modules/` nor `dist/`",
+      "then": "the result holds exactly `.hexa/loop.json`, `.hexa/loop.lock`, `.env*` and `!.env.example`, and holds neither `target/` nor `node_modules/` nor `dist/`",
       "test": "hexa-cli/tests/adr_2610281552_spec.rs::s16_go_gitignore_lines"
     },
     {

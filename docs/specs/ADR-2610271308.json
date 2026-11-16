@@ -253,10 +253,10 @@
         "§6"
       ],
       "kind": "negative",
-      "description": "--yes does not skip confirmation for a destructive route",
+      "description": "--yes skips confirmation for a destructive route; without it the route asks",
       "given": "a request that routes to \"harden src/parser\" (destructive: true)",
-      "when": "`hexa hey --yes \"harden src/parser\"` is run and the confirmation prompt is refused",
-      "then": "it asks for confirmation, and when refused it does not run `hexa harden src/parser`",
+      "when": "`hexa hey --yes \"harden src/parser\"` is run, and separately `hexa hey \"harden src/parser\"` is run and the prompt is refused",
+      "then": "with --yes it runs `hexa harden src/parser` without asking; without --yes it asks, and when refused it does not run it",
       "test": "hexa-cli/tests/adr_2610271308_spec.rs::s20_yes_does_not_skip_destructive_confirmation"
     },
     {
