@@ -7,7 +7,7 @@
 
 use tree_sitter::{Language as TsLanguage, Node, Parser};
 
-use crate::ports::{Entity, FileExtract, NodeKind, RawImport};
+use crate::ports::{Entity, FileExtract, ImportKind, NodeKind, RawImport};
 
 /// Languages the AST extractor understands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,13 +104,79 @@ fn extract_rust(root: &Node, source: &str) -> FileExtract {
                         raw_path: format!("self::{name}"),
                         names: vec![name],
                         line: line_of(child),
+                        kind: ImportKind::ModDecl,
                     });
                 }
             }
             _ => {}
         }
     }
+    collect_rust_paths(*root, source, &mut out.imports);
     out
+}
+
+/// Record every fully qualified path in an expression or a type
+/// (`crate::domain::util::half(4)`, `super::a::Alpha`, `other_crate::f()`) as a
+/// use. Such a call names an item without a `use`, and a consumer trace that
+/// misses it calls a live module dead. `use` lines are collected separately.
+fn collect_rust_paths(node: Node, source: &str, imports: &mut Vec<RawImport>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "use_declaration" => {}
+            "scoped_identifier" | "scoped_type_identifier" => {
+                if let Some(imp) = rust_path_use(child, source) {
+                    let seen = imports
+                        .iter()
+                        .any(|i| i.kind == ImportKind::PathExpr && i.raw_path == imp.raw_path);
+                    if !seen {
+                        imports.push(imp);
+                    }
+                }
+                // The outermost path is the whole path; its `path` child is a
+                // prefix of it. Any other child can hold paths of its own.
+                let prefix = child.child_by_field_name("path").map(|p| p.id());
+                let mut inner = child.walk();
+                for part in child.children(&mut inner) {
+                    if Some(part.id()) != prefix {
+                        collect_rust_paths(part, source, imports);
+                    }
+                }
+            }
+            _ => collect_rust_paths(child, source, imports),
+        }
+    }
+}
+
+/// A path use from one scoped path, or `None` for a path that cannot name a
+/// project module (`std::…`, `Self::…`, `self::…`, a bare `a::b` relative to
+/// a `use`). Whether a head identifier is a workspace crate is decided at
+/// resolution, against the crate roots.
+fn rust_path_use(node: Node, source: &str) -> Option<RawImport> {
+    let raw: String = text(node, source).chars().filter(|c| !c.is_whitespace()).collect();
+    let path = match raw.find('<') {
+        Some(i) => raw[..i].trim_end_matches("::").to_string(),
+        None => raw,
+    };
+    let segs: Vec<&str> = path.split("::").filter(|s| !s.is_empty()).collect();
+    if segs.len() < 2 {
+        return None;
+    }
+    let head = segs[0];
+    if matches!(head, "self" | "Self" | "std" | "core" | "alloc") {
+        return None;
+    }
+    let names: Vec<String> = segs[1..]
+        .iter()
+        .filter(|s| **s != "super")
+        .map(|s| s.to_string())
+        .collect();
+    Some(RawImport {
+        raw_path: path,
+        names,
+        line: line_of(node),
+        kind: ImportKind::PathExpr,
+    })
 }
 
 fn rust_has_body(node: Node) -> bool {
@@ -143,6 +209,7 @@ fn collect_rust_use(node: Node, source: &str, imports: &mut Vec<RawImport>) {
                 raw_path: full,
                 names: vec![name],
                 line,
+                kind: ImportKind::Use,
             });
         }
     } else {
@@ -151,6 +218,7 @@ fn collect_rust_use(node: Node, source: &str, imports: &mut Vec<RawImport>) {
             raw_path: path.to_string(),
             names: vec![name],
             line,
+            kind: ImportKind::Use,
         });
     }
 }
@@ -260,6 +328,7 @@ fn collect_ts_import(node: Node, source: &str, imports: &mut Vec<RawImport>) {
         raw_path,
         names,
         line: line_of(node),
+        kind: ImportKind::Use,
     });
 }
 
@@ -331,6 +400,7 @@ fn collect_go_imports(node: Node, source: &str, imports: &mut Vec<RawImport>) {
                         raw_path: unquote(text(path, source)),
                         names: vec!["*".to_string()],
                         line: line_of(child),
+                        kind: ImportKind::Use,
                     });
                 }
             }

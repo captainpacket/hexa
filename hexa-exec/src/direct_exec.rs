@@ -276,6 +276,60 @@ pub struct DirectRun {
     pub committed: Option<String>,
     pub duration_ms: u64,
     pub error: Option<String>,
+    /// The repository the run ran in ([`repo_key`]); empty for a run logged
+    /// before it was recorded. `hexa do runs` lists the current one's.
+    #[serde(default)]
+    pub repo: String,
+}
+
+/// The repository a run belongs to: the main working tree of the repository
+/// at `root`, so every worktree of one repository shares a key. A directory
+/// git does not know is its own canonical path.
+pub fn repo_key(root: &std::path::Path) -> String {
+    let common = std::process::Command::new("git")
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| std::path::PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()));
+    let main = match common {
+        Some(dir) if dir.file_name().is_some_and(|n| n == ".git") => dir.parent().map(|p| p.to_path_buf()).unwrap_or(dir),
+        Some(dir) => dir,
+        None => root.to_path_buf(),
+    };
+    main.canonicalize().unwrap_or(main).to_string_lossy().into_owned()
+}
+
+/// Record a `hexa do gate` run in the same feed as `do run`, so `do runs`
+/// shows it: the message as its instruction, its files, and the commit or
+/// why there is none.
+pub fn record_gate_run(
+    runs: &dyn crate::ports::RunLog,
+    repo_root: &std::path::Path,
+    files: &[String],
+    message: &str,
+    outcome: &Result<String, String>,
+    started_at: String,
+    duration_ms: u64,
+) {
+    let run = DirectRun {
+        id: RUN_ID.fetch_add(1, Ordering::Relaxed),
+        agent: "do-gate".to_string(),
+        started_at,
+        instruction: message.chars().take(240).collect(),
+        file: files.join(", "),
+        model: String::new(),
+        ok: outcome.is_ok(),
+        attempts: 1,
+        steps: 1,
+        evidence_passed: outcome.is_ok(),
+        committed: outcome.as_ref().ok().cloned(),
+        duration_ms,
+        error: outcome.as_ref().err().cloned(),
+        repo: repo_key(repo_root),
+    };
+    store_run(runs, run);
 }
 
 /// Record a ReAct-loop run (multi-step tool-use, ADR-2606071XXX) into the shared
@@ -307,6 +361,7 @@ pub(crate) fn record_react_run(
         committed,
         duration_ms,
         error,
+        repo: repo_key(&repo_root()),
     };
     store_run(runs, run);
 }
@@ -481,6 +536,7 @@ pub(crate) fn record_run(
         committed: r.committed.clone(),
         duration_ms,
         error: r.error.clone(),
+        repo: repo_key(&repo_root()),
     };
     store_run(runs, run);
 }
@@ -534,6 +590,7 @@ fn persist_run_async(runs: &dyn crate::ports::RunLog, run: DirectRun) {
         "committed": run.committed,
         "duration_ms": run.duration_ms,
         "error": run.error,
+        "repo": run.repo,
     }));
 }
 
@@ -600,9 +657,22 @@ pub(crate) fn runs_from_rows(rows: Vec<Value>) -> Vec<DirectRun> {
                 committed: opt("committed"),
                 duration_ms: u("duration_ms"),
                 error: opt("error"),
+                repo: s("repo"),
             }
         })
         .collect()
+}
+
+/// The recorded runs of one repository ([`repo_key`]), newest first, and how
+/// many runs of other repositories, or of none recorded, were left out. With
+/// `repo` `None`, every run.
+pub fn runs_for_repo(runs: &dyn crate::ports::RunLog, repo: Option<&str>) -> (Vec<DirectRun>, usize) {
+    let all = runs_snapshot(runs);
+    let Some(repo) = repo else { return (all, 0) };
+    let total = all.len();
+    let mine: Vec<DirectRun> = all.into_iter().filter(|r| r.repo == repo).collect();
+    let hidden = total - mine.len();
+    (mine, hidden)
 }
 
 /// Aggregate counters for an at-a-glance monitor header.
@@ -612,7 +682,7 @@ pub fn runs_summary(runs: &dyn crate::ports::RunLog) -> Value {
 
 /// Count `runs` into the monitor-header shape: total, passed, failed,
 /// committed, pass_rate.
-pub(crate) fn summary_of(runs: &[DirectRun]) -> Value {
+pub fn summary_of(runs: &[DirectRun]) -> Value {
     let total = runs.len();
     let passed = runs.iter().filter(|r| r.ok).count();
     let committed = runs.iter().filter(|r| r.committed.is_some()).count();
@@ -921,9 +991,10 @@ pub(crate) fn ground_window(content: &str, instruction: &str) -> String {
 pub(crate) async fn gather_context(memory: &dyn crate::ports::MemoryStore, task: &DirectTask) -> String {
     let mut out = String::new();
 
-    // (a) Graph neighbourhood for the target file, from graph-out/graph.json.
+    // (a) Graph neighbourhood for the target file, from the saved graph
+    // (`.hexa/graph/graph.json`, or a legacy `graph-out/graph.json`).
     let bundle = {
-        let graph_path = repo_root().join("graph-out").join("graph.json");
+        let graph_path = hexa_graph::graph_file(&repo_root());
         std::fs::read_to_string(&graph_path)
             .ok()
             .and_then(|raw| hexa_graph::model::KnowledgeGraph::from_json(&raw).ok())

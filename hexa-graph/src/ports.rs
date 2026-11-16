@@ -18,6 +18,21 @@ pub struct Entity {
     pub line: usize,
 }
 
+/// How a file came to name another module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImportKind {
+    /// An import statement: `use`, `import`, a re-export.
+    #[default]
+    Use,
+    /// A Rust `mod x;` declaration. It wires a module into the tree; it does
+    /// not use any of the module's items.
+    ModDecl,
+    /// A fully qualified path in an expression or type
+    /// (`crate::domain::util::half()`). It names an item without importing it,
+    /// so it links only when the path resolves to a file that defines the item.
+    PathExpr,
+}
+
 /// A raw import statement (paths not yet resolved to files).
 #[derive(Debug, Clone)]
 pub struct RawImport {
@@ -26,6 +41,7 @@ pub struct RawImport {
     /// Imported symbol names (`*` for whole-module).
     pub names: Vec<String>,
     pub line: usize,
+    pub kind: ImportKind,
 }
 
 /// Everything pulled out of a single source file.

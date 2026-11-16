@@ -6,7 +6,7 @@
 //! Usage:
 //!   hexa inference add groq --key $GROQ_API_KEY          # Template-based (auto-registers all models)
 //!   hexa inference add cerebras --key $CEREBRAS_API_KEY   # Template-based
-//!   hexa inference add ollama http://bazzite.local:11434 --model qwen3:32b  # Manual
+//!   hexa inference add ollama http://gpu-box.local:11434 --model qwen3:32b  # Manual
 //!   hexa inference add vllm http://gpu-server:8000 --model Qwen/Qwen3-32B  # Manual
 //!   hexa inference list
 //!   hexa inference test <provider-id>
@@ -77,7 +77,7 @@ pub enum InferenceAction {
     Add {
         /// Provider type or template name: groq, cerebras, sambanova, together, openrouter, ollama, gemini, vllm, openai-compat
         provider_type: String,
-        /// Base URL (e.g., http://bazzite.local:11434). Optional for template providers.
+        /// Base URL (e.g., http://gpu-box.local:11434). Optional for template providers.
         url: Option<String>,
         /// Model name (e.g., qwen3:32b)
         #[arg(long)]
@@ -128,7 +128,7 @@ pub enum InferenceAction {
     Setup,
     /// Benchmark a model: code-gen, reasoning, and identity prompts — quality + speed + tier recommendation (ADR-2026-04-13-1238)
     Bench {
-        /// Provider ID, model name, or URL (e.g. "bazzite-ollama", "minimax-m2.7:cloud", "http://bazzite:11434")
+        /// Provider ID, model name, or URL (e.g. "gpu-box-ollama", "minimax-m2.7:cloud", "http://gpu-box:11434")
         target: String,
         /// Specific model to benchmark (overrides the provider's registered model)
         #[arg(long)]
@@ -248,7 +248,7 @@ pub async fn run(action: InferenceAction) -> anyhow::Result<()> {
 
 /// `hexa inference gpu-check` — verify Ollama runs the given model on the GPU (WP P1-4).
 ///
-/// Workplan wp-bazzite-e2e-arch-validation task P1-4 required confirming that
+/// A workplan's task P1-4 (end-to-end architecture validation) required confirming that
 /// `OLLAMA_VULKAN=true ollama run qwen3:4b "..."` streams a response from the GPU
 /// (not CPU). This subcommand wraps that check so it can be re-run non-interactively.
 async fn gpu_check(model: &str, prompt: &str) -> anyhow::Result<()> {
@@ -1165,12 +1165,7 @@ async fn discover_ollama(prune: bool) -> anyhow::Result<()> {
     // ── 2. LAN scan for unregistered Ollama instances ─────────────
     println!("{}", "── LAN Scan (unregistered) ──".cyan());
 
-    let candidates = [
-        ("localhost", "http://127.0.0.1:11434"),
-        ("bazzite", "http://bazzite:11434"),
-        ("bazzite.local", "http://bazzite.local:11434"),
-        ("Docker host", "http://host.docker.internal:11434"),
-    ];
+    let candidates = discovery_candidates(&|k| std::env::var(k).ok());
 
     let mut new_found = 0;
     for (label, url) in &candidates {
@@ -1208,7 +1203,7 @@ async fn discover_ollama(prune: bool) -> anyhow::Result<()> {
     }
 
     if new_found == 0 {
-        println!("  No unregistered Ollama instances found on LAN.");
+        println!("  No unregistered Ollama instances found (probed localhost, and HEXA_OLLAMA_HOST / OLLAMA_HOST when set).");
     }
 
     println!();
@@ -1221,6 +1216,29 @@ async fn discover_ollama(prune: bool) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// The Ollama servers `config inference discover` probes beyond the registry:
+/// localhost, then the host each of `HEXA_OLLAMA_HOST` and `OLLAMA_HOST` names
+/// when set, each once. A bare host gets `http://` and Ollama's port.
+///
+/// It once also probed a personal machine by name. Discovery probes no host
+/// the operator did not name: another machine is reached by setting one of
+/// those variables, or registered with `hexa inference add`.
+fn discovery_candidates(env: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
+    let mut out = vec![("localhost".to_string(), "http://127.0.0.1:11434".to_string())];
+    for var in ["HEXA_OLLAMA_HOST", "OLLAMA_HOST"] {
+        let Some(raw) = env(var).map(|v| v.trim().trim_end_matches('/').to_string()).filter(|v| !v.is_empty()) else {
+            continue;
+        };
+        let with_scheme = if raw.contains("://") { raw } else { format!("http://{raw}") };
+        let authority = with_scheme.split_once("://").map(|(_, a)| a).unwrap_or("");
+        let url = if authority.contains(':') { with_scheme } else { format!("{with_scheme}:11434") };
+        if !out.iter().any(|(_, u)| *u == url) {
+            out.push((var.to_string(), url));
+        }
+    }
+    out
 }
 
 async fn discover_openrouter(filter: Option<&str>, min_context: Option<u64>) -> anyhow::Result<()> {
@@ -2220,5 +2238,43 @@ mod key_ref_tests {
     fn no_key_anywhere_is_none_for_a_keyless_provider() {
         assert_eq!(key_ref(None, None, |_| false), Ok(None));
         assert_eq!(key_ref(None, Some("OPENROUTER_API_KEY"), |_| false), Ok(None));
+    }
+}
+
+#[cfg(test)]
+mod discovery {
+    use super::discovery_candidates;
+
+    fn none(_: &str) -> Option<String> {
+        None
+    }
+
+    /// Discovery probes no named personal host: only localhost, unless the
+    /// environment names another.
+    #[test]
+    fn with_nothing_set_only_localhost_is_probed() {
+        let got = discovery_candidates(&none);
+        assert_eq!(got, vec![("localhost".to_string(), "http://127.0.0.1:11434".to_string())]);
+    }
+
+    #[test]
+    fn a_host_from_the_environment_is_probed_too_with_a_scheme_and_port() {
+        let env = |k: &str| match k {
+            "HEXA_OLLAMA_HOST" => Some("gpu-box".to_string()),
+            "OLLAMA_HOST" => Some("http://10.0.0.5:11500/".to_string()),
+            _ => None,
+        };
+        let urls: Vec<String> = discovery_candidates(&env).into_iter().map(|(_, u)| u).collect();
+        assert_eq!(urls, vec!["http://127.0.0.1:11434", "http://gpu-box:11434", "http://10.0.0.5:11500"]);
+    }
+
+    #[test]
+    fn the_same_host_twice_is_probed_once() {
+        let env = |k: &str| match k {
+            "OLLAMA_HOST" => Some("127.0.0.1:11434".to_string()),
+            "HEXA_OLLAMA_HOST" => Some("".to_string()),
+            _ => None,
+        };
+        assert_eq!(discovery_candidates(&env).len(), 1);
     }
 }

@@ -31,7 +31,7 @@ default adapters behind its ports (`hexa_exec::default_deps()`,
 never constructs an adapter.
 
 All state is files: `~/.hexa/*.jsonl`, `~/.hexa/inference-servers.json`,
-`graph-out/graph.json`, `.hexa/project.json`, `.hexa/memory.jsonl`, `docs/`.
+`.hexa/graph/graph.json`, `.hexa/project.json`, `.hexa/memory.jsonl`, `docs/`.
 Memory is per project — `hexa memory --global` names the shared user store.
 
 ## Tiered inference routing

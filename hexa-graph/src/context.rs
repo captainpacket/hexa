@@ -45,6 +45,9 @@ pub struct ContextBundle {
     pub imports: Vec<String>,
     /// Files that import the target (inbound).
     pub imported_by: Vec<String>,
+    /// Files that declare the target as a module (`mod x;`). Not consumers:
+    /// removing the module means removing this line, not changing a caller.
+    pub declared_in: Vec<String>,
     /// Entities (elsewhere) the target references.
     pub uses: Vec<EntityRef>,
     /// Who references the target's own entities (inbound — the consumers).
@@ -114,6 +117,7 @@ pub fn context_for(
     // Imports (out) and imported-by (in).
     let mut imports = Vec::new();
     let mut imported_by = Vec::new();
+    let mut declared_in = Vec::new();
     // Uses (out references to other files' entities).
     let mut uses = Vec::new();
     // Used-by (in references to our own entities).
@@ -125,6 +129,7 @@ pub fn context_for(
         match e.kind {
             EdgeKind::Imports if e.src == file_id => imports.push(label_of(&e.dst)),
             EdgeKind::Imports if e.dst == file_id => imported_by.push(label_of(&e.src)),
+            EdgeKind::Declares if e.dst == file_id => declared_in.push(label_of(&e.src)),
             EdgeKind::References if e.src == file_id => {
                 if let Some(n) = by_id.get(e.dst.as_str()) {
                     uses.push(EntityRef {
@@ -148,6 +153,8 @@ pub fn context_for(
     imports.dedup();
     imported_by.sort();
     imported_by.dedup();
+    declared_in.sort();
+    declared_in.dedup();
     uses.sort_by(|a, b| a.label.cmp(&b.label));
     used_by.sort_by(|a, b| a.file.cmp(&b.file).then_with(|| a.entity.cmp(&b.entity)));
 
@@ -194,6 +201,7 @@ pub fn context_for(
         defines,
         imports,
         imported_by,
+        declared_in,
         uses,
         used_by,
         community_siblings,
@@ -229,6 +237,9 @@ fn anchor_terms(b: &ContextBundle) -> Vec<String> {
         push(f);
     }
     for f in &b.imported_by {
+        push(f);
+    }
+    for f in &b.declared_in {
         push(f);
     }
     for f in &b.community_siblings {
@@ -330,6 +341,9 @@ pub fn render_markdown(b: &ContextBundle) -> String {
             more("imported_by"),
             b.imported_by.join(", ")
         ));
+    }
+    if !b.declared_in.is_empty() {
+        out.push_str(&format!("Declared in: {}\n", b.declared_in.join(", ")));
     }
     if !b.uses.is_empty() {
         let items: Vec<String> = b

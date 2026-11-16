@@ -71,8 +71,49 @@ pub enum DoAction {
         #[arg(long)]
         uncounted: bool,
     },
-    /// List recent direct runs (task, evidence verdict, commit).
-    Runs,
+    /// List recent direct runs (task, evidence verdict, commit) in this repository.
+    Runs {
+        /// List every repository's runs, and runs logged before runs named theirs.
+        #[arg(long)]
+        all: bool,
+    },
+}
+
+/// Where a failed `do run` stopped, read from its result: `commit` when the
+/// evidence passed; `evidence` when the evidence ran and failed; otherwise the
+/// stage before it — `parse` (a reply that held no usable edit), `inference`
+/// (no model, or no reply), or `setup` (the run never reached the model).
+///
+/// The evidence ran exactly when it left output; a failing command with no
+/// output at all is read from the error, which then names an evidence failure.
+fn failure_stage(error: &str, evidence_passed: bool, evidence_output: &str) -> &'static str {
+    if evidence_passed {
+        return "commit";
+    }
+    if !evidence_output.is_empty() {
+        return "evidence";
+    }
+    // The last attempt's reason is what stopped the run.
+    let last = error.rsplit("last: ").next().unwrap_or(error);
+    const PARSE: [&str; 7] = [
+        "no fenced code block",
+        "fenced blocks",
+        "non-empty old snippet",
+        "empty replacement",
+        "apply:",
+        "loop ended with no edit",
+        "propose_edit",
+    ];
+    if PARSE.iter().any(|m| last.contains(m)) {
+        return "parse";
+    }
+    if last.starts_with("no model configured") || last.contains("inference:") || last.contains("claude spawn failed") {
+        return "inference";
+    }
+    if last.contains("evidence") && !last.contains("before") {
+        return "evidence";
+    }
+    "setup"
 }
 
 pub async fn run(action: DoAction) -> anyhow::Result<()> {
@@ -167,10 +208,17 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
                 );
             } else {
                 let err = r.get("error").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let output = r.get("evidence_output").and_then(|v| v.as_str()).unwrap_or("");
+                let stage = failure_stage(err, ev, output);
+                // Only a run whose evidence ran has an evidence verdict to show.
+                let verdict = match stage {
+                    "evidence" | "commit" => format!("evidence {ev_label}"),
+                    _ => "evidence not run".to_string(),
+                };
                 println!(
-                    "{} evidence {} · {} {}\n  {}",
-                    "✗ failed".red().bold(),
-                    ev_label,
+                    "{} {} · {} {}\n  {}",
+                    format!("✗ failed at {stage}").red().bold(),
+                    verdict,
                     attempts_n,
                     step_word,
                     err.dimmed()
@@ -192,7 +240,10 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
                 if evidence_passed {
                     anyhow::bail!("evidence passed; the run did not complete (see above)");
                 }
-                anyhow::bail!("direct run did not pass evidence");
+                match stage {
+                    "evidence" => anyhow::bail!("direct run did not pass evidence"),
+                    other => anyhow::bail!("direct run failed at {other}, before its evidence ran"),
+                }
             }
         }
         DoAction::Gate { files, evidence, message, uncounted } => {
@@ -216,7 +267,20 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
             }
             println!("{} {}", "⬡ gate:".cyan().bold(), evidence);
             println!("  {} {}", "files".dimmed(), rel.join(", "));
-            match hexa_exec::direct_exec::gate_patch(&root, &rel, &evidence, &message, uncounted).await {
+            let started_at = chrono::Utc::now().to_rfc3339();
+            let clock = std::time::Instant::now();
+            let outcome = hexa_exec::direct_exec::gate_patch(&root, &rel, &evidence, &message, uncounted).await;
+            // `do runs` lists gate runs beside `do run`'s, from one feed.
+            hexa_exec::direct_exec::record_gate_run(
+                &hexa_exec::run_log(),
+                &root,
+                &rel,
+                &message,
+                &outcome,
+                started_at,
+                u64::try_from(clock.elapsed().as_millis()).unwrap_or(u64::MAX),
+            );
+            match outcome {
                 Ok(sha) => println!("{} commit {} · {} file(s)", "✓ gated".green().bold(), sha.yellow(), rel.len()),
                 Err(e) => {
                     println!("{}\n  {}", "✗ not committed".red().bold(), e.replace('\n', "\n  "));
@@ -224,10 +288,23 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
                 }
             }
         }
-        DoAction::Runs => {
+        DoAction::Runs { all } => {
+            let here = if all {
+                None
+            } else {
+                let root = std::process::Command::new("git")
+                    .args(["rev-parse", "--show-toplevel"])
+                    .output()
+                    .ok()
+                    .filter(|o| o.status.success())
+                    .map(|o| std::path::PathBuf::from(String::from_utf8_lossy(&o.stdout).trim().to_string()))
+                    .unwrap_or(std::env::current_dir()?);
+                Some(hexa_exec::direct_exec::repo_key(&root))
+            };
+            let (runs, hidden) = hexa_exec::direct_exec::runs_for_repo(&hexa_exec::run_log(), here.as_deref());
             let r = json!({
-                "summary": hexa_exec::direct_exec::runs_summary(&hexa_exec::run_log()),
-                "runs": hexa_exec::direct_exec::runs_snapshot(&hexa_exec::run_log()),
+                "summary": hexa_exec::direct_exec::summary_of(&runs),
+                "runs": runs,
             });
             let s = &r["summary"];
             let pass_pct = (s["pass_rate"].as_f64().unwrap_or(0.0) * 100.0).trunc() as u32;
@@ -242,7 +319,7 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
             );
             if let Some(runs) = r["runs"].as_array() {
                 if runs.is_empty() {
-                    println!("  {}", "no runs yet — `hexa do run …` to start".dimmed());
+                    println!("  {}", "no runs here yet — `hexa do run …` to start".dimmed());
                 }
                 for run in runs.iter().take(30) {
                     let ev = run["evidence_passed"].as_bool().unwrap_or(false);
@@ -253,7 +330,41 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
                     println!("  {} {:<9} {:<18} {}", mark, commit.yellow(), file.dimmed(), instr);
                 }
             }
+            if hidden > 0 {
+                println!(
+                    "  {}",
+                    format!("{hidden} run(s) of other repositories (or logged before runs named theirs) not shown; --all lists them")
+                        .dimmed()
+                );
+            }
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::failure_stage;
+
+    #[test]
+    fn a_run_that_never_reached_its_evidence_says_where_it_stopped() {
+        assert_eq!(failure_stage("no model configured — run `hexa config model t2 <model>`", false, ""), "inference");
+        assert_eq!(failure_stage("inference: connection refused", false, ""), "inference");
+        assert_eq!(
+            failure_stage("exhausted 3 attempts without passing evidence. last: inference: no fenced code block in reply", false, ""),
+            "parse"
+        );
+        assert_eq!(failure_stage("loop ended with no edit: I think the file is fine", false, ""), "parse");
+        assert_eq!(failure_stage("workspace: no such worktree", false, ""), "setup");
+    }
+
+    #[test]
+    fn a_run_whose_evidence_ran_fails_at_evidence_or_commit() {
+        assert_eq!(failure_stage("exhausted 3 attempts", false, "test result: FAILED"), "evidence");
+        assert_eq!(failure_stage("evidence PASSED but the commit failed", true, "ok"), "commit");
+        assert_eq!(
+            failure_stage("exhausted 3 attempts without passing evidence. last: evidence `false` exited non-zero", false, ""),
+            "evidence"
+        );
+    }
 }

@@ -27,6 +27,7 @@ use walkdir::WalkDir;
 
 use extract::code::{self, Language};
 use extract::markdown;
+use ports::ImportKind;
 use model::{edge_id, id_for, Confidence, Edge, EdgeKind, KnowledgeGraph, Node, NodeKind};
 use semantic::{SemanticContext, SemanticExtractor};
 
@@ -82,7 +83,34 @@ impl Default for BuildOpts {
 /// as too noisy (prevents common names from forming false hubs).
 const MAX_AMBIGUOUS_REFS: usize = 3;
 
+/// Where `hexa graph build` writes the graph, relative to the project root.
+/// Under `.hexa/`, which a hexa project already ignores, so a build leaves no
+/// untracked directory at the repository root.
+pub const GRAPH_FILE: &str = ".hexa/graph/graph.json";
+
+/// Where the graph was written before it moved under `.hexa/`. Still read, so
+/// a graph built by an older hexa keeps answering until the next build.
+pub const LEGACY_GRAPH_FILE: &str = "graph-out/graph.json";
+
+/// The graph file to read for `root`: the current location when it exists,
+/// else the legacy one when that exists, else the current location (which a
+/// build would create, and which a "no graph" error should name).
+pub fn graph_file(root: &Path) -> std::path::PathBuf {
+    let current = root.join(GRAPH_FILE);
+    if current.is_file() {
+        return current;
+    }
+    let legacy = root.join(LEGACY_GRAPH_FILE);
+    if legacy.is_file() {
+        return legacy;
+    }
+    current
+}
+
 const EXCLUDE_DIRS: &[&str] = &[
+    // hexa's and Claude Code's own folders: skill docs and caches, not the
+    // project. Indexed, `.claude/` skills outranked project code in `query`.
+    ".claude",
     "node_modules",
     "target",
     "dist",
@@ -115,8 +143,8 @@ pub async fn build(
     let mut id_file: HashMap<String, String> = HashMap::new();
     // set of known relative file paths, for import resolution.
     let mut file_set: HashSet<String> = HashSet::new();
-    // collected (file_rel, raw_path, names) imports to resolve after all files seen.
-    let mut pending_imports: Vec<(String, String, Vec<String>)> = Vec::new();
+    // collected (file_rel, raw_path, names, kind) imports to resolve after all files seen.
+    let mut pending_imports: Vec<(String, String, Vec<String>, ImportKind)> = Vec::new();
     // prose chunks for the deep semantic pass: (file_rel, prose).
     let mut prose_chunks: Vec<(String, String)> = Vec::new();
 
@@ -217,7 +245,7 @@ pub async fn build(
                 }
             }
             for imp in fx.imports {
-                pending_imports.push((rel_lossy.clone(), imp.raw_path, imp.names));
+                pending_imports.push((rel_lossy.clone(), imp.raw_path, imp.names, imp.kind));
             }
         }
 
@@ -255,9 +283,66 @@ pub async fn build(
 
     // ── Resolve import + reference edges (now that all files/entities are known).
     let crate_roots = crate_roots(root, &file_set);
-    for (from_rel, raw_path, names) in &pending_imports {
+    for (from_rel, raw_path, names, kind) in &pending_imports {
         let from_file_id = id_for(NodeKind::File, from_rel, from_rel);
         let resolved = resolve_import(from_rel, raw_path, &file_set, &crate_roots);
+
+        match kind {
+            // `mod x;` wires a module in. It is not a use of its items.
+            ImportKind::ModDecl => {
+                if let Some(target_rel) = &resolved {
+                    let to_file_id = id_for(NodeKind::File, target_rel, target_rel);
+                    add_edge(
+                        &mut graph,
+                        &mut edge_ids,
+                        EdgeKind::Declares,
+                        &from_file_id,
+                        &to_file_id,
+                        Confidence::Extracted,
+                    );
+                }
+                continue;
+            }
+            // A qualified path links only to an item the resolved file defines.
+            // An unresolvable prefix falls back to the crate root, and a name
+            // match there or repo-wide would be a guess.
+            ImportKind::PathExpr => {
+                let Some(target_rel) = &resolved else { continue };
+                let hits: Vec<String> = names
+                    .iter()
+                    .filter_map(|name| label_index.get(&name.to_ascii_lowercase()))
+                    .flatten()
+                    .filter(|tid| {
+                        id_file.get(tid.as_str()).map(|f| f.as_str()) == Some(target_rel.as_str())
+                    })
+                    .cloned()
+                    .collect();
+                if hits.is_empty() {
+                    continue;
+                }
+                let to_file_id = id_for(NodeKind::File, target_rel, target_rel);
+                add_edge(
+                    &mut graph,
+                    &mut edge_ids,
+                    EdgeKind::Imports,
+                    &from_file_id,
+                    &to_file_id,
+                    Confidence::Extracted,
+                );
+                for tid in &hits {
+                    add_edge(
+                        &mut graph,
+                        &mut edge_ids,
+                        EdgeKind::References,
+                        &from_file_id,
+                        tid,
+                        Confidence::Extracted,
+                    );
+                }
+                continue;
+            }
+            ImportKind::Use => {}
+        }
 
         // File→file import edge when the path resolves inside the project.
         if let Some(target_rel) = &resolved {
@@ -392,6 +477,36 @@ pub async fn build(
     };
 
     Ok(graph)
+}
+
+/// Files a build would index that changed after `since` (the time a graph was
+/// written), project-relative, sorted, at most `limit`. A non-empty answer means
+/// the graph on disk no longer describes the tree, and a consumer verdict read
+/// from it may be wrong.
+pub fn newer_sources(root: &Path, since: std::time::SystemTime, limit: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    for entry in WalkDir::new(root)
+        .sort_by_file_name()
+        .into_iter()
+        .filter_entry(|e| !is_excluded(e))
+        .filter_map(|e| e.ok())
+    {
+        if out.len() >= limit {
+            break;
+        }
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let rel = rel_path(root, entry.path());
+        if Language::from_path(&rel).is_none() && !markdown::is_doc_file(&rel) {
+            continue;
+        }
+        let modified = entry.metadata().ok().and_then(|m| m.modified().ok());
+        if modified.is_some_and(|m| m > since) {
+            out.push(rel);
+        }
+    }
+    out
 }
 
 // ── helpers ──────────────────────────────────────────────

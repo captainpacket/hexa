@@ -44,7 +44,7 @@ A boundary violation in an adapter is fixed by importing through the port; if
 the port does not re-export the type, add the re-export to the port first. A
 dead export is removed, or made private when its own file uses it. Before
 removing anything, run `hexa graph build`, then `hexa graph consumers <path>`:
-consumers reads the saved graph in `graph-out/graph.json`, which is stale or
+consumers reads the saved graph in `.hexa/graph/graph.json`, which is stale or
 missing until it is rebuilt.
 
 ## 3. Grade again
