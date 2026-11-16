@@ -114,8 +114,8 @@ pub enum AdrAction {
     Accept {
         /// ADR id (e.g. ADR-2026-06-05-1200 or 2606051200)
         adr_id: String,
-        /// One-line rationale recorded in the commit/audit trail.
-        #[arg(long, short, default_value = "operator: accepted via `hexa adr accept`")]
+        /// Why: one line, recorded under the status. Required — a placeholder would record a decision nobody explained.
+        #[arg(long, short)]
         rationale: String,
     },
     /// Set an ADR to Completed — GATED on its workplan being reconciled done.
@@ -126,7 +126,7 @@ pub enum AdrAction {
     Complete {
         /// ADR id
         adr_id: String,
-        #[arg(long, short, default_value = "operator: completed via `hexa adr complete`")]
+        #[arg(long, short)]
         rationale: String,
         /// Skip the implementation-confirmed gate (operator override).
         #[arg(long)]
@@ -139,7 +139,7 @@ pub enum AdrAction {
         /// The replacement ADR id (must exist).
         #[arg(long)]
         by: String,
-        #[arg(long, short, default_value = "operator: superseded via `hexa adr supersede`")]
+        #[arg(long, short)]
         rationale: String,
     },
     /// Regenerate `docs/adrs/INDEX.md` — a generated map of the ledger grouped by
@@ -314,20 +314,17 @@ async fn set_adr_status(
         anyhow::bail!("no `Status:` header line in {} — unexpected ADR format", path.display());
     };
     let rationale = rationale.trim();
-    let out = if rationale.is_empty() {
-        out
-    } else {
-        let date = chrono::Local::now().format("%Y-%m-%d");
-        insert_status_note(&out, &format!("> {date} {new_status}: {}", rationale.replace('\n', " ")))
-    };
+    if rationale.is_empty() {
+        anyhow::bail!("give the reason: --rationale \"<why {id} is {new_status}>\" — it is recorded under the status");
+    }
+    let date = chrono::Local::now().format("%Y-%m-%d");
+    let out = insert_status_note(&out, &format!("> {date} {new_status}: {}", rationale.replace('\n', " ")));
     write_atomically(&path, &out)?;
     println!("{} {} : {} → {}", "\u{2b21}".cyan(), id, old.dimmed(), new_status.green().bold());
     if let Some(by) = superseded_by {
         println!("  Superseded-By: {}", by.yellow());
     }
-    if !rationale.is_empty() {
-        println!("  {} (recorded under the status)", rationale.dimmed());
-    }
+    println!("  {} (recorded under the status)", rationale.dimmed());
     println!("  {} file updated (uncommitted — commit to record the transition in history)", "\u{2192}".dimmed());
     Ok(())
 }

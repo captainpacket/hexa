@@ -63,7 +63,7 @@ fn lines(text: &str) -> Vec<&str> {
 #[test]
 fn accept_rewrites_the_frontmatter_and_the_body_in_their_own_styles() {
     let l = Ledger::with(PROPOSED);
-    l.hexa(&["adr", "accept", ID]);
+    l.hexa(&["adr", "accept", ID, "--rationale", "the review signed off"]);
     let adr = l.adr();
 
     assert!(lines(&adr).contains(&"status: accepted"), "frontmatter keeps its lowercase key and value:\n{adr}");
@@ -81,7 +81,7 @@ fn accept_rewrites_the_frontmatter_and_the_body_in_their_own_styles() {
 #[test]
 fn complete_rewrites_both_lines() {
     let l = Ledger::with(&PROPOSED.replace("status: proposed", "status: accepted").replace("**Status:** Proposed", "**Status:** Accepted"));
-    l.hexa(&["adr", "complete", ID, "--force"]);
+    l.hexa(&["adr", "complete", ID, "--force", "--rationale", "built"]);
     let adr = l.adr();
 
     assert!(lines(&adr).contains(&"status: completed"), "{adr}");
@@ -91,7 +91,7 @@ fn complete_rewrites_both_lines() {
 #[test]
 fn supersede_rewrites_both_lines_and_links_the_replacement_once() {
     let l = Ledger::with(&PROPOSED.replace("status: proposed", "status: accepted").replace("**Status:** Proposed", "**Status:** Accepted"));
-    l.hexa(&["adr", "supersede", ID, "--by", "ADR-2610160002"]);
+    l.hexa(&["adr", "supersede", ID, "--by", "ADR-2610160002", "--rationale", "replaced"]);
     let adr = l.adr();
 
     assert!(lines(&adr).contains(&"status: superseded"), "{adr}");
@@ -103,7 +103,7 @@ fn supersede_rewrites_both_lines_and_links_the_replacement_once() {
 fn a_capitalised_frontmatter_keeps_its_case() {
     let adr = PROPOSED.replace("status: proposed", "Status: Proposed");
     let l = Ledger::with(&adr);
-    l.hexa(&["adr", "accept", ID]);
+    l.hexa(&["adr", "accept", ID, "--rationale", "the review signed off"]);
     let adr = l.adr();
 
     assert!(lines(&adr).contains(&"Status: Accepted"), "{adr}");
@@ -114,7 +114,7 @@ fn a_capitalised_frontmatter_keeps_its_case() {
 fn a_body_only_adr_still_transitions() {
     let adr = "# ADR-2610160001: A decision\n\n**Status:** Proposed\n**Date:** 2026-10-16\n";
     let l = Ledger::with(adr);
-    l.hexa(&["adr", "accept", ID]);
+    l.hexa(&["adr", "accept", ID, "--rationale", "the review signed off"]);
     let adr = l.adr();
 
     assert!(lines(&adr).contains(&"**Status:** Accepted"), "{adr}");
