@@ -6,7 +6,7 @@
 > [`ARCHITECTURE.md`](../../ARCHITECTURE.md); for *why* a decision was made,
 > read the ADR itself.
 
-**55 ADRs** across 1 epochs.
+**73 ADRs** across 1 epochs.
 
 ## Epoch: `single-agent` — **current**
 
@@ -14,12 +14,30 @@ _One gateway-mediated agent loop; code-graph context as the differentiator_
 
 | ADR | Status | Title | Superseded-By |
 |-----|--------|-------|---------------|
+| ADR-2611151030 | proposed | ADR-2611151030: `hexa adr board` shows which decisions are done, how far each is, and who is on it |  |
+| ADR-2611151330 | proposed | ADR-2611151330: `hexa dev build-keys` catches a native build that recompiles depending on the command |  |
+| ADR-2611151645 | proposed | ADR-2611151645: `hexa harden` checks its gate before it hunts, and keeps what the gate said |  |
+| ADR-2611152035 | proposed | ADR-2611152035: hexa learns from its own record, and gives better models bigger work |  |
+| ADR-2611081151 | accepted | ADR-2611081151: A check that cannot read its evidence fails, and a seal is anchored in history |  |
+| ADR-2611062141 | accepted | ADR-2611062141: `hexa spec amend` records a reviewed edit to a sealed test |  |
+| ADR-2611050000 | proposed | ADR-2611050000: Template-Driven Telemetry Rendering |  |
+| ADR-2611051850 | proposed | ADR-2611051850: hexa keeps the record and the rules for concurrent agents |  |
+| ADR-2611031914 | accepted | ADR-2611031914: hexa files issues and opens pull requests on the repository's forge |  |
+| ADR-2611020815 | accepted | ADR-2611020815: A run does not replace the loop's gate |  |
 | ADR-2610301129 | accepted | ADR-2610301129: hexa installs the question-alert Claude Code mod on setup |  |
+| ADR-2610301330 | proposed | ADR-2610301330: The status bar gets a glance, not a paragraph |  |
+| ADR-2610301500 | proposed | ADR-2610301500: A dead end gives a guide, and the guide records the gap |  |
+| ADR-2610281011 | proposed | ADR-2610281011: design is the first stage of the hexa loop |  |
+| ADR-2610281442 | proposed | ADR-2610281442: a sealed test can pass, and its writer sees the API it tests |  |
+| ADR-2610281516 | proposed | ADR-2610281516: inference is measured, cached, and repaired rather than repeated |  |
+| ADR-2610281552 | proposed | ADR-2610281552: a new project is consistent on day one |  |
+| ADR-2610281628 | proposed | ADR-2610281628: an amended decision is re-proved where it changed |  |
 | ADR-2610270853 | accepted | ADR-2610270853: hexa knows which build it is and says when it is behind |  |
 | ADR-2610270901 | accepted | ADR-2610270901: `claude-text` serves Claude as a tool-less completion |  |
 | ADR-2610271110 | proposed | ADR-2610271110: A decision not yet built is declared, and the declaration may only shrink |  |
 | ADR-2610271308 | accepted | ADR-2610271308: `hexa hey` routes only to verbs hexa has |  |
 | ADR-2610271649 | accepted | ADR-2610271649: An adapter importing another adapter in its own layer is a violation |  |
+| ADR-2610271736 | proposed | ADR-2610271736: hexa designs with an elephant and reviews with goldfish |  |
 | ADR-2610261356 | accepted | ADR-2610261356: A primary adapter may drive a use case; the docs say so |  |
 | ADR-2610261420 | accepted | ADR-2610261420: A grade floor names what it let through; the scaffold fails on any violation |  |
 | ADR-2610221540 | accepted | ADR-2610221540: An ADR is compiled to a spec, the spec to sealed tests that fail, and only then is code generated |  |
@@ -70,6 +88,3 @@ _One gateway-mediated agent loop; code-graph context as the differentiator_
 | ADR-2609121843 | accepted | ADR-2609121843: `hexa build` must prove it built something |  |
 | ADR-2609122048 | accepted | ADR-2609122048: a tool that reports "nothing found" must prove it looked |  |
 
-| ADR-2611020815 | accepted | ADR-2611020815: A run does not replace the loop's gate |  |
-| ADR-2611031914 | accepted | ADR-2611031914: hexa files issues and opens pull requests on the repository's forge |  |
-| ADR-2611081151 | accepted | ADR-2611081151: A check that cannot read its evidence fails, and a seal is anchored in history |  |
