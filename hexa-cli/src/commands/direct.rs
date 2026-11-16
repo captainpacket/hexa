@@ -116,6 +116,45 @@ fn failure_stage(error: &str, evidence_passed: bool, evidence_output: &str) -> &
     "setup"
 }
 
+/// `f`, given from `cwd`, as a path relative to the repository `root`, or `None`
+/// when it ends up outside it. `.` and `..` are resolved first, and symlinks in
+/// the part of the path that exists (macOS reaches `/var` through `/private/var`),
+/// so `../../docs/a.md` from a subdirectory and an absolute path both work.
+fn repo_relative(root: &std::path::Path, cwd: &std::path::Path, f: &str) -> Option<String> {
+    use std::path::{Component, Path, PathBuf};
+    let joined = if Path::new(f).is_absolute() { PathBuf::from(f) } else { cwd.join(f) };
+    let mut lexical = PathBuf::new();
+    for c in joined.components() {
+        match c {
+            Component::ParentDir => {
+                lexical.pop();
+            }
+            Component::CurDir => {}
+            other => lexical.push(other.as_os_str()),
+        }
+    }
+    // Resolve symlinks through the deepest ancestor that exists; keep the rest as written.
+    let mut existing = lexical.clone();
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    while !existing.exists() {
+        match existing.file_name() {
+            Some(n) => tail.push(n.to_os_string()),
+            None => break,
+        }
+        if !existing.pop() {
+            break;
+        }
+    }
+    let mut real = existing.canonicalize().unwrap_or(existing);
+    for n in tail.into_iter().rev() {
+        real.push(n);
+    }
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let rel = real.strip_prefix(&root).ok()?;
+    let s = rel.to_string_lossy().into_owned();
+    (!s.is_empty()).then_some(s)
+}
+
 pub async fn run(action: DoAction) -> anyhow::Result<()> {
     // No daemon. `hexa do` used to POST the whole task to /api/direct/execute and require nexus to
     // be up first — for a route that was a one-line passthrough to `execute_direct`, in a crate
@@ -254,13 +293,13 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
             let root = std::path::PathBuf::from(String::from_utf8_lossy(&top.stdout).trim().to_string());
             // Paths are given from where you stand; the gate runs and commits from the repository root.
             let cwd = std::env::current_dir()?;
-            let rel: Vec<String> = files
-                .iter()
-                .map(|f| {
-                    let abs = cwd.join(f);
-                    abs.strip_prefix(&root).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| f.clone())
-                })
-                .collect();
+            let mut rel: Vec<String> = Vec::new();
+            for f in &files {
+                match repo_relative(&root, &cwd, f) {
+                    Some(p) => rel.push(p),
+                    None => anyhow::bail!("{f} is outside the repository ({}): only files in it can be gated and committed", root.display()),
+                }
+            }
             crate::commands::loop_cmd::note_run_gate(&evidence, "build", None);
             if uncounted {
                 crate::commands::loop_cmd::note_gate_uncounted(&evidence);
