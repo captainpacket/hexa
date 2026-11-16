@@ -65,7 +65,7 @@ hexa dev validate       # build → test → analyze → validate
 hexa dev worktree list  # every active worktree
 hexa dev worktree cleanup           # dry run: the merged worktrees it would remove
 hexa dev worktree cleanup --force   # remove them; a worktree with uncommitted changes is kept
-hexa status             # project, config and git state
+hexa status             # the loop, what is in flight in this repo, the next step
 ```
 
 `cleanup --stale` adds unmerged feature worktrees idle for a day. Their

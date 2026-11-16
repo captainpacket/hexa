@@ -26,4 +26,4 @@ description: Provide a high-level synthesis of project progress, mapping ADRs to
    - **⬡ Health**: Current architecture grade and any critical violations.
 
 ## CLI Shortcut
-Use `hexa status` for low-level state, but use this skill for the "Developer's View" of progress.
+`hexa status` says where this session's work stands: the loop, what is in flight in this repo, and the next step. Use this skill for the "Developer's View" of progress across every ADR.

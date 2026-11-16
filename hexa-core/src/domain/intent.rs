@@ -32,6 +32,7 @@ const HEXA_COMMANDS: &[&str] = &[
     "doctor",
     "self-update --check",
     "harden <path>",
+    "graph consumers <path>",
     "memory search <words>",
     "dev worktree list",
     "dev worktree cleanup",
@@ -131,6 +132,24 @@ pub fn route(text: &str) -> Routed {
                 format!("harden {p}"),
                 true,
                 format!("Hunt for bugs in {p}, verify each finding, fix each under the gate"),
+            ),
+            None => Routed::None,
+        };
+    }
+
+    // Who uses a path, and whether deleting it is safe: the excision oracle.
+    // The path comes from the request or there is no route.
+    if (has("who") && (starts("use") || has("calls") || has("imports")))
+        || has("depends")
+        || has("depend")
+        || has("consumers")
+        || (has("safe") && (has("delete") || has("remove")))
+    {
+        return match ws.iter().find_map(|w| path_like(w.raw)) {
+            Some(p) => hexa(
+                format!("graph consumers {p}"),
+                false,
+                format!("List what uses {p}, from the saved code graph (`hexa graph build` refreshes it)"),
             ),
             None => Routed::None,
         };
@@ -260,7 +279,7 @@ pub fn route(text: &str) -> Routed {
         );
     }
     if has("next") || (ws.len() == 1 && has("go")) {
-        return hexa("go", false, "Suggest the next action");
+        return hexa("go", false, "Show the next step, read from the loop (the Next: line of hexa status)");
     }
 
     if starts("calibrat") || (starts("test") && has("inference")) {
@@ -290,8 +309,11 @@ pub fn route(text: &str) -> Routed {
             "Check the docs for freshness and terminology",
         );
     }
-    if (ws.len() == 1 && has("status")) || (has("project") && has("status")) {
-        return hexa("status", false, "Show project, config and git state");
+    if (ws.len() == 1 && has("status"))
+        || (has("project") && has("status"))
+        || (has("where") && has("am") && has("i"))
+    {
+        return hexa("status", false, "Show where the work stands: the loop, what is in flight here, and the next step");
     }
 
     if has("rebuild") || (has("build") && has("release")) {

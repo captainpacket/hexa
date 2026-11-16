@@ -188,7 +188,7 @@ enum Commands {
     Bootstrap(BootstrapArgs),
     /// Refresh hexa-managed sections of CLAUDE.md in place (no interview, no reset)
     Refresh(RefreshArgs),
-    /// Do the next right thing — check project health and suggest/execute actions
+    /// The next step for this repo, read from the loop (the `Next:` line of `hexa status`). Read-only
     Go,
     /// Knowledge graph — build/query/path/explain a project's code+docs graph
     Graph {
@@ -316,7 +316,7 @@ ADRs are history and are not checked.")]
         #[command(subcommand)]
         action: commands::assets_cmd::AssetsAction,
     },
-    /// Where the work stands: git, the loop, runs and subagents in progress, last outcomes. JSON when piped
+    /// Where am I: the loop, what is in flight in this repo (--all: every project), and the next step. JSON when piped
     Status(commands::status::StatusArgs),
     /// The task ledger: register a task and the paths it may edit, report it done, list and release (JSON when piped)
     Agent {
@@ -587,7 +587,7 @@ fn print_getting_started() {
     println!();
     println!("{}", "  Getting started".bold());
     println!();
-    println!("    {}              Do the next right thing (autonomous)", "hexa go".cyan());
+    println!("    {}          Where the work stands, and the next step", "hexa status".cyan());
     println!("    {}           Structured brief of recent activity", "hexa brief".cyan());
     println!("    {}      Workplan lifecycle (create, execute, status)", "hexa plan list".cyan());
     println!("    {}          Configure trust, taste, inference", "hexa config".cyan());
