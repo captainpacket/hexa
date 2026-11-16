@@ -9,6 +9,25 @@ hexa does not trust a change because its tests pass. It trusts a change whose
 gate was written before the code, by something that never saw the code, and
 which failed until the code existed. This skill is that loop, verb by verb.
 
+## Which path
+
+- **A small change** (a fix, one behaviour, no new port, adapter or
+  dependency): record a gate, make the edit, see the gate green. That is
+  `hexa loop gate '<command>'`, the edit, and the gate run (or `hexa do run`,
+  section 4). Sections 0–3 do not apply.
+- **An ADR-backed feature** (a new port, adapter or dependency, or anything
+  an ADR decides): sections 0–5 in order. Section 2 ends at a person: **an
+  agent stops and asks; it never runs `hexa spec accept` itself.**
+- **Outward-facing verbs** (`hexa pr open`, `hexa issue file`,
+  `hexa issue sync`, `hexa gap pr`): by default they print what they would
+  send. Pass `--send` only when the person has said to send it, in this
+  conversation. `hexa forge status` reads the forge and sends nothing.
+
+Several verbs commit, and some reset. Before running `do run`, `harden`,
+`build`, `spec tests`, `bench` or `gate coverage` in a tree with other work in
+it, read `/hexa-git-effects`: what each commits, on which branch, what it
+resets, and how to get your work back (`git reflog`).
+
 ## 0. Design (optional, before the decision)
 
 For a feature-sized change, stress-test the idea before deciding it, with the
@@ -74,11 +93,33 @@ the ADR, then the spec, then a new acceptance.
 
 ```bash
 hexa loop gate "hexa spec verify ADR-<id>"
-hexa do run "<task>" --file <path> --evidence "<command>"   # one file, committed only on exit 0
+hexa do run "<task>" --file <path> --evidence "<command>"   # an agent edits; commits on this branch only if the evidence passes
 hexa build "<challenge>" --target <dir> --gate "<command>"  # a whole system
 hexa spec verify ADR-<id>          # each scenario's test, run alone
 hexa spec verify --prove ADR-<id>  # each test existed and failed at its red commit
 ```
+
+`hexa do run` commits on the current branch: `--file`, plus each file named
+with `--also` (repeatable) for a change that needs more than one file. Start
+from a clean tree. It refuses while other tracked files in the same package
+are already modified, unless you name them with `--also` or pass
+`--include-dirty` to sweep them in on purpose. Details and recovery:
+`/hexa-git-effects`.
+
+**Counted or uncounted.** A gate or evidence command passes on what a test
+runner reports, not on exit 0 alone: zero tests is a failure, and output no
+known runner wrote (cargo test, go test, node --test, bun test,
+`hexa spec verify`) is a failure. A command that runs no tests — a build, a
+lint, `hexa analyze . --exit-code` — must be declared uncounted, or it fails
+every time:
+
+```bash
+hexa do run "<task>" --file <path> --evidence "cargo clippy -- -D warnings" --uncounted
+hexa loop gate "hexa analyze . --exit-code" --uncounted
+```
+
+The commit and every report then say `uncounted`, so a reader knows no test
+was counted.
 
 ## 5. Harden, then ship
 

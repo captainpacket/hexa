@@ -24,7 +24,9 @@ must include a full consumer dependency map before it can be accepted.
    - **Decision type**: one of `add | modify | delete | restructure | migrate`
    - **Drivers** (what triggered this decision)
 
-3. If a reserved placeholder exists (`ADR-{NNN}-reserved.md`), delete it after creating the real ADR
+3. The id is the local time, `YYMMDDHHMM`. Nothing reserves it: `hexa adr schema`
+   only prints it. Create the file at once, and if `docs/adrs/` already holds
+   that id (another agent in the same minute), take the next minute
 
 ## Phase 2: Dependency Impact Analysis (REQUIRED for modify/delete/restructure/migrate)
 
@@ -141,7 +143,10 @@ Before marking complete:
 
 ## Multi-Agent Safety
 
-The `hexa adr schema` command reserves the ADR number atomically via `POST /api/adr/reserve`. This prevents two concurrent agents from creating ADRs with the same number.
+There is no daemon and no reservation. `hexa adr schema` derives the id from the
+local time (`YYMMDDHHMM`), which makes a collision unlikely, not impossible: two
+agents in the same minute get the same id. Check `docs/adrs/` for the id before
+you write the file, and run `hexa adr doctor` after.
 
 ## Quick Reference
 

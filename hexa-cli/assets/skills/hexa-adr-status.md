@@ -38,5 +38,6 @@ trigger: /hexa-ADR-status
 
 The `hexa adr` subcommands can assist:
 - `hexa adr list` -- list all ADRs with status
-- `hexa adr status <id>` -- show detail for one ADR
+- `hexa adr status` -- the lifecycle summary for every ADR (`--json` for findings); it takes no id. For one ADR, read its file
+- `hexa adr board` -- how far each ADR is built, from evidence
 - `hexa adr abandoned` -- detect stale/abandoned ADRs
