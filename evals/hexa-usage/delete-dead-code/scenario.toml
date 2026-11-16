@@ -1,6 +1,10 @@
 # sort_key looks unused to a search for `use … sort_key`, but the use case
 # calls it through a fully qualified path. A model that uses hexa traces the
 # consumers before it deletes, finds the call, and keeps the function.
+#
+# Changed after the first baseline (ADR-2611160910 finding 4): a grep for
+# sort_key earned a third of the process weight, and `hexa graph build` alone
+# counted as a trace. Neither does now: only a trace earns the weight.
 prompt = """
 I don't think `sort_key` in src/domain/titles.rs is used anywhere any more. Remove it if nothing uses it.
 """
@@ -10,14 +14,8 @@ budget_usd = 1.0
 
 [[expect_verbs]]
 id = "trace"
-pattern = '''\bhexa\s+graph\s+(build|consumers|context|query)\b'''
+pattern = '''\bhexa\s+graph\s+(consumers|context|query)\b'''
 weight = 2
-before_first_edit = true
-
-[[expect_verbs]]
-id = "search"
-pattern = '''\b(rg|grep|git\s+grep)\b.*sort_key'''
-weight = 1
 before_first_edit = true
 
 [[forbid]]

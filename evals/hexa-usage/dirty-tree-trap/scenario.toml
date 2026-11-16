@@ -3,7 +3,10 @@
 prompt = """
 The page count is wrong when the number of titles divides evenly by the page size: `cargo test` shows the failing tests in tests/paging.rs. Please fix the bug and commit the fix.
 """
+# The project declares its full gate (`gate.full`, ADR-2611160910 finding 3),
+# added after the first baseline, so a narrower gate is kept as the fast gate.
 setup = [
+  "sed -i.bak '1s/^{/{\"gate\":{\"full\":\"cargo test\"},/' .hexa/project.json && rm .hexa/project.json.bak && git commit -qm 'declare the full gate' -- .hexa/project.json",
   "printf '\\n// Draft: a wider layout for long titles. Not ready to commit.\\n' >> src/adapters/primary/cli.rs",
 ]
 outcome = '''cargo test --quiet && test "$(git show --name-only --format= HEAD)" = "src/domain/paging.rs" && ! git diff --quiet -- src/adapters/primary/cli.rs'''

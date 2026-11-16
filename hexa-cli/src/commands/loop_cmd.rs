@@ -60,6 +60,9 @@ pub enum LoopAction {
     },
     /// Forget the recorded state
     Clear,
+    /// Carry the most recent ended session's work into this one: its ADR,
+    /// gate (re-confirmed now), stage and checklist (ADR-2611160910)
+    Resume,
     /// The checklist: the steps this work is made of, checked off as they land
     Task {
         #[command(subcommand)]
@@ -302,25 +305,38 @@ pub fn loop_summary(dir: &Path) -> serde_json::Value {
         Err(e) => return serde_json::json!({ "readable": false, "error": e }),
     };
     let session = session_id();
+    // ADR-2611160910 finding 2: a session with no work of its own is shown
+    // the most recent ended session's, labelled `previous`.
+    let previous = previous_of(dir, &session, &pid_alive).map(|(id, e)| previous_summary(&id, &e));
     let Some(entry) = file.and_then(|f| entries(&f, &session).get(&session).cloned()) else {
-        return serde_json::json!({ "readable": true, "recorded": false });
+        let mut v = serde_json::json!({ "readable": true, "recorded": false });
+        if let Some(p) = previous {
+            v["previous"] = p;
+        }
+        return v;
     };
+    let previous = previous.filter(|_| !has_work(&entry));
     let s = |k: &str, d: &str| entry.get(k).and_then(|v| v.as_str()).unwrap_or(d).to_string();
     let checklist: Vec<serde_json::Value> = task_list(&entry)
         .into_iter()
         .map(|t| serde_json::json!({ "n": t.n, "title": t.title, "status": t.status }))
         .collect();
     let done = checklist.iter().filter(|t| t["status"] == "done").count();
-    serde_json::json!({
+    let mut v = serde_json::json!({
         "readable": true,
         "recorded": true,
         "adr": s("adr", "none"),
         "stage": s("stage", "decide"),
         "gate": s("gate", "none"),
+        "fast_gate": entry.get("fast_gate").and_then(|v| v.as_str()),
         "checklist": checklist,
         "checklist_done": done,
         "running": running_line(&entry),
-    })
+    });
+    if let Some(p) = previous {
+        v["previous"] = p;
+    }
+    v
 }
 
 fn write_entries(dir: &Path, m: serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
@@ -546,6 +562,98 @@ pub fn others(dir: &Path) -> Vec<Other> {
     others_of(dir, &session_id(), &pid_alive)
 }
 
+/// Whether an entry recorded work: an ADR, a gate, a design draft or a
+/// checklist. A stage alone, or touched files alone, is not work to resume.
+fn has_work(e: &serde_json::Value) -> bool {
+    let set = |k: &str| e.get(k).and_then(|v| v.as_str()).is_some_and(|s| !s.trim().is_empty() && s != "none");
+    set("adr") || set("gate") || set("design") || e.get("tasks").and_then(|t| t.as_array()).is_some_and(|a| !a.is_empty())
+}
+
+/// The most recent ended session other than `session` that recorded work,
+/// with its id (ADR-2611160910 finding 2). A live session's work is its own:
+/// the awareness lines show it, and it is never offered for resuming.
+fn previous_of(
+    dir: &Path,
+    session: &str,
+    alive: &dyn Fn(u64, Option<u64>) -> bool,
+) -> Option<(String, serde_json::Value)> {
+    let f = read_file(dir)?;
+    let mut ended: Vec<(String, serde_json::Value)> = entries(&f, session)
+        .into_iter()
+        .filter(|(id, e)| {
+            id != session
+                && has_work(e)
+                && !alive(e.get("pid").and_then(|v| v.as_u64()).unwrap_or(0), e.get("pid_start").and_then(|v| v.as_u64()))
+        })
+        .collect();
+    let updated = |e: &serde_json::Value| e.get("updated").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    ended.sort_by_key(|(_, e)| std::cmp::Reverse(updated(e)));
+    ended.into_iter().next()
+}
+
+/// The previous session's work, when this session has recorded none of its
+/// own. `None` when this session has work, or no ended session left any.
+pub fn previous(dir: &Path) -> Option<(String, serde_json::Value)> {
+    if read_loop(dir).is_some_and(|e| has_work(&e)) {
+        return None;
+    }
+    previous_of(dir, &session_id(), &pid_alive)
+}
+
+/// The previous session's work for `hexa status --json`: what `loop_summary`
+/// reports for a recorded entry, plus the session and when it last wrote.
+fn previous_summary(session: &str, e: &serde_json::Value) -> serde_json::Value {
+    let s = |k: &str, d: &str| e.get(k).and_then(|v| v.as_str()).unwrap_or(d).to_string();
+    let checklist: Vec<serde_json::Value> = task_list(e)
+        .into_iter()
+        .map(|t| serde_json::json!({ "n": t.n, "title": t.title, "status": t.status }))
+        .collect();
+    let done = checklist.iter().filter(|t| t["status"] == "done").count();
+    serde_json::json!({
+        "session": session,
+        "adr": s("adr", "none"),
+        "stage": s("stage", "decide"),
+        "gate": s("gate", "none"),
+        "fast_gate": e.get("fast_gate").and_then(|v| v.as_str()),
+        "checklist": checklist,
+        "checklist_done": done,
+        "updated": e.get("updated").and_then(|v| v.as_str()),
+    })
+}
+
+/// The step the previous session left open: the task in progress, else the
+/// first not done.
+fn pending_task(e: &serde_json::Value) -> Option<Task> {
+    let tasks = task_list(e);
+    let i = tasks.iter().position(|t| t.status == "doing").or_else(|| tasks.iter().position(|t| t.status != "done"))?;
+    tasks.into_iter().nth(i)
+}
+
+/// The lines under the loop line that show the previous session's work:
+/// its checklist and how to carry it over. Empty when there is none to show.
+/// For `hexa loop` and the session-start banner (ADR-2611160910 finding 2).
+pub fn previous_lines(dir: &Path) -> Vec<String> {
+    let Some((_, e)) = previous(dir) else { return Vec::new() };
+    let mut out = checklist(&e);
+    let next = match pending_task(&e) {
+        Some(t) => format!("next: task {} {} — ", t.n, t.title),
+        None => String::new(),
+    };
+    out.push(format!(
+        "{next}`hexa loop resume` carries the previous session's work into this one, so the hooks accept edits under its gate"
+    ));
+    out
+}
+
+/// The project's full gate, declared as `gate.full` in `.hexa/project.json`:
+/// the command that proves the whole project, which decides `stage done` and
+/// is the evidence `hexa do gate` is given (ADR-2611160910 finding 3).
+pub fn full_gate(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join(".hexa").join("project.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    v.get("gate")?.get("full")?.as_str().map(str::trim).filter(|g| !g.is_empty()).map(String::from)
+}
+
 /// How many files a session's entry remembers.
 const TOUCHED_CAP: usize = 40;
 
@@ -755,12 +863,17 @@ fn with_telemetry(line: &str, state: &serde_json::Value, asset: &crate::fmt::Tel
 /// One line for the hooks: the state, or what is missing.
 pub fn status_line(dir: &Path) -> String {
     let project = project_name(dir);
-    match read_loop(dir) {
+    // `previous` is `None` whenever this session has work of its own.
+    let prev = previous(dir);
+    match read_loop(dir).filter(|_| prev.is_none()) {
         Some(st) => {
             let adr = st.get("adr").and_then(|v| v.as_str()).unwrap_or("none");
             let gate = st.get("gate").and_then(|v| v.as_str()).unwrap_or("none");
             let stage = st.get("stage").and_then(|v| v.as_str()).unwrap_or("decide");
             let mut line = format!("Loop ({project}): stage {stage} · ADR {adr} · gate {gate}");
+            if let Some(f) = st.get("fast_gate").and_then(|v| v.as_str()).filter(|f| !f.is_empty()) {
+                line.push_str(&format!(" · fast gate {f}"));
+            }
             if let Some(d) = st.get("design").and_then(|v| v.as_str()) {
                 line.push_str(&format!(" · design {d}"));
             }
@@ -776,6 +889,23 @@ pub fn status_line(dir: &Path) -> String {
                 }
             }
             with_telemetry(&line, &st, &crate::fmt::TelemetryAsset::shipped())
+        }
+        // Nothing of this session's own, but an ended session left work in
+        // this repo: show it, labelled, rather than "nothing recorded"
+        // (ADR-2611160910 finding 2).
+        None if prev.is_some() => {
+            let (id, e) = prev.expect("checked");
+            let s = |k: &str, d: &str| e.get(k).and_then(|v| v.as_str()).unwrap_or(d).to_string();
+            let tasks = task_list(&e);
+            let done = tasks.iter().filter(|t| t.status == "done").count();
+            let tasks = if tasks.is_empty() { String::new() } else { format!(" · tasks {done}/{}", tasks.len()) };
+            format!(
+                "Loop ({project}): nothing recorded in this session. The previous session ({}, ended) left: stage {} · ADR {} · gate {}{tasks}",
+                short(&id),
+                s("stage", "decide"),
+                s("adr", "none"),
+                s("gate", "none"),
+            )
         }
         None => format!(
             "Loop ({project}): stage decide · nothing recorded. Design (optional) → Decide → Gate → Build → Harden. Record with `hexa loop design <draft>`, `hexa loop adr <ID>` and `hexa loop gate '<command>'`."
@@ -1067,7 +1197,11 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
         LoopAction::Line => println!("{}", glance_line(&cwd)),
         LoopAction::Show => {
             println!("{} {}", "\u{2b21}".cyan(), status_line(&cwd));
-            if let Some(st) = read_loop(&cwd) {
+            let prev = previous_lines(&cwd);
+            for l in &prev {
+                println!("  {l}");
+            }
+            if let Some(st) = read_loop(&cwd).filter(|_| prev.is_empty()) {
                 for l in checklist(&st) {
                     println!("  {l}");
                 }
@@ -1101,20 +1235,40 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
             if command.is_empty() {
                 anyhow::bail!("a gate is a command; it cannot be empty");
             }
+            // ADR-2611160910 finding 3: when the project declares its full
+            // gate, a different command is recorded as the fast gate and the
+            // full gate stays the gate. Warned, never refused: a narrow gate
+            // is a legitimate fast gate, not the proof.
+            let full = full_gate(&cwd).filter(|f| *f != command);
             // `gate_at`: re-running this re-confirms the gate for the current
             // task, which the hooks require (ADR-2611160730 §4).
-            update_loop(
-                &cwd,
-                serde_json::json!({
+            let patch = match &full {
+                Some(full) => serde_json::json!({
+                    "gate": full,
+                    "fast_gate": command,
+                    "gate_uncounted": false,
+                    "gate_at": chrono::Utc::now().to_rfc3339(),
+                    "stage": "gate"
+                }),
+                None => serde_json::json!({
                     "gate": command,
+                    "fast_gate": null,
                     "gate_uncounted": uncounted,
                     "gate_at": chrono::Utc::now().to_rfc3339(),
                     "stage": "gate"
                 }),
-            )
-                .map_err(|e| anyhow::anyhow!(e))?;
+            };
+            update_loop(&cwd, patch).map_err(|e| anyhow::anyhow!(e))?;
             println!("{} {}", "\u{2b21}".green(), status_line(&cwd));
-            if uncounted {
+            if let Some(full) = &full {
+                println!(
+                    "  {} `{command}` is not this project's full gate (`{full}`, gate.full in .hexa/project.json). \
+                     It is recorded as the fast gate, for quick checks while you work. The full gate still decides: \
+                     `hexa loop stage done` runs it, and it is the evidence `hexa do gate` is given: \
+                     `hexa do gate --files <file> -e '{full}' -m '<message>'`.",
+                    "warning:".yellow().bold(),
+                );
+            } else if uncounted {
                 println!("  gate recorded as uncounted: its exit status alone will decide");
             } else if gate_runs_a_known_runner(&command) == Some(false) {
                 println!(
@@ -1204,6 +1358,38 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
             let rel = hexa_exec::egm::draft_in_project(&ws, &draft).map_err(anyhow::Error::msg)?;
             update_loop(&cwd, serde_json::json!({ "design": rel, "stage": "design" })).map_err(|e| anyhow::anyhow!(e))?;
             println!("{} {}", "\u{2b21}".green(), status_line(&cwd));
+        }
+        LoopAction::Resume => {
+            if let Some(mine) = read_loop(&cwd).filter(has_work) {
+                anyhow::bail!(
+                    "this session already has work recorded (stage {} · gate {}); resuming would overwrite it. \
+                     `hexa loop clear` first if you mean to replace it with the previous session's",
+                    mine.get("stage").and_then(|v| v.as_str()).unwrap_or("decide"),
+                    mine.get("gate").and_then(|v| v.as_str()).unwrap_or("none"),
+                );
+            }
+            let Some((from, prev)) = previous_of(&cwd, &session_id(), &pid_alive) else {
+                anyhow::bail!("no ended session in this repository recorded work (an ADR, a gate or a checklist) to resume");
+            };
+            // The work, not the session: pid, touched files and runs stay
+            // with the session that made them.
+            let mut patch = serde_json::json!({ "resumed_from": from });
+            for k in ["adr", "gate", "gate_uncounted", "fast_gate", "stage", "tasks", "evidence", "design"] {
+                if let Some(v) = prev.get(k).filter(|v| !v.is_null()) {
+                    patch[k] = v.clone();
+                }
+            }
+            // Re-confirmed now: the hooks accept edits under a gate recorded
+            // in this session, after the last step checked off.
+            if prev.get("gate").and_then(|v| v.as_str()).is_some_and(|g| !g.trim().is_empty()) {
+                patch["gate_at"] = serde_json::json!(chrono::Utc::now().to_rfc3339());
+            }
+            update_loop(&cwd, patch).map_err(|e| anyhow::anyhow!(e))?;
+            println!("{} resumed session {}'s work", "\u{2b21}".green(), short(&from));
+            println!("{} {}", "\u{2b21}".green(), status_line(&cwd));
+            for l in checklist(&read_loop(&cwd).unwrap_or_default()) {
+                println!("  {l}");
+            }
         }
         LoopAction::Clear => {
             let was = clear_loop(&cwd).map_err(|e| anyhow::anyhow!(e))?;

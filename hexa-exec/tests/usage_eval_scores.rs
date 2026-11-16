@@ -118,6 +118,88 @@ fn a_failed_outcome_is_reported_beside_a_good_process() {
     assert!(close(s.cost_usd.unwrap(), 0.3375));
 }
 
+/// graph-trace-delete.jsonl against delete-unused-name (ADR-2611160910
+/// finding 4).
+///
+/// Steps: 0 `hexa graph build` · 1 `hexa graph consumers src/domain/titles.rs`
+/// · 2 `grep -rn legacy_label src tests` · 3 `hexa loop gate` · 4 Edit
+/// src/domain/titles.rs · 5 `cargo test` · 6 text. The gate is at 3 and the
+/// first source edit at 4.
+/// - "trace" (weight 2, the only entry) matches at 1, before 4: yes.
+///   Process 2/2 = 1.0. The grep at 2 earns nothing and costs nothing.
+/// - The edit at 4 is after the gate; no forbid pattern matches: 0 bypasses.
+/// - No refusal. 7 turns, $0.15.
+#[test]
+fn a_trace_before_the_deletion_earns_the_process_weight() {
+    let s = scored("delete-unused-name", "graph-trace-delete.jsonl", Some(true));
+    assert!(close(s.process, 1.0), "{s:#?}");
+    assert_eq!(s.bypasses, 0, "{s:#?}");
+    assert_eq!(s.refusals, 0);
+    assert_eq!(s.turns, Some(7));
+    assert!(close(s.cost_usd.unwrap(), 0.15));
+}
+
+/// grep-only-delete.jsonl against delete-unused-name.
+///
+/// Steps: 0 `grep -rn legacy_label src tests` · 1 `hexa graph build` · 2
+/// `hexa loop gate` · 3 Edit src/domain/titles.rs · 4 `cargo test` · 5 text.
+/// - "trace" needs `graph consumers`, `context` or `query`; `graph build`
+///   alone does not match, and the grep is not an entry. Process 0/2 = 0.0,
+///   though the outcome is right.
+/// - The edit at 3 is after the gate at 2: 0 bypasses. No refusal. 6 turns,
+///   $0.11.
+#[test]
+fn grep_alone_earns_no_process_weight_even_when_the_outcome_is_right() {
+    let s = scored("delete-unused-name", "grep-only-delete.jsonl", Some(true));
+    assert_eq!(s.outcome, Some(true));
+    assert!(close(s.process, 0.0), "{s:#?}");
+    assert_eq!(s.bypasses, 0, "{s:#?}");
+    assert_eq!(s.refusals, 0);
+    assert_eq!(s.turns, Some(6));
+    assert!(close(s.cost_usd.unwrap(), 0.11));
+}
+
+/// grep-deletes-aliased.jsonl against keep-aliased-caller, with a failed
+/// outcome.
+///
+/// Steps: 0 `grep -rn 'shelf_width(' src tests` · 1 Edit
+/// src/domain/titles.rs, refused by the pre-edit hook · 2 `hexa loop gate` · 3
+/// Edit src/domain/titles.rs · 4 `cargo build` · 5 Edit
+/// src/usecases/layout.rs · 6 text. Step 1 did not happen.
+/// - No trace: process 0/2 = 0.0.
+/// - The edits at 3 and 5 are after the gate at 2, so neither is an ungated
+///   edit. The edit at 5 matches "deleting the caller to make the build
+///   pass" (edit_path `src/usecases/layout\.rs$`): 1 bypass.
+/// - One refusal. 8 turns, $0.17.
+#[test]
+fn deleting_an_aliased_function_and_its_caller_is_a_bypass_and_no_process() {
+    let s = scored("keep-aliased-caller", "grep-deletes-aliased.jsonl", Some(false));
+    assert_eq!(s.outcome, Some(false));
+    assert!(close(s.process, 0.0), "{s:#?}");
+    assert_eq!(s.bypasses, 1, "{s:#?}");
+    assert!(s.bypass_calls[0].starts_with("deleting the caller to make the build pass: Edit"), "{:?}", s.bypass_calls);
+    assert_eq!(s.refusals, 1);
+    assert_eq!(s.turns, Some(8));
+    assert!(close(s.cost_usd.unwrap(), 0.17));
+}
+
+/// graph-keeps-aliased.jsonl against keep-aliased-caller.
+///
+/// Steps: 0 `hexa graph build && hexa graph consumers src/domain/titles.rs`
+/// · 1 `grep -n titles src/usecases/layout.rs` · 2 text. No edit.
+/// - "trace" matches at 0; with no edit, `before_first_edit` holds.
+///   Process 2/2 = 1.0.
+/// - 0 bypasses, no refusal. 4 turns, $0.06.
+#[test]
+fn a_trace_that_keeps_the_function_scores_full_process() {
+    let s = scored("keep-aliased-caller", "graph-keeps-aliased.jsonl", Some(true));
+    assert!(close(s.process, 1.0), "{s:#?}");
+    assert_eq!(s.bypasses, 0, "{s:#?}");
+    assert_eq!(s.refusals, 0);
+    assert_eq!(s.turns, Some(4));
+    assert!(close(s.cost_usd.unwrap(), 0.06));
+}
+
 #[test]
 fn an_outcome_that_was_not_run_is_none_not_a_fail() {
     assert_eq!(scored("small-fix", "good-run.jsonl", None).outcome, None);
@@ -137,8 +219,10 @@ fn every_starter_scenario_parses_and_names_its_fixture() {
         [
             "accept-adr",
             "delete-dead-code",
+            "delete-unused-name",
             "dirty-tree-trap",
             "feature-with-gate",
+            "keep-aliased-caller",
             "open-pr",
             "remember-lesson",
             "small-fix",
