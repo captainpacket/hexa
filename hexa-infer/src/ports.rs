@@ -169,6 +169,51 @@ pub trait EndpointRegistry: Send + Sync {
     fn remove(&self, id: &str) -> Result<bool, String>;
 }
 
+// ── Context compression (ADR-2611050000, amendment) ──────
+
+/// The one context budget, in estimated tokens (chars / 4), that both
+/// compression layers share.
+///
+/// The ReAct loop (`hexa-exec`'s `direct_react`) compresses mechanically every
+/// step and makes one cheap summarization call only when the result is still
+/// over this. [`crate::complete::complete_raw_with`] never compresses a request
+/// at or below it, and never compresses a request whose caller says it already
+/// did (see [`COMPRESSION_KEY`]). It was two numbers — 12 000 in the loop and
+/// 4 000 here — and the smaller one undid the larger on most steps.
+pub const COMPRESSION_THRESHOLD_TOKENS: u64 = 12_000;
+
+/// The request-JSON key a caller uses to say it owns compression.
+///
+/// ```json
+/// "compression": { "already_compressed": true, "layer": "mechanical",
+///                  "original_tokens": 30000, "compressed_tokens": 9000,
+///                  "summarization_calls": 0 }
+/// ```
+///
+/// With `already_compressed: true`, `complete_raw_with` does not run its
+/// compressor, and reports the caller's figures as the reply's telemetry, so
+/// the telemetry names the layer that actually acted.
+pub const COMPRESSION_KEY: &str = "compression";
+
+/// The estimated tokens of a transcript: every block, tool results and tool
+/// inputs included, at chars / 4 — the same rough measure the loop uses.
+///
+/// `Message::text_content` counts only text blocks, so a transcript of tool
+/// results estimated as nearly empty however large it was.
+pub fn estimate_message_tokens(messages: &[hexa_core::domain::messages::Message]) -> u64 {
+    use hexa_core::domain::messages::ContentBlock;
+    let chars: usize = messages
+        .iter()
+        .flat_map(|m| m.content.iter())
+        .map(|b| match b {
+            ContentBlock::Text { text } => text.len(),
+            ContentBlock::ToolUse { input, .. } => input.to_string().len(),
+            ContentBlock::ToolResult { content, .. } => content.len(),
+        })
+        .sum();
+    chars as u64 / 4
+}
+
 /// A service that compresses conversation history to fit within
 /// model context windows while preserving semantic signal.
 #[async_trait]
@@ -176,8 +221,17 @@ pub trait PromptCompressor: Send + Sync {
     /// Compresses the provided messages for the given model.
     ///
     /// Returns the compressed messages and a map of telemetry metadata
-    /// (e.g. compression ratio, tokens saved).
+    /// (e.g. compression ratio, tokens saved). An implementation that cannot
+    /// summarize should fall back rather than fail; an `Err` is still never
+    /// allowed to fail the caller's completion.
     async fn compress(&self, model: &str, messages: Vec<hexa_core::domain::messages::Message>) -> Result<(Vec<hexa_core::domain::messages::Message>, std::collections::HashMap<String, String>), String>;
+
+    /// The estimate above which [`Self::compress`] is called for `model`.
+    /// Never below [`COMPRESSION_THRESHOLD_TOKENS`].
+    fn threshold_tokens(&self, model: &str) -> u64 {
+        let _ = model;
+        COMPRESSION_THRESHOLD_TOKENS
+    }
 }
 
 /// `base_url`, with the environment reader injected. The local server's

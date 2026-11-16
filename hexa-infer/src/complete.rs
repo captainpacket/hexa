@@ -167,12 +167,28 @@ pub async fn complete_raw_with(
         .map(|arr| arr.iter().map(message_from_json).collect::<Vec<_>>())
         .unwrap_or_default();
 
-    let mut compression_telemetry = std::collections::HashMap::new();
-    if estimate_tokens(&messages) > 4000 {
-        let (compressed, telemetry) = compressor.compress(model, messages).await?;
-        messages = compressed;
-        compression_telemetry = telemetry;
-    }
+    // One budget, one owner (ADR-2611050000, amendment). A caller that says
+    // it compressed is not compressed again; otherwise the compressor runs
+    // only above its threshold, which is never below the shared one. Neither
+    // path can fail the call: a compressor error sends the transcript as it
+    // came, and says so.
+    let compression_telemetry = match caller_compression(req) {
+        Some(t) => t,
+        None => {
+            let original = crate::ports::estimate_message_tokens(&messages);
+            if original > compressor.threshold_tokens(model) {
+                match compressor.compress(model, messages.clone()).await {
+                    Ok((compressed, telemetry)) => {
+                        messages = compressed;
+                        telemetry
+                    }
+                    Err(e) => no_compression(original, Some(format!("compression unavailable, sent uncompressed: {e}"))),
+                }
+            } else {
+                no_compression(original, None)
+            }
+        }
+    };
 
     let tools = parse_tools(req.get("tools").unwrap_or(&serde_json::Value::Null))?;
 
@@ -211,10 +227,43 @@ pub async fn complete_raw_with(
     }))
 }
 
-fn estimate_tokens(messages: &[hexa_core::domain::messages::Message]) -> u64 {
-    messages.iter()
-        .map(|m| m.text_content().len() as u64 / 4)
-        .sum()
+/// The telemetry of a request no layer compressed.
+fn no_compression(tokens: u64, note: Option<String>) -> std::collections::HashMap<String, String> {
+    let mut t = std::collections::HashMap::new();
+    t.insert("compression_layer".to_string(), "none".to_string());
+    t.insert("original_tokens".to_string(), tokens.to_string());
+    t.insert("compressed_tokens".to_string(), tokens.to_string());
+    t.insert("summarization_calls".to_string(), "0".to_string());
+    if let Some(n) = note {
+        t.insert("compression_note".to_string(), n);
+    }
+    t
+}
+
+/// The caller's own compression report, when it says it already compressed
+/// (`"compression": {"already_compressed": true, …}`, see
+/// [`crate::ports::COMPRESSION_KEY`]): its figures become the telemetry, so
+/// the layer named is the one that acted.
+fn caller_compression(req: &serde_json::Value) -> Option<std::collections::HashMap<String, String>> {
+    let c = req.get(crate::ports::COMPRESSION_KEY)?;
+    if c.get("already_compressed").and_then(|v| v.as_bool()) != Some(true) {
+        return None;
+    }
+    let num = |k: &str| c.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+    let (original, compressed) = (num("original_tokens"), num("compressed_tokens"));
+    let mut t = std::collections::HashMap::new();
+    let layer = c.get("layer").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("caller");
+    t.insert("compression_layer".to_string(), layer.to_string());
+    t.insert("original_tokens".to_string(), original.to_string());
+    t.insert("compressed_tokens".to_string(), compressed.to_string());
+    t.insert("summarization_calls".to_string(), num("summarization_calls").to_string());
+    if compressed > 0 {
+        t.insert("compression_ratio".to_string(), format!("{:.1}x", original as f64 / compressed as f64));
+        let saved = original.saturating_sub(compressed);
+        let label = if saved < 1000 { saved.to_string() } else { format!("{:.1}k", saved as f64 / 1000.0) };
+        t.insert("tokens_saved".to_string(), label);
+    }
+    Some(t)
 }
 
 /// One message, from the loop's JSON. Content may be a bare string or a block array.
@@ -306,5 +355,146 @@ mod truncated_tests {
     fn text_is_returned_under_either_stop() {
         assert_eq!(text_or_truncation(&text("{\"findings\":[]}"), StopReason::EndTurn, "m", 4096).unwrap(), "{\"findings\":[]}");
         assert_eq!(text_or_truncation(&text("partial"), StopReason::MaxTokens, "m", 4096).unwrap(), "partial");
+    }
+}
+
+/// One budget, one owner (ADR-2611050000, amendment): `complete_raw_with`
+/// compresses only above the shared threshold, and never a request whose
+/// caller already compressed it.
+#[cfg(test)]
+mod compression_tests {
+    use super::*;
+    use crate::ports::{COMPRESSION_KEY, COMPRESSION_THRESHOLD_TOKENS};
+    use hexa_core::ports::inference::{InferenceError, InferenceRequest, InferenceResponse};
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    /// A backend that records every request and answers "ok".
+    #[derive(Default)]
+    struct Recording {
+        calls: Mutex<Vec<InferenceRequest>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Backends for Recording {
+        async fn complete(&self, request: InferenceRequest) -> Result<InferenceResponse, InferenceError> {
+            self.calls.lock().unwrap().push(request.clone());
+            Ok(InferenceResponse {
+                content: vec![ContentBlock::Text { text: "ok".into() }],
+                model_used: request.model,
+                stop_reason: StopReason::EndTurn,
+                input_tokens: 1,
+                output_tokens: 1,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                latency_ms: 0,
+                telemetry: HashMap::new(),
+            })
+        }
+        fn record_spend(&self, _: &str, _: u64, _: u64) {}
+    }
+
+    /// A compressor that counts its calls and halves the transcript.
+    #[derive(Default)]
+    struct Counting {
+        calls: Mutex<u32>,
+        fail: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl PromptCompressor for Counting {
+        async fn compress(&self, _: &str, messages: Vec<Message>) -> Result<(Vec<Message>, HashMap<String, String>), String> {
+            *self.calls.lock().unwrap() += 1;
+            if self.fail {
+                return Err("summarizer down".into());
+            }
+            let keep = messages.len() / 2;
+            let mut t = HashMap::new();
+            t.insert("compression_layer".to_string(), "semantic".to_string());
+            Ok((messages[keep..].to_vec(), t))
+        }
+    }
+
+    /// A tool-result transcript of about `tokens` estimated tokens.
+    fn transcript(tokens: u64) -> serde_json::Value {
+        let per = 4_000usize; // chars per result ≈ 1 000 tokens
+        let n = (tokens as usize * 4).div_ceil(per);
+        let mut msgs = vec![serde_json::json!({"role": "user", "content": "seed"})];
+        for i in 0..n {
+            msgs.push(serde_json::json!({"role": "assistant", "content": [
+                {"type": "tool_use", "id": format!("t{i}"), "name": "repo_grep", "input": {}}]}));
+            msgs.push(serde_json::json!({"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": format!("t{i}"), "content": "g".repeat(per)}]}));
+        }
+        serde_json::Value::Array(msgs)
+    }
+
+    fn req(messages: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({"model": "m", "max_tokens": 16, "messages": messages})
+    }
+
+    #[test]
+    fn the_shared_threshold_is_at_least_the_loops_budget() {
+        const { assert!(COMPRESSION_THRESHOLD_TOKENS >= 12_000) };
+        assert_eq!(Counting::default().threshold_tokens("any"), COMPRESSION_THRESHOLD_TOKENS);
+    }
+
+    /// The 4 000-token trigger this replaced fired on most loop steps.
+    #[tokio::test]
+    async fn nothing_is_compressed_at_or_below_the_shared_threshold() {
+        let backends = Recording::default();
+        let compressor = Counting::default();
+        let r = req(transcript(COMPRESSION_THRESHOLD_TOKENS - 2_000));
+        let out = complete_raw_with(&backends, &compressor, &r).await.unwrap();
+        assert_eq!(*compressor.calls.lock().unwrap(), 0, "compressed below the threshold");
+        assert_eq!(backends.calls.lock().unwrap().len(), 1);
+        assert_eq!(out["telemetry"]["compression_layer"], "none");
+    }
+
+    /// Tool results count toward the estimate. `text_content` skipped them,
+    /// so a transcript of large reads estimated near zero.
+    #[tokio::test]
+    async fn above_the_threshold_tool_results_count_and_the_compressor_runs_once() {
+        let backends = Recording::default();
+        let compressor = Counting::default();
+        let r = req(transcript(COMPRESSION_THRESHOLD_TOKENS + 4_000));
+        let out = complete_raw_with(&backends, &compressor, &r).await.unwrap();
+        assert_eq!(*compressor.calls.lock().unwrap(), 1);
+        assert_eq!(backends.calls.lock().unwrap().len(), 1);
+        assert_eq!(out["telemetry"]["compression_layer"], "semantic");
+    }
+
+    /// One layer only: the ReAct loop says it compressed, so nothing here does.
+    #[tokio::test]
+    async fn a_caller_that_already_compressed_is_not_compressed_again() {
+        let backends = Recording::default();
+        let compressor = Counting::default();
+        let mut r = req(transcript(COMPRESSION_THRESHOLD_TOKENS * 3));
+        r[COMPRESSION_KEY] = serde_json::json!({
+            "already_compressed": true, "layer": "mechanical",
+            "original_tokens": 90000, "compressed_tokens": 36000, "summarization_calls": 1,
+        });
+        let out = complete_raw_with(&backends, &compressor, &r).await.unwrap();
+        assert_eq!(*compressor.calls.lock().unwrap(), 0, "a second layer ran");
+        assert_eq!(backends.calls.lock().unwrap().len(), 1, "exactly the user's call");
+        let t = &out["telemetry"];
+        assert_eq!(t["compression_layer"], "mechanical", "the layer that acted is the caller's: {t}");
+        assert_eq!(t["original_tokens"], "90000");
+        assert_eq!(t["compressed_tokens"], "36000");
+        assert_eq!(t["summarization_calls"], "1");
+        assert_eq!(t["compression_ratio"], "2.5x");
+    }
+
+    /// Summarization unavailable never fails the user's call.
+    #[tokio::test]
+    async fn a_failing_compressor_does_not_fail_the_call() {
+        let backends = Recording::default();
+        let compressor = Counting { fail: true, ..Default::default() };
+        let r = req(transcript(COMPRESSION_THRESHOLD_TOKENS + 4_000));
+        let out = complete_raw_with(&backends, &compressor, &r).await.expect("the call must survive");
+        assert_eq!(backends.calls.lock().unwrap().len(), 1);
+        let t = &out["telemetry"];
+        assert_eq!(t["compression_layer"], "none", "{t}");
+        assert!(t["compression_note"].as_str().unwrap_or("").contains("summarizer down"), "{t}");
     }
 }

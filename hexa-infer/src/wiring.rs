@@ -23,15 +23,96 @@ use std::sync::Arc;
 /// The registry-backed [`Backends`]: what `hexa_infer::complete_text` and `complete_raw` run on.
 pub struct RegistryBackends;
 
+/// The registry-backed [`PromptCompressor`]: a [`SemanticCompressor`] whose
+/// cheap model is tier `t1`, resolved through the tier configuration as every
+/// other cheap call is, and whose budget and verbatim window come from
+/// `.hexa/project.json` (see [`compressor_config_in`]).
 pub struct RegistryCompressor;
+
+impl RegistryCompressor {
+    fn compressor() -> SemanticCompressor {
+        SemanticCompressor::new(Arc::new(RegistryBackends), compressor_config_in(&crate::tiers::project_root()))
+    }
+}
 
 #[async_trait]
 impl PromptCompressor for RegistryCompressor {
     async fn compress(&self, model: &str, messages: Vec<hexa_core::domain::messages::Message>) -> Result<(Vec<hexa_core::domain::messages::Message>, std::collections::HashMap<String, String>), String> {
-        let backends = Arc::new(RegistryBackends);
-        SemanticCompressor::new(backends, CompressorConfig::default())
-        .compress(model, messages)
-        .await
+        Self::compressor().compress(model, messages).await
+    }
+
+    fn threshold_tokens(&self, model: &str) -> u64 {
+        Self::compressor().threshold_tokens(model)
+    }
+}
+
+/// The compressor's configuration for the project at `root`.
+///
+/// - the cheap model is tier `t1` (`inference.tier_models.t1`); none
+///   configured means no summarization, never a guessed model name;
+/// - `inference.compression.threshold_tokens` raises the budget above which a
+///   request is compressed — a value below
+///   [`crate::ports::COMPRESSION_THRESHOLD_TOKENS`] is raised to it, so this
+///   layer never fires below the ReAct loop's own budget;
+/// - `inference.compression.keep_recent_tool_results` sets how many recent
+///   tool results stay verbatim.
+pub fn compressor_config_in(root: &std::path::Path) -> CompressorConfig {
+    let mut cfg = CompressorConfig {
+        cheap_model: crate::tiers::tier_model_in(root, "t1"),
+        ..CompressorConfig::default()
+    };
+    let project: serde_json::Value = std::fs::read_to_string(root.join(".hexa").join("project.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    let section = project.get("inference").and_then(|i| i.get("compression"));
+    let num = |k: &str| section.and_then(|c| c.get(k)).and_then(|v| v.as_u64());
+    if let Some(t) = num("threshold_tokens") {
+        cfg.threshold = t.max(crate::ports::COMPRESSION_THRESHOLD_TOKENS);
+    }
+    if let Some(n) = num("keep_recent_tool_results") {
+        cfg.keep_recent_tool_results = usize::try_from(n).unwrap_or(usize::MAX);
+    }
+    cfg
+}
+
+#[cfg(test)]
+mod compressor_config_tests {
+    use super::*;
+    use crate::ports::COMPRESSION_THRESHOLD_TOKENS;
+
+    fn project(json: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".hexa")).unwrap();
+        std::fs::write(dir.path().join(".hexa/project.json"), json).unwrap();
+        dir
+    }
+
+    #[test]
+    fn no_tier_means_no_cheap_model_and_the_shared_threshold() {
+        let d = tempfile::tempdir().unwrap();
+        let cfg = compressor_config_in(d.path());
+        assert_eq!(cfg.cheap_model, None, "a model name was guessed");
+        assert_eq!(cfg.threshold, COMPRESSION_THRESHOLD_TOKENS);
+    }
+
+    #[test]
+    fn the_cheap_model_is_tier_t1_and_the_knobs_are_read() {
+        let d = project(r#"{"inference":{"tier_models":{"t1":"small-one"},
+            "compression":{"threshold_tokens":50000,"keep_recent_tool_results":7}}}"#);
+        let cfg = compressor_config_in(d.path());
+        assert_eq!(cfg.cheap_model.as_deref(), Some("small-one"));
+        assert_eq!(cfg.threshold, 50_000);
+        assert_eq!(cfg.keep_recent_tool_results, 7);
+    }
+
+    #[test]
+    fn a_threshold_below_the_shared_one_is_raised_to_it() {
+        let d = project(r#"{"inference":{"compression":{"threshold_tokens":4000}}}"#);
+        let cfg = compressor_config_in(d.path());
+        assert_eq!(cfg.threshold, COMPRESSION_THRESHOLD_TOKENS);
+        let c = SemanticCompressor::new(Arc::new(RegistryBackends), cfg);
+        assert_eq!(c.threshold_tokens("m"), COMPRESSION_THRESHOLD_TOKENS);
     }
 }
 
