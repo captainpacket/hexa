@@ -63,9 +63,13 @@ hexa api test --base-url http://127.0.0.1:8080   # every operation against a run
 hexa dev ci             # every hexa enforcement gate
 hexa dev validate       # build → test → analyze → validate
 hexa dev worktree list  # every active worktree
-hexa dev worktree cleanup   # remove worktrees whose branches are merged into main
+hexa dev worktree cleanup           # dry run: the merged worktrees it would remove
+hexa dev worktree cleanup --force   # remove them; a worktree with uncommitted changes is kept
 hexa status             # project, config and git state
 ```
+
+`cleanup --stale` adds unmerged feature worktrees idle for a day. Their
+branches are kept, and git still refuses any worktree with uncommitted work.
 
 ## Loose ends in transcripts
 
