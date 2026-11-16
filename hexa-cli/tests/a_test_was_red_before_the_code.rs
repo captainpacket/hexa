@@ -102,6 +102,10 @@ fn spec(root: &Path, red: &str) {
         ),
     )
     .unwrap();
+    // An acceptance binds committed text (ADR-2611161600 §1).
+    let rel = format!("docs/specs/{}.json", id());
+    git(root, &["add", "--", &rel]);
+    git(root, &["commit", "-qm", "the spec, as written"]);
     for args in [vec!["spec", "accept", &id(), "--by", "a reviewer"][..].to_vec(), vec!["spec", "seal", &id()]] {
         let (code, out) = run(root, &args);
         assert_eq!(code, 0, "{args:?}:\n{out}");
