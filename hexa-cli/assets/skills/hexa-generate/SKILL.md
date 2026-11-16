@@ -63,7 +63,7 @@ Run quality gates in order, up to max_iterations:
 1. **Compile**: `npx tsc --noEmit` / `go build ./...` / `cargo check`
 2. **Lint**: `npx eslint src/adapters/{adapter}/ --ext .ts` / equivalent
 3. **Unit Test**: `npx vitest run tests/unit/{adapter_name}.test.ts` / equivalent
-4. **AST Diff** (optional): `npx hexa summarize --file src/adapters/{adapter}/index.ts --level L2`
+4. **Neighbourhood check** (optional): `hexa graph build` then `hexa graph context src/adapters/{adapter}/index.ts` — what the new file defines and uses, and who consumes it
 
 On failure:
 1. Parse structured error output from the failing gate

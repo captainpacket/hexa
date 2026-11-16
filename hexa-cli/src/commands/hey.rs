@@ -9,8 +9,10 @@ pub struct HeyArgs {
     /// Natural-language description of what you want hexa to do
     #[arg(required = true, num_args = 1..)]
     pub text: Vec<String>,
-    /// Enqueue for async execution instead of running now
-    #[arg(long)]
+    /// Ignored. There is no queue: `hexa hey` acts now. Hidden from `--help`
+    /// and kept only so an old script that passes it still parses
+    /// (ADR-2611160730 §7).
+    #[arg(long, hide = true)]
     pub queue: bool,
     /// Skip confirmation prompts
     #[arg(long, short)]

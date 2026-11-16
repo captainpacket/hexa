@@ -128,6 +128,9 @@ async fn react_attempts(
     // Snapshot pre-run dirty files so the commit includes the supporting files the
     // evidence depends on (do-loop commit-gap fix).
     let start_dirty = direct_exec::dirty_paths(repo_root).await;
+    if let Err(e) = direct_exec::refuse_dirty_riders(repo_root, task, &start_dirty) {
+        return (DirectResult::err(e), 0, model);
+    }
 
     let mut result = DirectResult {
         ok: false,
@@ -872,6 +875,9 @@ pub async fn claude_attempts(
     // Snapshot pre-run dirty files so the commit includes the supporting files the
     // evidence depends on (do-loop commit-gap fix).
     let start_dirty = direct_exec::dirty_paths(repo_root).await;
+    if let Err(e) = direct_exec::refuse_dirty_riders(repo_root, task, &start_dirty) {
+        return (DirectResult::err(e), 0, model);
+    }
     let mut result = DirectResult {
         ok: false,
         attempts: 0,

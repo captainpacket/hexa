@@ -61,6 +61,11 @@ pub struct DirectTask {
     /// the commit says `uncounted` (ADR-2611081151 §6).
     #[serde(default)]
     pub uncounted: bool,
+    /// Commit the tracked files that were already modified before the run, in
+    /// the target's package, with the change. Without it such files refuse the
+    /// run before any inference (ADR-2611160730 §2).
+    #[serde(default)]
+    pub include_dirty: bool,
 }
 
 /// Refuse any `--also` path that could leave the repository or reach into
@@ -734,6 +739,9 @@ async fn exec_attempts(deps: &ExecDeps, task: &DirectTask, repo_root: &std::path
         return DirectResult::err(e);
     }
     let start_dirty = dirty_paths(repo_root).await;
+    if let Err(e) = refuse_dirty_riders(repo_root, task, &start_dirty) {
+        return DirectResult::err(e);
+    }
     let max_attempts = task.max_attempts.unwrap_or(3).clamp(1, 6);
     let Some(model) = resolve_model(task) else {
         return DirectResult::err(NO_MODEL_CONFIGURED.to_string());
@@ -1534,6 +1542,129 @@ pub async fn restore_unlisted(repo_root: &std::path::Path, paths: &[String]) -> 
 /// tracked in `HEAD` and missing after the run (a deletion the run made, recorded
 /// in the commit) — and nothing else new: an unlisted untracked file stays out
 /// (the concurrency guard). An `--also` path neither present nor tracked is skipped.
+/// `hexa do gate` (ADR-2611160730 §3): gate the change already in the tree and
+/// commit ONLY `files`. No model is called: the agent wrote the patch.
+///
+/// Refuses before running anything when no file is named, a path escapes the
+/// repository, a file is a credential, a named file has no change, or a sealed
+/// test or spec record was touched. Then the evidence runs; only a real pass
+/// (`Passed`, or `Uncounted` when declared) commits. A failing or vacuous gate
+/// commits nothing and leaves the patch exactly where it is, for the agent to
+/// fix. Returns the new commit's id.
+pub async fn gate_patch(
+    repo_root: &std::path::Path,
+    files: &[String],
+    evidence: &str,
+    message: &str,
+    uncounted: bool,
+) -> Result<String, String> {
+    let Some((first, rest)) = files.split_first() else {
+        return Err("name the files the change is in: --files <path>…".to_string());
+    };
+    validate_also_paths(files)?;
+    refuse_credentials(first, rest)?;
+    let paths: Vec<String> = files.iter().map(|p| normalize_also(p)).collect();
+    let dirty = dirty_paths(repo_root).await;
+    let unchanged: Vec<&str> = paths.iter().filter(|p| !dirty.contains(p)).map(String::as_str).collect();
+    if !unchanged.is_empty() {
+        return Err(format!("nothing to commit in {}: no change against HEAD", unchanged.join(", ")));
+    }
+    let broken = broken_seals(repo_root);
+    if !broken.is_empty() {
+        return Err(format!(
+            "refused: sealed test(s) or spec record(s) changed: {}. A sealed test changes through the spec, never in a fix \
+             (ADR-2610221540 §6); nothing committed",
+            broken.join(", ")
+        ));
+    }
+    let (passed, output) = run_evidence(evidence, repo_root).await;
+    let verdict = evidence_verdict(passed, &output, uncounted);
+    if !verdict.passes() {
+        let tail: String = {
+            let lines: Vec<&str> = output.lines().collect();
+            lines[lines.len().saturating_sub(40)..].join("\n")
+        };
+        return Err(format!("{}\nnothing committed; the change is left in the tree", evidence_failure(evidence, &verdict, &tail)));
+    }
+    let add = tokio::process::Command::new("git")
+        .args(["add", "-A", "--"])
+        .args(&paths)
+        .current_dir(repo_root)
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !add.status.success() {
+        return Err(format!("git add: {}", String::from_utf8_lossy(&add.stderr)));
+    }
+    let how = if uncounted { "uncounted: its exit status alone decided" } else { "counted" };
+    let msg = format!("{}\n\nGate: {evidence} ({how}; hexa do gate, ADR-2611160730 §3)", message.trim());
+    let commit = tokio::process::Command::new("git")
+        .args(["commit", "-q", "-m", &msg, "--"])
+        .args(&paths)
+        .current_dir(repo_root)
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !commit.status.success() {
+        return Err(format!("git commit: {}", String::from_utf8_lossy(&commit.stderr)));
+    }
+    let head = tokio::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(repo_root)
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&head.stdout).trim().to_string())
+}
+
+/// The tracked files the operator had already changed before the run, in the
+/// target's package, that the old commit sweep would have carried into the
+/// agent's commit: not the target, not named with `--also`, not untracked
+/// (#36), not a credential, not hexa's or Claude's own state.
+pub fn pre_run_riders(repo_root: &std::path::Path, file: &str, also: &[String], start_dirty: &[String]) -> Vec<String> {
+    let pkg = package_prefix(repo_root, file);
+    let named: Vec<String> = also.iter().map(|p| normalize_also(p)).collect();
+    start_dirty
+        .iter()
+        .filter(|p| {
+            p.as_str() != file
+                && !named.contains(p)
+                && pkg.as_deref().map_or(!p.contains('/'), |pkg| p.starts_with(pkg))
+                && repo_root.join(p).exists()
+                && tracked_in_index(repo_root, p)
+                && !is_credential(p)
+                && !p.starts_with(".hexa/")
+                && !p.starts_with(".claude/")
+        })
+        .cloned()
+        .collect()
+}
+
+/// Refuse a run over someone's uncommitted tracked edits (ADR-2611160730 §2).
+///
+/// The old behaviour swept every such file in the target's package into the
+/// agent's commit so the commit would reproduce the green state; with a root
+/// manifest the package is the whole repository, so a person's half-done work
+/// left in their tree went out under the agent's message. Now the run stops
+/// before any inference and says how to go on: name the file with `--also`,
+/// commit or stash it, or ask for the sweep with `--include-dirty`.
+pub fn refuse_dirty_riders(repo_root: &std::path::Path, task: &DirectTask, start_dirty: &[String]) -> Result<(), String> {
+    if task.include_dirty {
+        return Ok(());
+    }
+    let riders = pre_run_riders(repo_root, &task.file, &task.also, start_dirty);
+    if riders.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "refused before any change: these tracked files were already modified and would have been committed with {}: {}. \
+         Name the ones the change needs with --also, commit or stash the rest, or pass --include-dirty to commit them all \
+         with this change (ADR-2611160730 §2)",
+        task.file,
+        riders.join(", ")
+    ))
+}
+
 pub async fn commit_with_also(
     repo_root: &std::path::Path,
     file: &str,
@@ -1580,21 +1711,12 @@ pub async fn commit_with_also(
     // to the target's PACKAGE and exclude anything dirtied concurrently, so neither
     // unrelated dirty files nor concurrent changes get swept (preserves the 2026-06-04
     // review-swarm fix).
-    let pkg = package_prefix(repo_root, file);
+    // A run reaches here with riders only under `--include-dirty`: otherwise
+    // `refuse_dirty_riders` stopped it before any inference (ADR-2611160730 §2).
     let mut paths: Vec<String> = vec![file.to_string()];
-    for p in start_dirty {
-        if p != file
-            && !paths.contains(p)
-            && pkg.as_deref().map_or(!p.contains('/'), |pkg| p.starts_with(pkg))
-            && repo_root.join(p).exists()
-            // Only what the operator already tracks rides along: an untracked
-            // pre-run file (a token, a draft) is committed only when named (#36).
-            && tracked_in_index(repo_root, p)
-            && !is_credential(p)
-            && !p.starts_with(".hexa/")
-            && !p.starts_with(".claude/")
-        {
-            paths.push(p.clone());
+    for p in pre_run_riders(repo_root, file, also, start_dirty) {
+        if !paths.contains(&p) {
+            paths.push(p);
         }
     }
     for p in also.iter().map(|p| normalize_also(p)) {

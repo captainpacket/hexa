@@ -56,6 +56,13 @@ pub struct InitArgs {
     /// Force overwrite existing .hexa/ config
     #[arg(short, long)]
     pub force: bool,
+
+    /// Close the hand-edit path (ADR-2611160730 §4): add `Edit(src/**)` and
+    /// `Write(src/**)` to `.claude/settings.json` `permissions.deny` and
+    /// `Bash(hexa do *)` to `permissions.allow`. Merges, never clobbers, and
+    /// is safe to re-run; on an initialized project it does only this.
+    #[arg(long)]
+    pub strict: bool,
 }
 
 pub async fn run(args: InitArgs) -> Result<()> {
@@ -80,6 +87,11 @@ pub async fn run(args: InitArgs) -> Result<()> {
 
     // ── Guard: already initialized? ───────────────────────────────
     let hexa_dir = target.join(".hexa");
+    if hexa_dir.exists() && !args.force && args.strict {
+        apply_strict_permissions(&target)?;
+        println!("  {} .claude/settings.json: strict permissions", "\u{2713}".green());
+        return Ok(());
+    }
     if hexa_dir.exists() && !args.force {
         anyhow::bail!(
             "Project already initialized at {}. Use --force to reinitialize.",
@@ -105,6 +117,9 @@ pub async fn run(args: InitArgs) -> Result<()> {
 
     // ── 3. .claude/settings.json (hooks → hexa hook <event>) ──────
     create_claude_settings(&target)?;
+    if args.strict {
+        apply_strict_permissions(&target)?;
+    }
 
     // ── 4. CLAUDE.md ──────────────────────────────────────────────
     if !args.no_claude_md {
@@ -274,6 +289,55 @@ pub fn create_claude_settings(target: &Path) -> Result<()> {
     fs::write(&settings_path, serde_json::to_string_pretty(&settings)?)
         .context("Failed to write .claude/settings.json")?;
 
+    Ok(())
+}
+
+/// What `hexa init --strict` denies and allows (ADR-2611160730 §4): source
+/// is edited through `hexa do`, which gates the edit, not by hand.
+const STRICT_DENY: &[&str] = &["Edit(src/**)", "Write(src/**)"];
+const STRICT_ALLOW: &[&str] = &["Bash(hexa do *)"];
+
+/// Merge the strict permissions into a settings object. Existing keys and
+/// entries are kept; each rule is added once. Returns whether anything changed.
+fn merge_strict_permissions(settings: &mut serde_json::Value) -> bool {
+    if !settings.is_object() {
+        *settings = serde_json::json!({});
+    }
+    if !settings["permissions"].is_object() {
+        settings["permissions"] = serde_json::json!({});
+    }
+    let mut changed = false;
+    for (key, rules) in [("deny", STRICT_DENY), ("allow", STRICT_ALLOW)] {
+        if !settings["permissions"][key].is_array() {
+            settings["permissions"][key] = serde_json::json!([]);
+        }
+        let list = settings["permissions"][key].as_array_mut().expect("just made an array");
+        for rule in rules {
+            if !list.iter().any(|v| v.as_str() == Some(rule)) {
+                list.push(serde_json::json!(rule));
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+/// `hexa init --strict`: merge the strict permissions into
+/// `.claude/settings.json`, creating it if needed. A file that is not JSON is
+/// refused rather than replaced.
+pub fn apply_strict_permissions(target: &Path) -> Result<()> {
+    let claude_dir = target.join(".claude");
+    create_dir_if_missing(&claude_dir)?;
+    let path = claude_dir.join("settings.json");
+    let mut settings: serde_json::Value = match fs::read_to_string(&path) {
+        Ok(text) if !text.trim().is_empty() => serde_json::from_str(&text)
+            .with_context(|| format!("{} is not valid JSON; fix it before `--strict` merges into it", path.display()))?,
+        _ => serde_json::json!({}),
+    };
+    if merge_strict_permissions(&mut settings) {
+        fs::write(&path, serde_json::to_string_pretty(&settings)? + "\n")
+            .with_context(|| format!("Failed to write {}", path.display()))?;
+    }
     Ok(())
 }
 
@@ -547,6 +611,20 @@ fn extract_templates(target: &Path) -> std::io::Result<Vec<String>> {
 #[cfg(test)]
 mod scaffold_tests {
     use super::*;
+
+    #[test]
+    fn strict_permissions_merge_once_and_keep_what_is_there() {
+        let mut s = serde_json::json!({"model": "m", "permissions": {"deny": ["Read(./.env)"], "ask": ["Bash(rm *)"]}});
+        assert!(merge_strict_permissions(&mut s));
+        assert!(!merge_strict_permissions(&mut s), "a second merge changes nothing");
+        assert_eq!(s["model"], "m");
+        assert_eq!(s["permissions"]["ask"], serde_json::json!(["Bash(rm *)"]));
+        assert_eq!(
+            s["permissions"]["deny"],
+            serde_json::json!(["Read(./.env)", "Edit(src/**)", "Write(src/**)"])
+        );
+        assert_eq!(s["permissions"]["allow"], serde_json::json!(["Bash(hexa do *)"]));
+    }
 
     #[test]
     fn every_language_declares_a_gate() {

@@ -210,7 +210,7 @@ impl Scratch {
 
     /// [`Scratch::harden`], with each finding's title given.
     async fn harden_titled(&self, fixes: Vec<Fix>, titles: Vec<String>, fast_gate: Option<String>) -> ReviewReport {
-        let gates = HardenGates { gate: self.full(), fast_gate, batch: None, baseline: false };
+        let gates = HardenGates { gate: self.full(), fast_gate, batch: None, baseline: false, lessons: Vec::new() };
         run_review_gated(FakeFrontier::new(fixes, titles), hexa_exec::default_git_history(), TARGET, &gates, &self.dir).await
     }
 
@@ -277,7 +277,9 @@ async fn five_clean_fixes_cost_one_full_gate() {
     for (subject, gate) in &commits {
         assert_eq!(gate, "fast", "'{subject}' carries Hexa-Gate: fast as a trailer: {commits:?}");
     }
-    assert_eq!(s.runs("fast"), 5, "each fix is gated fast");
+    // Each fix is gated fast, then its test is run fast without the fix to
+    // see it red (ADR-2611160730 §5): two fast runs a fix, no full gate.
+    assert_eq!(s.runs("fast"), 10, "each fix is gated fast, and red-first fast");
     assert_eq!(s.runs("full"), 1, "one full gate for the batch, and the final gate is that run");
     assert_eq!(report.full_gates, 1, "the report counts the full gates that ran");
     assert!(report.gate_run && report.gate_passed, "the batch gate is the final gate: {}", report.gate_line());
@@ -292,11 +294,11 @@ async fn five_clean_fixes_cost_one_full_gate() {
 /// Fix 3 breaks a test in a file it did not touch. The fast gate passes it,
 /// the batch is red, bisection blames fix 3 within the bound, and fixes 1, 2,
 /// 4 and 5 are committed on a green head (§4, §5). The operator's own
-/// uncommitted work is never touched by the resets and cherry-picks.
+/// untracked work is never touched by the resets and cherry-picks. (A
+/// tracked edit is refused before the pass starts: ADR-2611160730 §1.)
 #[tokio::test]
 async fn a_fix_that_breaks_an_untouched_file_is_found_by_bisection() {
     let s = Scratch::new();
-    std::fs::write(s.dir.join("README.md"), "readme\noperator edit\n").unwrap();
     std::fs::write(s.dir.join("scratch.txt"), "operator notes\n").unwrap();
 
     let report = s.harden(vec![Fix::Good, Fix::Good, Fix::Poisons, Fix::Good, Fix::Good], Some(s.fast())).await;
@@ -330,11 +332,10 @@ async fn a_fix_that_breaks_an_untouched_file_is_found_by_bisection() {
     let (head_green, out) = run(&s.dir, &s.full());
     assert!(head_green, "the committed head passes the full gate: {out}");
 
-    assert_eq!(std::fs::read_to_string(s.dir.join("README.md")).unwrap(), "readme\noperator edit\n");
     assert_eq!(std::fs::read_to_string(s.dir.join("scratch.txt")).unwrap(), "operator notes\n");
     let mut status: Vec<String> = s.status().lines().map(str::to_string).collect();
     status.sort();
-    assert_eq!(status, vec![" M README.md", "?? scratch.txt"], "only the operator's work is uncommitted");
+    assert_eq!(status, vec!["?? scratch.txt"], "only the operator's work is uncommitted");
     assert!(report.verdict_line().contains("bug-3"), "the verdict names the dropped fix: {}", report.verdict_line());
 }
 
@@ -437,9 +438,11 @@ async fn a_touched_path_with_a_space_is_one_argument() {
     let s = Scratch::new();
     let report = s.harden(vec![Fix::SpacedPath], Some(s.fast())).await;
 
+    // The fix's fast gate gets both paths; the red-first run (ADR-2611160730
+    // §5) gets the test file alone.
     let mut args = s.fast_args();
     args.sort();
-    assert_eq!(args, vec!["src/my file 1.txt".to_string(), "tests/bug_1.txt".to_string()]);
+    assert_eq!(args, vec!["src/my file 1.txt".to_string(), "tests/bug_1.txt".to_string(), "tests/bug_1.txt".to_string()]);
     assert_eq!(report.fixed, titles(&[1]), "notes: {:?}", report.notes);
 }
 
@@ -453,7 +456,7 @@ async fn an_uncommitted_fast_gated_fix_is_not_covered_by_the_last_green_gate() {
     let s = Scratch::new();
     std::fs::create_dir_all(s.dir.join("tests")).unwrap();
     std::fs::write(s.dir.join("tests/bug_2.txt"), "operator draft\n").unwrap();
-    let gates = HardenGates { gate: s.full(), fast_gate: Some(s.fast()), batch: Some(1), baseline: false };
+    let gates = HardenGates { gate: s.full(), fast_gate: Some(s.fast()), batch: Some(1), baseline: false, lessons: Vec::new() };
     let report = run_review_gated(
         FakeFrontier::new(vec![Fix::Good, Fix::Poisons], titles(&[1, 2])),
         hexa_exec::default_git_history(),
@@ -479,7 +482,9 @@ async fn without_a_fast_gate_every_fix_gets_the_full_gate() {
     let report = s.harden(vec![Fix::Good; 3], None).await;
 
     assert_eq!(report.fixed, titles(&[1, 2, 3]), "notes: {:?}", report.notes);
-    assert_eq!(s.runs("full"), 3 + 1, "a full gate per fix, then the final gate");
+    // A full gate per fix, its red-first run without the fix
+    // (ADR-2611160730 §5), then the final gate.
+    assert_eq!(s.runs("full"), 3 + 3 + 1, "a full gate per fix, red-first per fix, then the final gate");
     assert_eq!(s.runs("fast"), 0);
     for (subject, gate) in s.commits() {
         assert!(gate.is_empty(), "'{subject}' claims Hexa-Gate: {gate}");

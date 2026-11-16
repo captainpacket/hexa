@@ -213,6 +213,7 @@ mod tests {
             worktree: None,
             gate: None,
             leases: vec!["src/a".into()],
+            frozen: Vec::new(),
             status: TaskStatus::Claimed,
             run: None,
             outcome: None,

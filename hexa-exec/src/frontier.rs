@@ -25,6 +25,8 @@ use crate::ports::{Frontier, FrontierError, SpendLog};
 /// The arguments that make `claude -p` report its usage.
 const OUTPUT_JSON: [&str; 2] = ["--output-format", "json"];
 
+pub use crate::ports::{HEXA_GIT_EMAIL, HEXA_GIT_NAME};
+
 fn claude_binary() -> String {
     std::env::var("HEXA_CLAUDE_BINARY").unwrap_or_else(|_| "claude".to_string())
 }
@@ -62,6 +64,12 @@ async fn run_claude(
         // not treat it as a person's work: `route` once drafted workplans from the
         // harden reviewer prompts. `hexa hook` returns early when this is set.
         .env("HEXA_INTERNAL", "1")
+        // Any commit this agent makes is hexa's, by identity: harden folds back
+        // only commits made as hexa and stops on anyone else's (ADR-2611160730 §1).
+        .env("GIT_AUTHOR_NAME", HEXA_GIT_NAME)
+        .env("GIT_AUTHOR_EMAIL", HEXA_GIT_EMAIL)
+        .env("GIT_COMMITTER_NAME", HEXA_GIT_NAME)
+        .env("GIT_COMMITTER_EMAIL", HEXA_GIT_EMAIL)
         .current_dir(cwd)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -144,6 +152,29 @@ mod tests {
             Ok(())
         }
         fn record_frontier(&self, _: &Value, _: u64, _: u64, _: Option<f64>, _: &str) {}
+    }
+
+    /// ADR-2611160730 §1: a commit made by a claude hexa started carries
+    /// hexa's identity, so harden can tell it from a person's commit and fold
+    /// it back instead of stopping (a real agent ignores "do not commit").
+    #[tokio::test]
+    async fn a_claude_hexa_starts_commits_as_hexa() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("claude");
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\necho \"$GIT_AUTHOR_NAME|$GIT_AUTHOR_EMAIL|$GIT_COMMITTER_NAME|$GIT_COMMITTER_EMAIL\" > ident.txt\necho '{\"result\":\"ok\"}'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("HEXA_CLAUDE_BINARY", &fake);
+        let r = run_claude(None, "p", dir.path(), Duration::from_secs(20), "test", &NoSpend).await;
+        std::env::remove_var("HEXA_CLAUDE_BINARY");
+        assert!(r.is_ok(), "{r:?}");
+        let ident = std::fs::read_to_string(dir.path().join("ident.txt")).unwrap();
+        assert_eq!(ident.trim(), format!("{HEXA_GIT_NAME}|{HEXA_GIT_EMAIL}|{HEXA_GIT_NAME}|{HEXA_GIT_EMAIL}"));
+        assert_eq!((HEXA_GIT_NAME, HEXA_GIT_EMAIL), ("hexa-factory", "factory@hexa.local"), "the identity harden folds back");
     }
 
     #[test]

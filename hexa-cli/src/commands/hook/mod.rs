@@ -14,6 +14,8 @@
 //! enforce that at spawn time and report what the subagents leave behind.
 
 pub mod punch_list;
+pub mod source_gate;
+pub mod write_shape;
 
 use anyhow::Result;
 use clap::Subcommand;
@@ -766,29 +768,11 @@ async fn pre_edit(project_dir: &Path) -> Result<()> {
             let mode = enforcement_mode(project_dir);
             let state = Some(SessionState::load_or_new());
 
-            // The loop. A prompt the router sized as T2 or T3 is work with a
-            // shape, and work with a shape is done under a gate that was
-            // written first. No gate recorded means the loop was skipped.
-            let sized = state
-                .as_ref()
-                .and_then(|s| s.last_tier.as_deref())
-                .map(|t| t == "T2" || t == "T3")
-                .unwrap_or(false);
-            if sized {
-                let has_gate = crate::commands::loop_cmd::read_loop(project_dir)
-                    .and_then(|s| s.get("gate").and_then(|g| g.as_str()).map(|g| !g.is_empty()))
-                    .unwrap_or(false);
-                if !has_gate {
-                    let msg = "No gate recorded for this work. Write the command that must exit 0, then `hexa loop gate '<command>'`, then edit.";
-                    if mode == "mandatory" {
-                        // stderr: on exit 2 it is the only stream Claude Code
-                        // shows, and a block with no reason reads as a crash.
-                        eprintln!("\u{26d4} {msg}");
-                        std::process::exit(2);
-                    }
-                    println!("\u{26a0}\u{fe0f} {msg}");
-                }
-            }
+            // The loop (ADR-2611160730 §4). Every edit to project source is
+            // done under a gate recorded for the current task, whatever size
+            // the router gave the prompt. The rule is `gate_is_current`'s.
+            let abs = if path.is_absolute() { path.to_path_buf() } else { project_dir.join(path) };
+            source_gate_check(project_dir, &[abs], mode, "this edit", false);
 
             if let Some(ref state) = state {
                 // ADR-050: Validate file falls within workplan adapter boundary
@@ -824,8 +808,14 @@ async fn post_edit(project_dir: &Path) -> Result<()> {
     let tool_input = tool_input_json();
     if let Ok(input) = serde_json::from_str::<serde_json::Value>(&tool_input) {
         if let Some(file_path) = input["file_path"].as_str() {
-            // ADR-2609131408: the boundary another session needs to see.
-            let _ = crate::commands::loop_cmd::touch(project_dir, file_path);
+            // ADR-2609131408: the boundary another session needs to see. A
+            // file outside the project, such as a scratch patch script, is no
+            // boundary; the files such a script writes are recorded by
+            // pre-bash (ADR-2611160730 §4).
+            let path = Path::new(file_path);
+            if !path.is_absolute() || path.starts_with(project_dir) {
+                let _ = crate::commands::loop_cmd::touch(project_dir, file_path);
+            }
             // Nothing to notify; the edit count is the record
             // to the daemon. The counter is local and stays.
             if let Some(mut state) = SessionState::load() {
@@ -896,10 +886,69 @@ async fn pre_bash() -> Result<()> {
                     }
                 }
             }
+
+            // ADR-2611160730 §4: a Bash command that writes project source is
+            // an edit, held to the same gate as Edit/Write. A claude hexa
+            // started runs under the gate of the verb that started it.
+            let internal = std::env::var("HEXA_INTERNAL").map(|v| !v.is_empty()).unwrap_or(false);
+            if !internal {
+                let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
+                let cwd = hook_payload()["cwd"]
+                    .as_str()
+                    .filter(|c| !c.is_empty())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| project_dir.clone()));
+                let targets = write_shape::write_targets(command, &cwd, &source_gate::read_script_bounded);
+                if !targets.is_empty() {
+                    let mode = enforcement_mode(&project_dir);
+                    source_gate_check(&project_dir, &targets, mode, &format!("`{}`", truncate_cmd(command, 60)), true);
+                }
+            }
         }
     }
 
     Ok(())
+}
+
+/// Hold writes to project source to the current task's gate
+/// (ADR-2611160730 §4). `targets` are the files about to be written; those
+/// that are project source in a hexa project (`.hexa/project.json`) and a
+/// git repo are checked. With no current gate: exit 2 naming them in
+/// mandatory mode, a warning in advisory mode. With `record`, when the write
+/// goes ahead its targets are recorded as touched: the files themselves, not
+/// the script or command that writes them. (An Edit is recorded by post-edit.)
+fn source_gate_check(project_dir: &Path, targets: &[PathBuf], mode: &str, what: &str, record: bool) {
+    if !project_dir.join(".hexa/project.json").is_file() {
+        return;
+    }
+    let Some(root) = source_gate::repo_root(project_dir) else { return };
+    let files = source_gate::project_source(&root, targets);
+    if files.is_empty() {
+        return;
+    }
+    let started = SessionState::load()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s.registered_at).ok());
+    let entry = crate::commands::loop_cmd::read_loop(project_dir);
+    if let Err(why) = source_gate::gate_is_current(entry.as_ref(), started) {
+        let msg = format!(
+            "No gate recorded for this work: {what} writes {} and {why}. Write the command that must exit 0, then `hexa loop gate '<command>'` (again after each `hexa loop task done`), then edit — or let `hexa do run` make the edit.",
+            files.join(", ")
+        );
+        if mode == "mandatory" {
+            // stderr: on exit 2 it is the only stream Claude Code shows,
+            // and a block with no reason reads as a crash.
+            eprintln!("\u{26d4} {msg}");
+            std::process::exit(2);
+        }
+        println!("\u{26a0}\u{fe0f} {msg}");
+    }
+    if record {
+        for f in &files {
+            let _ = crate::commands::loop_cmd::touch(project_dir, f);
+        }
+    }
 }
 
 /// ADR-2026-03-30-1200: Refresh the architecture fingerprint when key project files have changed.

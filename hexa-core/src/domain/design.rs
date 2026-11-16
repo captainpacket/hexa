@@ -172,7 +172,7 @@ fn inside_project(path: &str) -> bool {
     !path.starts_with('/')
         && !path.starts_with('\\')
         && !path.starts_with('~')
-        && !path.chars().nth(1).is_some_and(|c| c == ':')
+        && path.chars().nth(1).is_none_or(|c| c != ':')
         && !path.split(['/', '\\']).any(|c| c == "..")
 }
 

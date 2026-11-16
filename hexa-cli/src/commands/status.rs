@@ -828,6 +828,7 @@ mod tests {
             worktree: None,
             gate: None,
             leases: vec![format!("src/{id}")],
+            frozen: Vec::new(),
             status,
             run: None,
             outcome: None,

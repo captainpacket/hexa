@@ -1,68 +1,33 @@
 ---
 name: hexa-summarize
-description: Generate token-efficient AST summaries of source files. Use when the user asks to "summarize project", "ast summary", "token context", "generate context", "project overview", or "what does this project do".
+description: Give an agent a file's context without reading the whole tree — what it defines, what it uses, who consumes it. Use when the user asks to "summarize project", "ast summary", "token context", "generate context", "project overview", or "what does this project do".
 ---
 
-# Hex Summarize — Tree-Sitter AST Summaries for LLM Context
+# hexa summarize — context from the code graph
 
-Generates tree-sitter AST summaries at configurable detail levels, compressing source files to ~10% token count while preserving structural information needed for code generation and navigation.
+hexa has no summarize verb, and hexa is not an npm package, so never put npx
+in front of it. The context this skill used to promise comes from the code graph,
+which hexa builds from the source and saves in `graph-out/graph.json`.
 
-## Parameters
+## 1. Build the graph
 
-Ask the user for:
-- **target** (optional, default: "."): File or directory path to summarize
-- **level** (optional, default: L1): Summary detail level (L0, L1, L2, or L3)
-- **format** (optional, default: text): Output format — `text`, `json`, or `markdown`
-- **filter** (optional): Glob pattern to filter files (e.g., `**/*.ts`, `src/adapters/**`)
-- **max_tokens** (optional, default: 50000): Maximum total tokens for output
-- **include_tests** (optional, default: false): Whether to include test files
-
-## Summary Levels Explained
-
-| Level | Name | Tokens/File | What It Captures |
-|-------|------|-------------|------------------|
-| L0 | Index | ~5 | Filename, language, line count |
-| L1 | Skeleton | ~50 | Exports, imports, dependencies |
-| L2 | Signatures | ~200 | Full type signatures, params, return types |
-| L3 | Full | ~2000 | Complete source code (use sparingly) |
-
-## Execution
-
-### 1. Discover Files
-
-Find all source files (`.ts`, `.go`, `.rs`) in the target path, excluding `node_modules`, `dist`, `target`, and optionally test files.
-
-### 2. Run hexa summarize
-
-For a single file:
 ```bash
-npx hexa summarize <file> --level <L0|L1|L2|L3>
+hexa graph build              # (re)build graph-out/graph.json for this project
 ```
 
-For a directory:
-```bash
-npx hexa summarize <directory> --level <L0|L1|L2|L3>
-```
+Every graph verb reads the saved file, so run this first, and again after the
+code changes. A stale graph answers about the code as it was.
 
-If a filter is specified, apply it to limit which files are summarized.
+## 2. Ask the graph
 
-### 3. Token Budget Management
+| Need | Command |
+|---|---|
+| One file, ready to paste into a prompt: defines, uses, consumers, community | `hexa graph context <file>` (`--json` for the raw bundle, `--max-each <n>` to cap each list) |
+| Who depends on a file before you change or delete it | `hexa graph consumers <file>` |
+| The project at a glance: layers, grade, what is wrong | `hexa analyze .` |
 
-Estimate tokens using `word_count * 1.3` heuristic. If total exceeds max_tokens:
-1. Drop L2 files to L1
-2. Drop L1 files to L0
-3. Prioritize: ports > domain > adapters > infrastructure
+## 3. Report
 
-### 4. Format Output
-
-- **text**: Plain text with `---` separators between files
-- **json**: Structured JSON with filePath, language, level, exports, imports, dependencies, lineCount, tokenEstimate per file
-- **markdown**: Table format with file, language, lines, tokens, exports columns
-
-### 5. Write Output
-
-Display the summary to the user. If json or markdown format, also write to `docs/context/{level}-summary.{ext}`.
-
-## Output
-
-Report: level used, number of files summarized, estimated token count, and compression ratio (original tokens vs summary tokens).
+Say which files you asked about and paste the `hexa graph context` output, or
+the part of it that answers the question. Do not summarize a file you have not
+asked the graph or read.

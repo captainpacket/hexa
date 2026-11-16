@@ -31,6 +31,7 @@ pub mod skill;
 pub mod run_record;
 pub mod task_ledger;
 pub mod agent;
+pub mod lease_layers;
 pub mod status;
 pub mod build;
 pub mod test;

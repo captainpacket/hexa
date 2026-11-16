@@ -8,19 +8,23 @@ needs to be started. Every verb below runs in this process and exits.
 
 ### Route work through hexa where hexa has a verb for it
 
-| Don't do this by hand | Use this |
-|---|---|
-| edit, then hope it works | `hexa do run "<task>" --file <f> --evidence "<cmd>"` |
-| build a whole component by hand | `hexa build '<challenge>' --target <dir> --gate '<cmd>'` |
-| eyeball a diff for bugs | `hexa harden <path> --gate '<cmd>'` |
-| assert "the architecture is fine" | `hexa analyze .` |
-| delete code you *think* is dead | `hexa graph consumers <path>` |
-| read a file before editing it blind | `hexa graph context <path>` |
-| a lesson you will forget | `hexa memory store lesson:<topic> "<text>"` |
-| claim something about the repo | `hexa verify "<claim>"` |
-| guess which decisions are done, or what another agent is on | `hexa adr board` (progress from evidence) and `hexa agent list` (who holds which paths) |
-| edit paths another agent may be editing | `hexa agent register --task <name> --lease <path>`, and `hexa agent report` when done |
-| wonder why a native (C/C++) dependency rebuilds per command | `hexa dev build-keys` |
+| Don't do this by hand | Use this | Before you run it |
+|---|---|---|
+| edit, then hope it works | `hexa do run "<task>" --file <f> --evidence "<cmd>"` | Clean tree: it refuses while other tracked files in the package are modified. Name extra files with `--also`. Commits on this branch. Add `--uncounted` when `<cmd>` runs no tests |
+| build a whole component by hand | `hexa build '<challenge>' --target <dir> --gate '<cmd>'` | Clean tree, and no one else committing here: it commits every file that changes while it runs |
+| eyeball a diff for bugs | `hexa harden <path> --gate '<cmd>'` | Clean tree, and no other session in this checkout: it resets and reverts as it fixes. Use a worktree |
+| assert "the architecture is fine" | `hexa analyze .` | None; it writes nothing |
+| delete code you *think* is dead | `hexa graph consumers <path>` | `hexa graph build` first: it reads the saved `graph-out/graph.json` |
+| read a file before editing it blind | `hexa graph context <path>` | `hexa graph build` first, as above |
+| a lesson you will forget | `hexa memory store lesson:<topic> "<text>"` | None |
+| claim something about the repo | `hexa verify "<claim>"` | None; it reads only |
+| guess which decisions are done, or what another agent is on | `hexa adr board` (progress from evidence) and `hexa agent list` (who holds which paths) | None |
+| edit paths another agent may be editing | `hexa agent register --task <name> --lease <path>`, and `hexa agent report` when done | Before the first edit |
+| wonder why a native (C/C++) dependency rebuilds per command | `hexa dev build-keys` | None |
+
+What each committing verb commits, on which branch, what it resets, and how to
+get your work back is in the `/hexa-git-effects` skill. Read it before running
+one in a tree that holds work of yours or someone else's.
 
 ### Several agents, one repository
 
@@ -55,8 +59,9 @@ so the gap is counted and `hexa gap pr <id>` can turn it into a pull request.
 
 ### Autonomous operation (HARD RULES)
 
-1. **Trace consumers before you delete.** `hexa graph consumers <path>` over the
-   whole workspace, then grep for the two things a graph cannot see: a
+1. **Trace consumers before you delete.** `hexa graph build`, then
+   `hexa graph consumers <path>` over the whole workspace (it reads the saved
+   graph, so a stale one answers about old code), then grep for the two things a graph cannot see: a
    re-export at a package root, and a conditionally-compiled import. Both have
    caused a broken build after a trace came back clean.
 2. **Every change that deletes or restructures ends with a build.** A task
@@ -76,22 +81,33 @@ so the gap is counted and `hexa gap pr <id>` can turn it into a pull request.
 
 ## Development pipeline (gate-first)
 
-**The executable gate replaces the written spec. A spec that cannot be run is
-an ADR.**
+Pick the path by what the change is. The `/hexa-workflow` skill has every
+step.
 
-1. **Decide** — an ADR in `docs/adrs/`, if this adds a port, an adapter, or a
-   dependency.
-2. **Gate** — write the command that must exit 0, *before* the code.
-   Record it: `hexa loop gate '<command>'`. The hooks stop a feature-sized
-   edit that has no gate recorded, and `hexa loop` shows where the work stands.
-   List the steps with `hexa loop task add "<step>"` and check each off with
-   `hexa loop task done N` as it lands; the checklist is the progress report.
-3. **Diverge** — `hexa build` proposes designs and red-teams each one. The spec
-   it synthesizes is a disposable intermediate.
-4. **Build to the gate.**
-5. **Harden** — `hexa harden`: adversarial hunt, refute by default, every fix
-   gated.
-6. **Ship.**
+- **A small change** — a fix or one behaviour, no new port, adapter or
+  dependency:
+  1. Record the gate before the code: `hexa loop gate '<command>'`.
+  2. Make the edit (yourself, or `hexa do run`).
+  3. See the gate green. Then commit.
+- **An ADR-backed feature** — it adds a port, an adapter or a dependency, or
+  an ADR decides it:
+  1. An ADR in `docs/adrs/` (`hexa loop adr ADR-<id>`).
+  2. `hexa spec draft ADR-<id>`: scenarios from the decision, never the code.
+  3. **Stop. A person runs `hexa spec accept ADR-<id>`. An agent never does.**
+  4. `hexa spec tests ADR-<id> --crate <dir>`: sealed tests that fail now.
+  5. `hexa loop gate "hexa spec verify ADR-<id>"`, build to it, then
+     `hexa harden` and `hexa analyze .`.
+- **Outward-facing verbs** — `hexa pr open`, `hexa issue file`,
+  `hexa issue sync`, `hexa gap pr`. By default they print what they would
+  send. Pass `--send` only when the person has said to, in this conversation.
+
+List the steps with `hexa loop task add "<step>"` and check each off with
+`hexa loop task done N`; `hexa loop` shows where the work stands. The hooks
+stop a feature-sized edit that has no gate recorded.
+
+A gate passes on what a test runner reports, not on exit 0 alone. A gate that
+runs no tests (a build, a lint, `hexa analyze . --exit-code`) is declared
+`--uncounted`, on `hexa loop gate` and on `hexa do run`, or it fails.
 
 Three rules govern it:
 

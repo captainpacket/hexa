@@ -46,6 +46,30 @@ pub enum DoAction {
         /// (ADR-2611081151 §6). Without it, output no runner wrote fails.
         #[arg(long)]
         uncounted: bool,
+        /// Commit the tracked files you had already modified in the target's
+        /// package together with this change. Without it, such files refuse the
+        /// run before any change is made: name the ones the change needs with
+        /// --also, and commit or stash the rest (ADR-2611160730 §2).
+        #[arg(long = "include-dirty")]
+        include_dirty: bool,
+    },
+    /// Gate the change already in your tree and commit ONLY the named files (ADR-2611160730 §3).
+    /// No model is called: use it for a patch you wrote yourself. A failing or vacuous gate
+    /// commits nothing and leaves the change where it is.
+    Gate {
+        /// The files the change is in (repeatable, or several after one --files). Only these are committed.
+        #[arg(long = "files", value_name = "PATH", num_args = 1.., required = true)]
+        files: Vec<String>,
+        /// Shell command that must pass (a test runner that reports at least one test, or any
+        /// command with --uncounted).
+        #[arg(short, long)]
+        evidence: String,
+        /// The commit message.
+        #[arg(short, long)]
+        message: String,
+        /// The evidence runs no test runner: its exit status alone decides, and the commit says so.
+        #[arg(long)]
+        uncounted: bool,
     },
     /// List recent direct runs (task, evidence verdict, commit).
     Runs,
@@ -58,7 +82,7 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
     // the same binary.
 
     match action {
-        DoAction::Run { instruction, file, evidence, model, attempts, fast, max_steps, also, uncounted } => {
+        DoAction::Run { instruction, file, evidence, model, attempts, fast, max_steps, also, uncounted, include_dirty } => {
             if let Err(e) = hexa_exec::direct_exec::validate_also_paths(&also) {
                 anyhow::bail!("{e}");
             }
@@ -71,7 +95,7 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
             if uncounted {
                 crate::commands::loop_cmd::note_gate_uncounted(&evidence);
             }
-            let mut body = json!({ "instruction": instruction, "file": file, "evidence": evidence, "fast": fast, "isolate": false, "also": also, "uncounted": uncounted });
+            let mut body = json!({ "instruction": instruction, "file": file, "evidence": evidence, "fast": fast, "isolate": false, "also": also, "uncounted": uncounted, "include_dirty": include_dirty });
             if let Some(m) = model {
                 body["model"] = json!(m);
             }
@@ -169,6 +193,35 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
                     anyhow::bail!("evidence passed; the run did not complete (see above)");
                 }
                 anyhow::bail!("direct run did not pass evidence");
+            }
+        }
+        DoAction::Gate { files, evidence, message, uncounted } => {
+            let top = std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).output()?;
+            if !top.status.success() {
+                anyhow::bail!("hexa do gate runs inside a git repository");
+            }
+            let root = std::path::PathBuf::from(String::from_utf8_lossy(&top.stdout).trim().to_string());
+            // Paths are given from where you stand; the gate runs and commits from the repository root.
+            let cwd = std::env::current_dir()?;
+            let rel: Vec<String> = files
+                .iter()
+                .map(|f| {
+                    let abs = cwd.join(f);
+                    abs.strip_prefix(&root).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| f.clone())
+                })
+                .collect();
+            crate::commands::loop_cmd::note_run_gate(&evidence, "build", None);
+            if uncounted {
+                crate::commands::loop_cmd::note_gate_uncounted(&evidence);
+            }
+            println!("{} {}", "⬡ gate:".cyan().bold(), evidence);
+            println!("  {} {}", "files".dimmed(), rel.join(", "));
+            match hexa_exec::direct_exec::gate_patch(&root, &rel, &evidence, &message, uncounted).await {
+                Ok(sha) => println!("{} commit {} · {} file(s)", "✓ gated".green().bold(), sha.yellow(), rel.len()),
+                Err(e) => {
+                    println!("{}\n  {}", "✗ not committed".red().bold(), e.replace('\n', "\n  "));
+                    anyhow::bail!("the gate did not pass");
+                }
             }
         }
         DoAction::Runs => {
