@@ -262,3 +262,48 @@ fn report_prints_the_newest_result_and_how_it_moved() {
     assert!(out.contains("0.50 (+0.50)"), "{out}");
     assert!(out.contains("1 (-1)"), "{out}");
 }
+
+/// Run inside a Claude Code session, `hexa eval` must not hand that
+/// session's id to the scenario: setup's `hexa loop` records would be bound
+/// to the caller, and the model would see them as another session's work.
+/// The first baseline run hit exactly this.
+#[test]
+fn a_scenario_does_not_inherit_the_callers_claude_session() {
+    let h = here();
+    let dump = h.home.path().join("env.txt");
+    let bin = tempfile::tempdir().unwrap();
+    let p = bin.path().join("claude");
+    std::fs::write(
+        &p,
+        format!(
+            "#!/bin/sh\n[ \"$1\" = --version ] && {{ echo fake; exit 0; }}\nenv > '{}'\ncat '{}'\n",
+            dump.display(),
+            fixture("good-run.jsonl").display()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path = format!("{}:{}", bin.path().display(), std::env::var("PATH").unwrap_or_default());
+    let dir = scenarios();
+    let (code, out) = h.hexa_with(
+        &["eval", "run", "--dir", dir.to_str().unwrap(), "--scenario", "small-fix"],
+        &[
+            ("PATH", path),
+            ("CLAUDE_CODE_SESSION_ID", "the-callers-session".into()),
+            ("CLAUDE_SESSION_ID", "the-callers-session".into()),
+            ("CLAUDECODE", "1".into()),
+            ("HEXA_TASK", "the-callers-task".into()),
+            ("CLAUDE_CONFIG_DIR", "/kept/for/login".into()),
+        ],
+    );
+    assert_eq!(code, 0, "{out}");
+    let env = std::fs::read_to_string(&dump).unwrap();
+    assert!(!env.contains("the-callers-session"), "{env}");
+    assert!(!env.contains("the-callers-task"), "{env}");
+    assert!(!env.lines().any(|l| l.starts_with("CLAUDECODE=")), "{env}");
+    assert!(env.contains("CLAUDE_CONFIG_DIR=/kept/for/login"), "claude's login must still be found:\n{env}");
+}

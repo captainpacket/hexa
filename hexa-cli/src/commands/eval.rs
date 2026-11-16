@@ -271,13 +271,9 @@ impl Sandbox {
             .env("GH_TOKEN", DEAD_TOKEN)
             .env("GITHUB_TOKEN", DEAD_TOKEN)
             .env("GH_CONFIG_DIR", self.base.join("gh"))
-            .env("HEXA_NO_CLAUDE_MODS", "1")
-            .env_remove("CLAUDECODE")
-            .env_remove("CLAUDE_CODE_ENTRYPOINT");
+            .env("HEXA_NO_CLAUDE_MODS", "1");
         for (k, _) in std::env::vars_os() {
-            // HEXA_HOME is where the person keeps hexa's state; every other
-            // HEXA_ variable (a task binding, a skip switch) is the caller's.
-            if k.to_string_lossy().starts_with("HEXA_") && k != "HEXA_NO_CLAUDE_MODS" && k != "HEXA_HOME" {
+            if !inherited(&k.to_string_lossy()) {
                 c.env_remove(&k);
             }
         }
@@ -292,6 +288,21 @@ impl Sandbox {
         }
         Ok(text)
     }
+}
+
+/// Whether a variable of the caller's reaches the scenario. A scenario is a
+/// fresh top-level session: when `hexa eval` runs inside a Claude Code
+/// session, that session's id (`CLAUDE_CODE_SESSION_ID`, `CLAUDE_SESSION_ID`)
+/// would otherwise bind setup's `hexa loop` records to the caller, and the
+/// model would see them as another session's work. `CLAUDE_CONFIG_DIR` is
+/// where claude keeps its login, and `HEXA_HOME` where the person keeps
+/// hexa's state; every other `CLAUDE*`, `HEXA_*` and agent-host variable is
+/// the caller's own.
+fn inherited(key: &str) -> bool {
+    if key == "CLAUDE_CONFIG_DIR" || key == "HEXA_HOME" || key == "HEXA_NO_CLAUDE_MODS" {
+        return true;
+    }
+    !(key.starts_with("CLAUDE") || key.starts_with("HEXA_") || key.starts_with("T3CODE_") || key == "AI_AGENT")
 }
 
 fn tail(s: &str, n: usize) -> String {
