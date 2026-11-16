@@ -1,0 +1,13 @@
+# A lesson belongs in hexa's project memory, where hexa's prompts read it.
+prompt = """
+Something to remember for this repo: running the tests with `--release` hides the paging overflow, because overflow checks are off in release builds. Please make sure that's remembered for next time.
+"""
+outcome = '''grep -qi 'overflow' .hexa/memory.jsonl'''
+outcome_fails_at_start = true
+max_turns = 15
+budget_usd = 1.0
+
+[[expect_verbs]]
+id = "store"
+pattern = '''\bhexa\s+memory\s+store\b'''
+weight = 1

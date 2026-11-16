@@ -20,3 +20,5 @@ pub mod spec;
 pub mod tools;
 pub mod workflow;
 pub mod validation;
+// How a model used hexa, scored from a transcript (ADR-2611160910).
+pub mod usage_eval;

@@ -1,0 +1,13 @@
+{"type": "system", "subtype": "init", "cwd": "/tmp/hexa-eval/feature-with-gate/repo", "session_id": "fixture", "tools": ["Bash", "Edit", "Write", "Read"], "model": "fixture-model"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_01", "name": "Bash", "input": {"command": "cat > src/usecases/search.rs <<'EOF'\npub fn search() {}\nEOF"}}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01", "is_error": true, "content": "PreToolUse:Bash hook error: [hexa hook pre-bash]: \u26d4 No gate recorded for this work: writes src/usecases/search.rs."}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_02", "name": "Bash", "input": {"command": "hexa loop gate 'cargo test'"}}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_02", "content": "Loop (repo): stage gate"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_03", "name": "Edit", "input": {"file_path": "/tmp/hexa-eval/feature-with-gate/repo/src/usecases/browse.rs", "old_string": "    /// How many pages", "new_string": "    pub fn search(&self, word: &str) -> Vec<String> {\n        self.all().into_iter().filter(|t| t.contains(word)).collect()\n    }\n\n    /// How many pages"}}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_03", "content": "ok"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_04", "name": "Write", "input": {"file_path": "/tmp/hexa-eval/feature-with-gate/repo/tests/search.rs", "content": "#[test]\nfn finds_a_word() {\n    assert_eq!(shelf::shelf(&[\"Dune\"]).search(\"Dune\"), vec![\"Dune\"]);\n}\n"}}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_04", "content": "ok"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_05", "name": "Bash", "input": {"command": "cargo test 2>&1 | tail -5"}}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_05", "content": "test result: ok. 7 passed"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Added `Browse::search` with a test."}]}}
+{"type": "result", "subtype": "success", "is_error": false, "num_turns": 9, "total_cost_usd": 0.3375, "result": "done"}

@@ -33,6 +33,8 @@ pub mod simple_agent;
 pub mod spec_author;
 pub mod telegram_notifier;
 pub mod tool_registry;
+// Score a transcript of a model using hexa against a scenario (ADR-2611160910).
+pub mod usage_eval;
 pub mod tools;
 
 /// The repository the tools operate on.
