@@ -216,7 +216,7 @@
       ],
       "kind": "negative",
       "description": "Nothing is written when nothing is missing.",
-      "given": "existing = Some(\"target/\\n.hexa/loop.json\\n.hexa/loop.lock\\n\") and lang = `rust`",
+      "given": "existing = Some(\"target/\\n.hexa/loop.json\\n.hexa/loop.lock\\n.env*\\n!.env.example\\n\") and lang = `rust`",
       "when": "`merged_gitignore(existing, \"rust\")` is called",
       "then": "it returns None"
     },
