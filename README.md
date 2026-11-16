@@ -165,6 +165,9 @@ hexa spend                                # tokens and dollars, by source and mo
 `stage done` appends the evidence command's own output to the ADR, with the
 commit it ran at. The number in the decision record is the number the tree
 produced. A failing evidence command appends nothing and refuses to close.
+Evidence needs a recorded ADR to land in: `loop evidence` refuses without one.
+`loop gate` warns when its command runs no test runner hexa reads; such a gate
+passes only with `--uncounted`.
 
 **Check the install**
 

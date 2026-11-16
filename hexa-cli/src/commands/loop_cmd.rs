@@ -51,7 +51,9 @@ pub enum LoopAction {
         draft: String,
     },
     /// Record the evidence: a command whose stdout is appended to the ADR when
-    /// the stage is marked done (ADR-2609131341)
+    /// the stage is marked done (ADR-2609131341). The ADR is where it goes, so
+    /// an ADR must be recorded first (`hexa loop adr <ID>`); evidence with none
+    /// is refused rather than dropped at `stage done`
     Evidence {
         /// A shell command, e.g. "cargo test --test instrument -- --ignored --nocapture"
         command: String,
@@ -846,6 +848,41 @@ fn glance_run(state: &serde_json::Value, now: chrono::DateTime<chrono::Utc>) -> 
     Some(format!("running {where_} {elapsed}"))
 }
 
+/// Whether a gate command runs a test runner whose output the evidence
+/// reader recognises, decided from the command text alone, without running it.
+///
+/// `Some(true)`: some segment is a known runner. `Some(false)`: every segment
+/// is a command known not to run tests (`true`, `echo`, `cargo build`), so the
+/// gate can only pass `--uncounted`. `None`: a segment goes through something
+/// that cannot be read from the text (`make`, `npm test`, a script), and the
+/// gate is given the benefit of the doubt.
+fn gate_runs_a_known_runner(command: &str) -> Option<bool> {
+    let mut all_known_non_runners = true;
+    for seg in command.split(['&', '|', ';']).map(str::trim).filter(|s| !s.is_empty()) {
+        let words: Vec<&str> = seg
+            .split_whitespace()
+            .skip_while(|w| w.contains('=') && !w.starts_with('-'))
+            .collect();
+        let Some(&head) = words.first() else { continue };
+        let sub = words.get(1).copied().unwrap_or("");
+        let runner = matches!((head, sub), ("cargo", "test") | ("go", "test") | ("bun", "test"))
+            || (head == "node" && words.contains(&"--test"))
+            || (head == "hexa" && sub == "spec" && words.get(2) == Some(&"verify"));
+        if runner {
+            return Some(true);
+        }
+        let non_runner = matches!(
+            head,
+            "true" | "false" | ":" | "exit" | "echo" | "printf" | "test" | "[" | "ls" | "cat" | "grep" | "rg"
+                | "sleep" | "cd" | "tsc" | "eslint" | "prettier" | "rustfmt"
+        ) || matches!((head, sub), ("cargo", "build" | "check" | "clippy" | "fmt" | "doc") | ("go", "build" | "vet"));
+        if !non_runner {
+            all_known_non_runners = false;
+        }
+    }
+    all_known_non_runners.then_some(false)
+}
+
 /// The line that says what running the gate established (ADR-2609132059),
 /// read by the one reader (ADR-2611081151 §4–§6). Only a pass, or a declared
 /// uncounted gate that exited 0, closes the stage.
@@ -1079,12 +1116,29 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
             println!("{} {}", "\u{2b21}".green(), status_line(&cwd));
             if uncounted {
                 println!("  gate recorded as uncounted: its exit status alone will decide");
+            } else if gate_runs_a_known_runner(&command) == Some(false) {
+                println!(
+                    "  {} this gate runs no test runner hexa reads ({}); its output will need `--uncounted` \
+                     to pass: `hexa loop gate '{command}' --uncounted`",
+                    "warning:".yellow().bold(),
+                    hexa_core::ports::evidence::KNOWN_RUNNERS,
+                );
             }
         }
         LoopAction::Evidence { command } => {
             let command = command.trim().to_string();
             if command.is_empty() {
                 anyhow::bail!("evidence is a command; it cannot be empty");
+            }
+            // Evidence is appended to the ADR at `stage done`. Without one it
+            // would be accepted here and never run: refuse now, while the fix
+            // is one command away.
+            let adr = read_loop(&cwd).and_then(|s| s.get("adr").and_then(|v| v.as_str()).map(String::from));
+            if adr.as_deref().is_none_or(str::is_empty) {
+                anyhow::bail!(
+                    "no ADR recorded, and evidence is appended to the ADR at `stage done`: \
+                     record it first with `hexa loop adr <ID>`, then record the evidence"
+                );
             }
             update_loop(&cwd, serde_json::json!({ "evidence": command })).map_err(|e| anyhow::anyhow!(e))?;
             println!("{} {}", "\u{2b21}".green(), status_line(&cwd));
@@ -1125,11 +1179,20 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
                     anyhow::bail!("the stage stays where it was: {}", gate_line(&verdict));
                 }
                 if let Some(st) = st {
-                    let adr = st.get("adr").and_then(|v| v.as_str());
-                    let evidence = st.get("evidence").and_then(|v| v.as_str());
-                    if let (Some(adr), Some(cmd)) = (adr, evidence) {
-                        let path = record_evidence(&cwd, adr, cmd).map_err(|e| anyhow::anyhow!(e))?;
-                        println!("  evidence appended to {}", path.display());
+                    let adr = st.get("adr").and_then(|v| v.as_str()).filter(|a| !a.is_empty());
+                    let evidence = st.get("evidence").and_then(|v| v.as_str()).filter(|e| !e.is_empty());
+                    match (adr, evidence) {
+                        (Some(adr), Some(cmd)) => {
+                            let path = record_evidence(&cwd, adr, cmd).map_err(|e| anyhow::anyhow!(e))?;
+                            println!("  evidence appended to {}", path.display());
+                        }
+                        // Recorded evidence that cannot be recorded anywhere is
+                        // not silently dropped.
+                        (None, Some(cmd)) => anyhow::bail!(
+                            "evidence `{cmd}` is recorded but no ADR is, so it has nowhere to go: \
+                             record one with `hexa loop adr <ID>`; the stage stays where it was"
+                        ),
+                        _ => {}
                     }
                 }
             }
@@ -1148,6 +1211,35 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod gate_classification_tests {
+    use super::gate_runs_a_known_runner as k;
+
+    #[test]
+    fn a_runner_anywhere_in_the_command_counts() {
+        assert_eq!(k("cargo test --test add"), Some(true));
+        assert_eq!(k("cd apps/x && node --test"), Some(true));
+        assert_eq!(k("RUST_LOG=1 cargo test"), Some(true));
+        assert_eq!(k("cargo build && go test ./..."), Some(true));
+        assert_eq!(k("hexa spec verify --ci"), Some(true));
+    }
+
+    #[test]
+    fn only_known_non_runners_is_a_no() {
+        assert_eq!(k("true"), Some(false));
+        assert_eq!(k("cargo build && cargo clippy -- -D warnings"), Some(false));
+        assert_eq!(k("echo ok; exit 0"), Some(false));
+    }
+
+    #[test]
+    fn an_indirection_is_unknown() {
+        assert_eq!(k("make check"), None);
+        assert_eq!(k("npm test"), None);
+        assert_eq!(k("./run-tests.sh"), None);
+        assert_eq!(k("cargo build && ./check"), None);
+    }
 }
 
 #[cfg(test)]
