@@ -1,6 +1,7 @@
 # ADR-2611161600: Spec acceptance is of committed Rust specs, and guard tests are kept apart
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-16 Accepted: Accepted by gary, 2026-11-16: an acceptance must bind committed text, spec drafting is refused where spec tests cannot run, and a generation keeps its failing tests and sets aside the ones that already pass.
 **Date:** 2026-11-16
 **Drivers:** An audit of verbs that report success they did not earn (branch `fix/no-false-success`). Three of its fixes to `hexa spec` contradict accepted, sealed specs. An agent may not edit a sealed test, so these fixes change through this ADR, then the specs, then a person's acceptance.
 **Supersedes:** none. Amends ADR-2610221540 (S15, and the fixtures of S24, S24b and S24d), ADR-2610281516 (fixture setup), ADR-2610281628 (S06, S07) and ADR-2611062141 (fixture setup).
