@@ -150,6 +150,10 @@ struct Help {
     flags: BTreeSet<String>,
     /// Flags written `--name <VALUE>`: the next word is theirs.
     value_flags: BTreeSet<String>,
+    /// Flags written `--name <VALUE>...`: every word up to the next flag is theirs.
+    multi_flags: BTreeSet<String>,
+    /// `-e, --evidence <EVIDENCE>`: the short spelling of a long flag.
+    shorts: BTreeMap<String, String>,
     /// How many positional arguments `Usage:` allows; `None` is unbounded.
     max_positional: Option<usize>,
 }
@@ -206,6 +210,16 @@ fn parse_help(text: &str) -> Help {
                     let takes_value = line.contains(&format!("--{name} <"));
                     if takes_value {
                         h.value_flags.insert(name.clone());
+                        let after = line.split(&format!("--{name} <")).nth(1).unwrap_or("");
+                        if after.split_whitespace().next().is_some_and(|v| v.ends_with(">...")) {
+                            h.multi_flags.insert(name.clone());
+                        }
+                    }
+                    // "  -e, --evidence <EVIDENCE>": `-e` is `--evidence`.
+                    if let Some(short) = line.trim_start().strip_prefix('-').and_then(|l| l.split(',').next()) {
+                        if short.len() == 1 && line.trim_start().contains(&format!(", --{name}")) {
+                            h.shorts.insert(short.to_string(), name.clone());
+                        }
                     }
                     h.flags.insert(name);
                 }
@@ -274,9 +288,12 @@ fn defect(inv: &Invocation) -> Option<String> {
     let mut uncounted = false;
     let mut i = 0;
     while i < rest.len() {
-        let tok = rest[i].as_str();
+        let raw = rest[i].as_str();
         i += 1;
-        let Some(flag) = tok.strip_prefix("--") else {
+        // A short flag the help spells out (`-e`) is read as its long name.
+        let tok = raw;
+        let short = raw.strip_prefix('-').filter(|t| !t.starts_with('-')).and_then(|t| level.shorts.get(t)).map(String::as_str);
+        let Some(flag) = short.or_else(|| tok.strip_prefix("--")) else {
             if !tok.starts_with('-') && !tok.is_empty() {
                 // `hexa loop gate <COMMAND>`: the gate is the first positional.
                 if positional == 0 && chain == ["loop", "gate"] {
@@ -296,7 +313,13 @@ fn defect(inv: &Invocation) -> Option<String> {
         if !level.flags.contains(name) {
             return Some(format!("`hexa {}` takes no `--{name}`", chain.join(" ")));
         }
-        let value = if level.value_flags.contains(name) && inline.is_none() {
+        let value = if level.multi_flags.contains(name) && inline.is_none() {
+            let first = rest.get(i).map(|s| s.as_str());
+            while i < rest.len() && !rest[i].starts_with('-') {
+                i += 1;
+            }
+            first
+        } else if level.value_flags.contains(name) && inline.is_none() {
             i += 1;
             rest.get(i - 1).map(|s| s.as_str())
         } else {

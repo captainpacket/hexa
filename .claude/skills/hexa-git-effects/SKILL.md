@@ -50,9 +50,8 @@ Rules that hold for every verb below:
   is the nearest directory holding a `Cargo.toml` or `package.json`, so with a
   root `Cargo.toml` it was the whole repository. Now it refuses to start while
   such a file is modified. Name it with `--also` to commit it in the same
-  commit, or pass `--include-dirty` to sweep the package in on purpose. Check
-  `hexa do run --help`: a binary that lacks `--include-dirty` still sweeps.
-  Start clean.
+  commit, or pass `--include-dirty` to sweep the package in on purpose. The
+  refusal comes before any model call, so nothing is spent. Start clean.
 - **Reverts** `--file` and `--also` to their pre-run bytes when a run fails
   or times out, which overwrites anyone else's edits to those files. Other
   files a delegate changed are left on the tree and named. `--fast` does not
@@ -63,13 +62,24 @@ Rules that hold for every verb below:
   `git reset --soft HEAD~1` while it is still the tip, then unstage what
   should not have been in it.
 
-### do gate (decided, not yet in every binary)
+### `hexa do gate`
 
-ADR-2611160730 §3: gate a patch the agent already wrote. It runs the evidence
-on the tree as it is, fails a vacuous result, and commits only the files it is
-given, on this branch. It changes nothing else. If `hexa do --help` does not
-list `gate`, your binary predates it: record a gate with `hexa loop gate`,
-run it, and commit the named files yourself (`git commit -- <files>`).
+ADR-2611160730 §3: gate a patch you wrote yourself.
+For example, `hexa do gate --files src/a.rs src/b.rs -e "cargo test -p mycrate" -m "fix the parser"`.
+
+- **Calls no model.** It runs the evidence on the tree as it is.
+- **Commits** only `--files`, on this branch. The message is yours, with a
+  `Gate:` line that records the evidence.
+- **Refuses before running anything** when:
+  - no file is named, or a path escapes the repository;
+  - a file is a credential;
+  - a named file has no change against HEAD;
+  - a sealed test or spec record changed.
+- **A failing, vacuous (0 tests) or unrecognised result commits nothing** and
+  leaves your patch exactly where it is. Use `--uncounted` when the evidence is
+  not a test runner.
+- **Resets nothing, reverts nothing.**
+- **Recover:** `git reset --soft HEAD~1` while it is still the tip.
 
 ### `hexa harden`
 
