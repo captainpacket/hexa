@@ -647,6 +647,6 @@ mod tests {
         let t = parse_transcript("{\"type\":\"system\"}\n").unwrap();
         let sc = score(&s, &t, Some(true), &|_, _| false);
         assert_eq!(sc.process, 0.0);
-        assert!(sc.process.is_sign_positive(), "a plain zero, not -0.0: {}", format!("{:.2}", sc.process));
+        assert!(sc.process.is_sign_positive(), "a plain zero, not -0.0: {:.2}", sc.process);
     }
 }
