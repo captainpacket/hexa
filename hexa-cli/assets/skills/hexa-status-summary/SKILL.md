@@ -1,7 +1,6 @@
 ---
 name: hexa-status-summary
 description: Provide a high-level synthesis of project progress, mapping ADRs to Specs and current architectural health.
-trigger: /hexa-status-summary
 ---
 
 # Project Progress Summary

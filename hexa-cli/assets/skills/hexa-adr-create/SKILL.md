@@ -1,7 +1,6 @@
 ---
-name: hexa-ADR-create
+name: hexa-adr-create
 description: Create a new Architecture Decision Record with auto-numbering, dependency impact analysis, and validation gates
-trigger: /hexa-ADR-create
 ---
 
 # Create New ADR
@@ -152,4 +151,4 @@ you write the file, and run `hexa adr doctor` after.
 
 | Command | What it does |
 |---------|-------------|
-| `/hexa-ADR-create` | Create a new ADR with full impact analysis |
+| `/hexa-adr-create` | Create a new ADR with full impact analysis |

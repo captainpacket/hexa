@@ -1,7 +1,6 @@
 ---
-name: hexa-ADR-search
+name: hexa-adr-search
 description: Search Architecture Decision Records by keyword, status, or date
-trigger: /hexa-ADR-search
 ---
 
 # Search ADRs
@@ -26,5 +25,5 @@ trigger: /hexa-ADR-search
 
 ## Example
 
-User: `/hexa-ADR-search sqlite`
+User: `/hexa-adr-search sqlite`
 -> Shows every ADR that mentions SQLite, with relevant snippets
