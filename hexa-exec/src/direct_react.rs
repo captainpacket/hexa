@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::compress::{cap_str, compress_messages, estimate_tokens, CompressOpts};
+use crate::compress::{cap_str, prepare_step, CompressOpts};
 use crate::direct_exec::{self, DirectResult, DirectTask, Edit};
 use crate::simple_agent::{
     assistant_turn_content, extract_tool_uses, normalize_tool_input, strip_metadata_fields,
@@ -30,8 +30,9 @@ use crate::tool_registry::ToolRegistry;
 const DEFAULT_MAX_STEPS: u32 = 12;
 const MAX_TOKENS: u32 = 4096;
 /// When the compressed transcript still exceeds this, summarize the older region
-/// with one cheap-model call (the LLM half of the hybrid compression).
-const MAX_CTX_TOKENS: usize = 12_000;
+/// with one cheap-model call (the LLM half of the hybrid compression). The one
+/// budget both compression layers share (ADR-2611050000, amendment).
+const MAX_CTX_TOKENS: usize = crate::compress::LOOP_BUDGET_TOKENS;
 const NO_PROGRESS_LIMIT: u32 = 3;
 
 /// Read/verify tools the loop may call. No arbitrary shell; no persona or
@@ -159,18 +160,18 @@ async fn react_attempts(
     let opts = CompressOpts::default();
 
     for _ in 0..max_steps {
-        // Compress the transcript before each call; LLM-summarize on overflow.
-        let mut sent = compress_messages(&messages, &opts);
-        if estimate_tokens(&sent) > MAX_CTX_TOKENS {
-            sent = summarize_overflow(&model, sent).await;
-        }
+        // Compress the transcript before each call; LLM-summarize on overflow,
+        // at most once. The `compression` envelope tells hexa-infer this
+        // request is already compressed, so it does not compress it again.
+        let step = prepare_step(&messages, &opts, MAX_CTX_TOKENS, |sent| summarize_overflow(&model, sent)).await;
 
         let req = json!({
             "model": model,
             "max_tokens": MAX_TOKENS,
             "system": system_prompt,
             "tools": tools_schema,
-            "messages": sent,
+            "messages": step.messages,
+            hexa_infer::ports::COMPRESSION_KEY: step.envelope(),
         });
         // A library call. This was a POST to 127.0.0.1:$HEXA_NEXUS_PORT, which is why the ReAct
         // loop could not run without a daemon up. The request and the reply keep the daemon
