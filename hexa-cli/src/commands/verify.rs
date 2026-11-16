@@ -4,8 +4,11 @@
 //! it. Returns one of:
 //!   CONFIRMED   — adversarial check ran, came up empty (no counter-evidence)
 //!   REFUTED     — counter-evidence found; the claim is false
-//!   INCONCLUSIVE — couldn't run a falsifiable check (claim too vague or
-//!                  needs context we don't have)
+//!   INCONCLUSIVE — couldn't run a falsifiable check (claim too vague,
+//!                  needs context we don't have, or the check itself failed)
+//!
+//! Exit codes are 0 / 1 / 3 for the three verdicts and 4 for an error; 2 is
+//! clap's usage error. `hexa verify --help` lists them.
 //!
 //! Two paths:
 //!   1. Deterministic — common claim shapes (boundary check, file
@@ -26,6 +29,12 @@ use std::path::Path;
 use std::process::Command;
 
 #[derive(Debug, Parser)]
+#[command(after_help = "Exit codes:\n  \
+    0  CONFIRMED     a check that could have failed ran and found no counter-evidence\n  \
+    1  REFUTED       counter-evidence was found; the claim is false\n  \
+    2  usage error   the arguments could not be parsed\n  \
+    3  INCONCLUSIVE  no check could settle it: the claim was too vague, the tree has no grade, or a check could not run\n  \
+    4  error         verification itself failed (for example, inference was unreachable)")]
 pub struct VerifyArgs {
     /// The claim to verify, in plain English.
     /// Examples:
@@ -74,7 +83,24 @@ struct CheckResult {
     method: &'static str, // "deterministic" | "adversarial-llm"
 }
 
+/// Exit codes, as `--help` documents them. INCONCLUSIVE is not 2, which clap
+/// uses for a usage error, and an error is not 1, which is REFUTED.
+const EXIT_CONFIRMED: i32 = 0;
+const EXIT_REFUTED: i32 = 1;
+const EXIT_INCONCLUSIVE: i32 = 3;
+const EXIT_ERROR: i32 = 4;
+
 pub async fn run(args: VerifyArgs) -> Result<()> {
+    match verify(args).await {
+        Ok(code) => std::process::exit(code),
+        Err(e) => {
+            eprintln!("Error: {e:#}");
+            std::process::exit(EXIT_ERROR);
+        }
+    }
+}
+
+async fn verify(args: VerifyArgs) -> Result<i32> {
     let claim = args.claim.join(" ").trim().to_string();
     if claim.is_empty() {
         anyhow::bail!("usage: hexa verify <claim>");
@@ -115,13 +141,38 @@ pub async fn run(args: VerifyArgs) -> Result<()> {
         }
     }
 
-    // Exit code: 0 confirmed, 1 refuted, 2 inconclusive — operator can
-    // script around it.
-    std::process::exit(match result.verdict {
-        Verdict::Confirmed => 0,
-        Verdict::Refuted => 1,
-        Verdict::Inconclusive => 2,
-    });
+    Ok(match result.verdict {
+        Verdict::Confirmed => EXIT_CONFIRMED,
+        Verdict::Refuted => EXIT_REFUTED,
+        Verdict::Inconclusive => EXIT_INCONCLUSIVE,
+    })
+}
+
+/// A check that matched the claim's shape but could not run. It settles
+/// nothing, so it says so rather than reading its empty output as a verdict.
+fn could_not_run(what: &str, why: String) -> CheckResult {
+    CheckResult {
+        verdict: Verdict::Inconclusive,
+        summary: format!("{what} could not run, so the claim is neither confirmed nor refuted"),
+        evidence: vec![why],
+        method: "deterministic",
+    }
+}
+
+/// `git` with `args` in the current directory: its stdout when it exited 0,
+/// or why not. A caller that reads exit 1 as meaningful asks for it.
+fn git_ok(args: &[&str], also_ok: &[i32]) -> std::result::Result<(i32, String), String> {
+    let out = Command::new("git").args(args).output().map_err(|e| format!("`git {}` did not start: {e}", args.join(" ")))?;
+    let code = out.status.code().unwrap_or(-1);
+    if code == 0 || also_ok.contains(&code) {
+        Ok((code, String::from_utf8_lossy(&out.stdout).into_owned()))
+    } else {
+        Err(format!(
+            "`git {}` exited {code}: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ))
+    }
 }
 
 // ── Deterministic checks ────────────────────────────────────────────────────
@@ -155,26 +206,51 @@ fn check_boundary_violations(_claim: &str, lower: &str) -> Option<CheckResult> {
         return None;
     }
 
-    let out = Command::new("hexa").arg("analyze").arg(".").output().ok()?;
-    let s = String::from_utf8_lossy(&out.stdout);
-
-    let zero_violations = s.contains("0 boundary violations");
-    let grade = Regex::new(r"score (\d+)/100")
-        .ok()
-        .and_then(|re| re.captures(&s))
-        .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
-        .unwrap_or_else(|| "?".to_string());
+    // This binary, never whatever `hexa` is first on PATH: an older install
+    // there grades by older rules, and its verdict would be reported as ours.
+    let exe = match std::env::current_exe() {
+        Ok(e) => e,
+        Err(e) => return Some(could_not_run("hexa analyze", format!("this binary's path is unknown: {e}"))),
+    };
+    let out = match Command::new(&exe).args(["analyze", ".", "--json"]).output() {
+        Ok(o) => o,
+        Err(e) => return Some(could_not_run("hexa analyze", format!("`{} analyze` did not start: {e}", exe.display()))),
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let json: Option<serde_json::Value> = text.find('{').and_then(|i| serde_json::from_str(&text[i..]).ok());
+    let Some(json) = json else {
+        return Some(could_not_run(
+            "hexa analyze",
+            format!(
+                "`hexa analyze . --json` exited {} with no report: {}",
+                out.status.code().unwrap_or(-1),
+                String::from_utf8_lossy(&out.stderr).lines().next().unwrap_or("").trim()
+            ),
+        ));
+    };
+    // A tree with no grade has no boundary result: nothing was read.
+    let graded = json.get("graded").and_then(|g| g.as_bool()) == Some(true);
+    let violations = json.pointer("/score_components/violations").and_then(|v| v.as_u64());
+    let (true, Some(violations)) = (graded, violations) else {
+        return Some(CheckResult {
+            verdict: Verdict::Inconclusive,
+            summary: "hexa analyze . produced no grade for this tree, so it says nothing about its boundaries".into(),
+            evidence: vec![json
+                .get("not_graded_reason")
+                .and_then(|r| r.as_str())
+                .unwrap_or("no boundary analysis ran")
+                .to_string()],
+            method: "deterministic",
+        });
+    };
+    let score = json.get("score").and_then(|s| s.as_u64()).map(|s| s.to_string()).unwrap_or_else(|| "?".into());
 
     Some(CheckResult {
-        verdict: if zero_violations { Verdict::Confirmed } else { Verdict::Refuted },
-        summary: format!(
-            "hexa analyze . reports {} boundary violations (score {}/100)",
-            if zero_violations { "0" } else { "≥1" },
-            grade
-        ),
+        verdict: if violations == 0 { Verdict::Confirmed } else { Verdict::Refuted },
+        summary: format!("hexa analyze . reports {violations} boundary violation(s) (score {score}/100)"),
         evidence: vec![
-            "`hexa analyze .` — full hexagonal layering check across the workspace".into(),
-            format!("score {}/100", grade),
+            "`hexa analyze . --json` — full hexagonal layering check across the workspace".into(),
+            format!("score {score}/100"),
         ],
         method: "deterministic",
     })
@@ -190,11 +266,11 @@ fn check_secret_in_tree(_claim: &str, lower: &str) -> Option<CheckResult> {
         return None;
     }
 
-    let out = Command::new("git")
-        .args(["ls-files"])
-        .output().ok()?;
-    let files: Vec<&str> = std::str::from_utf8(&out.stdout).ok()?
-        .lines().collect();
+    let listed = match git_ok(&["ls-files"], &[]) {
+        Ok((_, s)) => s,
+        Err(why) => return Some(could_not_run("git ls-files", why)),
+    };
+    let files: Vec<&str> = listed.lines().collect();
     let mut hits = Vec::new();
     for f in &files {
         if f.ends_with(".env") || f == &".env" || f.ends_with("/credentials.json") {
@@ -216,20 +292,32 @@ fn check_secret_in_tree(_claim: &str, lower: &str) -> Option<CheckResult> {
 }
 
 /// Matches "no X in code" / "no X remains" — grep for literal token X.
-fn check_no_substring(claim: &str, lower: &str) -> Option<CheckResult> {
-    let re = Regex::new(r#"no [`"'']?([\w.\-/]{3,})[`"'']? (in|remains|present|exists)"#).ok()?;
-    let cap = re.captures(lower)?;
+fn check_no_substring(claim: &str, _lower: &str) -> Option<CheckResult> {
+    // Matched case-insensitively, captured as written: `git grep` is
+    // case-sensitive, and the lowercased token found nothing for
+    // "CounterStore", which confirmed a false claim.
+    let re = Regex::new(r#"(?i)\bno [`"'']?([\w.\-/]{3,})[`"'']? (in|remains|present|exists)"#).ok()?;
+    let cap = re.captures(claim)?;
     let token = cap.get(1)?.as_str().to_string();
     // Skip if the deterministic-secret check already covers it
-    if matches!(token.as_str(), "secret" | "secrets" | ".env" | "api" | "key") {
+    if matches!(token.to_lowercase().as_str(), "secret" | "secrets" | ".env" | "api" | "key") {
         return None;
     }
 
-    let out = Command::new("git").args(["grep", "-l", "-E", &regex::escape(&token)])
-        .output().ok()?;
-    let body = String::from_utf8_lossy(&out.stdout);
+    // `git grep` exits 0 with matches, 1 with none, and anything else when it
+    // could not search. Only 1 is "no match".
+    let (code, body) = match git_ok(&["grep", "-l", "-I", "-F", "--", &token], &[1]) {
+        Ok(r) => r,
+        Err(why) => return Some(could_not_run(&format!("git grep `{token}`"), why)),
+    };
     let lines: Vec<&str> = body.lines().take(10).collect();
     let n = body.lines().count();
+    if (code == 0) != (n > 0) {
+        return Some(could_not_run(
+            &format!("git grep `{token}`"),
+            format!("`git grep` exited {code} but listed {n} file(s)"),
+        ));
+    }
 
     Some(CheckResult {
         verdict: if n == 0 { Verdict::Confirmed } else { Verdict::Refuted },
@@ -238,7 +326,7 @@ fn check_no_substring(claim: &str, lower: &str) -> Option<CheckResult> {
             token, n, claim
         ),
         evidence: if n == 0 {
-            vec![format!("`git grep -l {}` returned 0 hits", token)]
+            vec![format!("`git grep -l -F {}` exited 1: no tracked file matches", token)]
         } else {
             lines.iter().map(|l| format!("hit: {}", l)).collect()
         },
@@ -255,9 +343,12 @@ fn check_files_under(_claim: &str, lower: &str) -> Option<CheckResult> {
         return None;
     }
     // Use git ls-files for an authoritative tracked-file count under dir.
-    // Falls back to 0 if not in a git repo.
-    let out = Command::new("git").args(["ls-files", "--", dir]).output().ok()?;
-    let count = String::from_utf8_lossy(&out.stdout).lines().filter(|l| !l.is_empty()).count();
+    // Outside a repository there is no count, and no verdict.
+    let listed = match git_ok(&["ls-files", "--", dir], &[]) {
+        Ok((_, s)) => s,
+        Err(why) => return Some(could_not_run("git ls-files", why)),
+    };
+    let count = listed.lines().filter(|l| !l.is_empty()).count();
     Some(CheckResult {
         verdict: if count > 0 { Verdict::Confirmed } else { Verdict::Refuted },
         summary: format!("{} contains {} file(s)", dir, count),
@@ -354,12 +445,13 @@ fn gather_evidence(claim: &str) -> (Vec<String>, Vec<String>) {
     let mut lines = Vec::new();
     let mut searched = Vec::new();
     for token in claim_tokens(claim) {
-        let out = Command::new("git")
-            .args(["grep", "-n", "-I", "-F", "--", &token])
-            .output();
-        let Ok(out) = out else { continue };
+        // Exit 1 is "no match"; any other failure searched nothing, and an
+        // empty result from it is not evidence of absence.
+        let text = match git_ok(&["grep", "-n", "-I", "-F", "--", &token], &[1]) {
+            Ok((_, t)) => t,
+            Err(_) => continue,
+        };
         searched.push(token.clone());
-        let text = String::from_utf8_lossy(&out.stdout);
         let hits: Vec<&str> = text.lines().take(8).collect();
         if hits.is_empty() {
             lines.push(format!("git grep -F {token} — no match in tracked files"));

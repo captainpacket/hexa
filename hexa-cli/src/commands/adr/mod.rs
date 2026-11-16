@@ -183,36 +183,117 @@ pub async fn run(action: AdrAction) -> anyhow::Result<()> {
 
 // ── Direct lifecycle verbs (no agent dispatch — the reliable path) ────────────
 
-/// Locate the single ADR file matching an id (accepts `ADR-...`, the bare
-/// timestamp, or any unambiguous substring of the filename).
+/// `ADR-<id>` for `ADR-<id>`, `adr-<id>` or the bare `<id>`: the form ids are
+/// compared in.
+pub(crate) fn canonical_adr_id(given: &str) -> String {
+    let t = given.trim();
+    let rest = if t.len() >= 4 && t[..4].eq_ignore_ascii_case("adr-") { &t[4..] } else { t };
+    format!("ADR-{rest}")
+}
+
+/// The id an ADR file is named for: `ADR-2610161730` from
+/// `ADR-2610161730-the-delegate-runs.md`, `ADR-2026-03-22-1500` from a dated
+/// name, `ADR-047` from a legacy one. `None` for a file not named for an ADR.
+pub(crate) fn adr_id_of_file(name: &str) -> Option<String> {
+    let stem = name.strip_suffix(".md").unwrap_or(name);
+    if stem.len() < 4 || !stem[..4].eq_ignore_ascii_case("adr-") {
+        return None;
+    }
+    let chars: Vec<char> = stem[4..].chars().collect();
+    let mut id = String::new();
+    for (i, c) in chars.iter().enumerate() {
+        // A digit, or a dash with a digit on both sides.
+        if c.is_ascii_digit() || (*c == '-' && !id.is_empty() && chars.get(i + 1).is_some_and(|n| n.is_ascii_digit())) {
+            id.push(*c);
+        } else {
+            break;
+        }
+    }
+    (!id.is_empty()).then(|| format!("ADR-{id}"))
+}
+
+/// Locate the ADR file whose id is exactly `adr_id` (`ADR-<id>` or the bare
+/// `<id>`). A substring used to do: the prefix and two digits named
+/// whichever ADR it happened to be the only match for, and `supersede --by`
+/// accepted it.
 fn find_adr_file(adr_id: &str) -> anyhow::Result<PathBuf> {
     let dir = find_adr_dir().ok_or_else(|| anyhow::anyhow!("No docs/adrs/ directory found"))?;
-    let needle = adr_id
-        .trim()
-        .trim_start_matches("ADR-")
-        .trim_start_matches("adr-")
-        .to_lowercase();
+    let wanted = canonical_adr_id(adr_id);
     let mut matches: Vec<PathBuf> = Vec::new();
     for entry in std::fs::read_dir(&dir)?.flatten() {
         let p = entry.path();
         if p.extension().and_then(|e| e.to_str()) != Some("md") {
             continue;
         }
-        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
-        if name.contains(&needle) {
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if adr_id_of_file(name).is_some_and(|id| id.eq_ignore_ascii_case(&wanted)) {
             matches.push(p);
         }
     }
     match matches.len() {
-        0 => anyhow::bail!("no ADR file matches '{}' under docs/adrs/", adr_id),
+        0 => anyhow::bail!("no ADR with id {} under docs/adrs/ (ids match exactly)", wanted),
         1 => Ok(matches.remove(0)),
-        n => anyhow::bail!("'{}' matches {} ADRs — be more specific", adr_id, n),
+        n => anyhow::bail!("{} files under docs/adrs/ carry the id {} — the ledger is inconsistent (`hexa adr doctor`)", n, wanted),
     }
 }
 
+/// Write `text` to `path` through a temporary file in the same directory and
+/// a rename, so a reader or a crash never sees half an ADR. The temporary
+/// name does not end in `.md`, so nothing scanning the ledger counts it.
+fn write_atomically(path: &Path, text: &str) -> anyhow::Result<()> {
+    let dir = path.parent().ok_or_else(|| anyhow::anyhow!("{} has no directory", path.display()))?;
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("adr");
+    let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, text).map_err(|e| anyhow::anyhow!("{}: {e}", tmp.display()))?;
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        anyhow::bail!("{} was not updated: {e}", path.display());
+    }
+    Ok(())
+}
+
+/// `content` with `note` on its own line under the status: after the body
+/// status line and its `Superseded-By:` backlink, else after the frontmatter
+/// status line's block. Each transition adds one, so the file keeps them all.
+fn insert_status_note(content: &str, note: &str) -> String {
+    let lines: Vec<&str> = content.split_inclusive('\n').collect();
+    let low = |l: &str| l.trim().to_lowercase();
+    let fm_end = (lines.first().map(|l| l.trim()) == Some("---"))
+        .then(|| lines.iter().skip(1).position(|l| l.trim() == "---").map(|p| p + 1))
+        .flatten();
+    let body_start = fm_end.map(|e| e + 1).unwrap_or(0);
+    let body_status = (body_start..lines.len()).find(|&i| {
+        let l = low(lines[i]);
+        l.starts_with("**status:**") || (fm_end.is_none() && l.starts_with("status:"))
+    });
+    let at = match body_status {
+        Some(i) => {
+            let mut at = i + 1;
+            while at < lines.len() && low(lines[at]).trim_start_matches('*').starts_with("superseded-by:") {
+                at += 1;
+            }
+            at
+        }
+        None => fm_end.map(|e| e + 1).unwrap_or(0),
+    };
+    let mut out = String::with_capacity(content.len() + note.len() + 2);
+    for l in &lines[..at] {
+        out.push_str(l);
+    }
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(note);
+    out.push('\n');
+    for l in &lines[at..] {
+        out.push_str(l);
+    }
+    out
+}
+
 /// Rewrite the ADR's status lines, optionally inserting a `Superseded-By:`
-/// backlink. Mirrors the adr_status_set tool — the file is the single source
-/// of truth.
+/// backlink, and record the rationale as a dated line under the status.
+/// Mirrors the adr_status_set tool — the file is the single source of truth.
 async fn set_adr_status(
     adr_id: &str,
     new_status: &str,
@@ -222,16 +303,31 @@ async fn set_adr_status(
     let path = find_adr_file(adr_id)?;
     let content = std::fs::read_to_string(&path)?;
     let old = parse_adr_status(&content).to_string();
+    let id = path.file_stem().and_then(|s| s.to_str()).unwrap_or(adr_id).to_string();
+    // A transition to the status it already has changes nothing, and says so:
+    // a second rationale line would record a decision nobody made.
+    if old.eq_ignore_ascii_case(new_status) {
+        println!("{} {} is already {} — nothing changed", "\u{2b21}".cyan(), id, new_status.bold());
+        return Ok(());
+    }
     let Some(out) = rewrite_adr_status(&content, new_status, superseded_by) else {
         anyhow::bail!("no `Status:` header line in {} — unexpected ADR format", path.display());
     };
-    std::fs::write(&path, out)?;
-    let id = path.file_stem().and_then(|s| s.to_str()).unwrap_or(adr_id);
+    let rationale = rationale.trim();
+    let out = if rationale.is_empty() {
+        out
+    } else {
+        let date = chrono::Local::now().format("%Y-%m-%d");
+        insert_status_note(&out, &format!("> {date} {new_status}: {}", rationale.replace('\n', " ")))
+    };
+    write_atomically(&path, &out)?;
     println!("{} {} : {} → {}", "\u{2b21}".cyan(), id, old.dimmed(), new_status.green().bold());
     if let Some(by) = superseded_by {
         println!("  Superseded-By: {}", by.yellow());
     }
-    println!("  {}", rationale.dimmed());
+    if !rationale.is_empty() {
+        println!("  {} (recorded under the status)", rationale.dimmed());
+    }
     println!("  {} file updated (uncommitted — commit to record the transition in history)", "\u{2192}".dimmed());
     Ok(())
 }
@@ -382,8 +478,19 @@ async fn complete_adr(adr_id: &str, rationale: &str, force: bool) -> anyhow::Res
 
 /// `hexa adr supersede` — verify the replacement exists, then set Superseded + backlink.
 async fn supersede_adr(adr_id: &str, by: &str, rationale: &str) -> anyhow::Result<()> {
-    find_adr_file(by).map_err(|_| anyhow::anyhow!("replacement ADR '{}' not found — create it first", by))?;
-    set_adr_status(adr_id, "Superseded", Some(by), rationale).await
+    let superseded = find_adr_file(adr_id)?;
+    let replacement =
+        find_adr_file(by).map_err(|e| anyhow::anyhow!("replacement ADR '{}' not found — create it first ({e})", by))?;
+    if superseded == replacement {
+        anyhow::bail!("{} cannot supersede itself: --by names the ADR being superseded", canonical_adr_id(adr_id));
+    }
+    // The backlink names the replacement by its id, not by what was typed.
+    let by_id = replacement
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(adr_id_of_file)
+        .unwrap_or_else(|| canonical_adr_id(by));
+    set_adr_status(adr_id, "Superseded", Some(&by_id), rationale).await
 }
 
 /// Drive the doctor subcommand: detection → optional tier-aware fix →
@@ -2512,5 +2619,32 @@ mod adr_gates_classify {
             GateOutcome::Failed(why) => assert!(why.contains("0 tests") || why.to_lowercase().contains("vacuous"), "{why}"),
             other => panic!("expected Failed, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod adr_ids_and_notes {
+    use super::{adr_id_of_file, canonical_adr_id, insert_status_note};
+
+    #[test]
+    fn an_id_is_read_from_a_file_name_exactly() {
+        assert_eq!(adr_id_of_file("ADR-2610161730-the-delegate-runs.md").as_deref(), Some("ADR-2610161730"));
+        assert_eq!(adr_id_of_file("ADR-2026-03-22-1500-dated.md").as_deref(), Some("ADR-2026-03-22-1500"));
+        assert_eq!(adr_id_of_file("ADR-047-legacy.md").as_deref(), Some("ADR-047"));
+        assert_eq!(adr_id_of_file("README.md"), None);
+        assert_eq!(canonical_adr_id("2610161730"), "ADR-2610161730");
+        // Assembled at run time: a literal short id here reads as a citation.
+        let short = format!("{}-{}", "adr", "26");
+        assert_eq!(canonical_adr_id(&short), format!("ADR-{}", "26"));
+        assert_ne!(adr_id_of_file("ADR-2610161730-x.md"), Some(canonical_adr_id(&short)));
+    }
+
+    #[test]
+    fn the_note_goes_under_the_body_status_and_its_backlink() {
+        let md = "# T\n\n**Status:** Superseded\n**Superseded-By:** ADR-2\n**Date:** x\n";
+        let out = insert_status_note(md, "> 2026-11-16 Superseded: why");
+        assert_eq!(out, "# T\n\n**Status:** Superseded\n**Superseded-By:** ADR-2\n> 2026-11-16 Superseded: why\n**Date:** x\n");
+        let fm = "---\nstatus: accepted\n---\n# T\n";
+        assert_eq!(insert_status_note(fm, "> n"), "---\nstatus: accepted\n---\n> n\n# T\n");
     }
 }

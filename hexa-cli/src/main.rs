@@ -67,18 +67,25 @@ enum DevGroupAction {
         /// Project root path
         #[arg(default_value = ".")]
         path: String,
+        /// Exit 1 on any rule finding from .hexa/ADR-rules.toml, warnings included
         #[arg(long)]
         strict: bool,
+        /// Check only the rules in .hexa/ADR-rules.toml; skip the boundary analysis and the grade
         #[arg(long)]
         adr_compliance: bool,
+        /// Print the report as JSON. An ungraded tree has "graded": false and "grade": null
         #[arg(long)]
         json: bool,
+        /// Check the imports of one file instead of the whole tree; exits 1 on a violation
         #[arg(long, value_name = "PATH")]
         file: Option<String>,
+        /// Leave out the layer inventory and the health detectors (with --file, print nothing when clean)
         #[arg(long)]
         quiet: bool,
+        /// Print only the violation lines, no report
         #[arg(long)]
         violations_only: bool,
+        /// Exit 1 on any boundary violation or rule error, or when the tree could not be graded
         #[arg(long)]
         exit_code: bool,
         /// Exit 1 when the architecture grade is below this letter (A+, A, B, C, D, F)
@@ -367,18 +374,25 @@ ADRs are history and are not checked.")]
     Analyze {
         #[arg(default_value = ".")]
         path: String,
+        /// Exit 1 on any rule finding from .hexa/ADR-rules.toml, warnings included
         #[arg(long)]
         strict: bool,
+        /// Check only the rules in .hexa/ADR-rules.toml; skip the boundary analysis and the grade
         #[arg(long)]
         adr_compliance: bool,
+        /// Print the report as JSON. An ungraded tree has "graded": false and "grade": null
         #[arg(long)]
         json: bool,
+        /// Check the imports of one file instead of the whole tree; exits 1 on a violation
         #[arg(long, value_name = "PATH")]
         file: Option<String>,
+        /// Leave out the layer inventory and the health detectors (with --file, print nothing when clean)
         #[arg(long)]
         quiet: bool,
+        /// Print only the violation lines, no report
         #[arg(long)]
         violations_only: bool,
+        /// Exit 1 on any boundary violation or rule error, or when the tree could not be graded
         #[arg(long)]
         exit_code: bool,
         /// Exit 1 when the architecture grade is below this letter (A+, A, B, C, D, F)

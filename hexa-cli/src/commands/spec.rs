@@ -59,6 +59,11 @@ pub enum SpecAction {
         /// Re-prove only these scenarios, into a new test file (ADR-2610281628 §2)
         #[arg(long, value_delimiter = ',', conflicts_with = "replace")]
         only: Vec<String>,
+        /// When some generated tests already pass, keep the ones that fail
+        /// first and report the passing ones as guards (their scenarios stay
+        /// pending) instead of refusing the generation. Red at HEAD only
+        #[arg(long = "keep-red", conflicts_with_all = ["red_at", "only"])]
+        keep_red: bool,
     },
     /// Every numbered decision has an example and a negative scenario; no
     /// model involved (ADR-2610221540 §3). All ADRs when none is named
@@ -116,9 +121,9 @@ pub async fn run(action: SpecAction) -> anyhow::Result<()> {
         SpecAction::Show { feature, check } => show(&feature, check).await,
         SpecAction::Workplan { feature } => workplan(&feature).await,
         SpecAction::Draft { adr, model, force } => super::spec_ledger::draft(&adr, model.as_deref(), force).await,
-        SpecAction::Tests { adr, krate, model, red_at, replace, because, only } => {
+        SpecAction::Tests { adr, krate, model, red_at, replace, because, only, keep_red } => {
             if only.is_empty() {
-                super::spec_ledger::tests(&adr, &krate, model.as_deref(), red_at, replace, because).await
+                super::spec_ledger::tests(&adr, &krate, model.as_deref(), red_at, replace, because, keep_red).await
             } else {
                 super::spec_ledger::reprove(&adr, &krate, model.as_deref(), red_at, &only, because).await
             }

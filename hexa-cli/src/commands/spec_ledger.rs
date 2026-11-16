@@ -273,11 +273,25 @@ pub fn check(adr: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Tests are generated for Rust only. Said before a paid `spec draft`, not
+/// after it and a person's acceptance, at `spec tests`.
+fn require_a_rust_project(root: &Path, id: &str, verb: &str) -> anyhow::Result<()> {
+    if root.join("Cargo.toml").is_file() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "{id}: {verb} refused: no Cargo.toml at {}. `hexa spec tests` generates Rust tests only; \
+         TypeScript and Go are not generated yet, so a spec here could be drafted and accepted but never sealed",
+        root.display()
+    )
+}
+
 /// `hexa spec accept <ADR>` — a person approves the behaviour (§4).
 pub fn accept(adr: &str, by: Option<&str>) -> anyhow::Result<()> {
     let root = std::env::current_dir()?;
     let a = find(&root, adr)?;
     let (text, mut spec) = load_text(&root, &a.id)?.ok_or_else(|| anyhow::anyhow!("{} has no spec to accept", a.id))?;
+
     if !print_coverage(&a, &spec, is_alt(&text)) {
         anyhow::bail!("{}: the spec does not cover the decision; accept a complete one", a.id);
     }
@@ -437,6 +451,9 @@ pub async fn draft(adr: &str, model: Option<&str>, force: bool) -> anyhow::Resul
     }
     let model = model_for(model, "t2.5")?;
     require_a_completion_path(&root, "`hexa spec draft`", &model)?;
+    // Free checks first, then this one, then the paid call: a spec drafted
+    // here could never be sealed.
+    require_a_rust_project(&root, &a.id, "`hexa spec draft`")?;
     println!("{} {} from the ADR and its ports, on {}", "\u{2b21} spec draft".cyan().bold(), a.id, model);
     let d = hexa_exec::draft_spec(&model, &root, &a.id).await.map_err(|e| anyhow::anyhow!(e))?;
     for g in &d.given {
@@ -463,6 +480,7 @@ pub async fn tests(
     red_at: Option<String>,
     replace: bool,
     because: Option<String>,
+    keep_red: bool,
 ) -> anyhow::Result<()> {
     let root = std::env::current_dir()?;
     let a = find(&root, adr)?;
@@ -487,7 +505,7 @@ pub async fn tests(
         }
         None
     };
-    let options = hexa_exec::spec_author::TestOptions { red_at, replace: replace.clone(), only: None, because: None };
+    let options = hexa_exec::spec_author::TestOptions { red_at, replace: replace.clone(), only: None, because: None, keep_red };
     let model = model_for(model, "t2")?;
     require_a_completion_path(&root, "`hexa spec tests`", &model)?;
     let path_env = gate_path(
@@ -496,9 +514,23 @@ pub async fn tests(
         &|p| p.is_dir(),
     );
     println!("{} {} on {}", "\u{2b21} spec tests".cyan().bold(), a.id, model);
-    let g = hexa_exec::generate_spec_tests(&model, &root, &spec, Path::new(krate), &path_env, &options)
-        .await
-        .map_err(|e| anyhow::anyhow!(e))?;
+    let g = match hexa_exec::generate_spec_tests(&model, &root, &spec, Path::new(krate), &path_env, &options).await {
+        Ok(g) => g,
+        Err(e) => {
+            // A generation refused for tests that already pass is the guard
+            // gap: say so, count it, and name the way to keep the red ones.
+            if e.contains("passes before the code exists") {
+                if let Some(g) = hexa_core::ports::guide::find("guard-test-is-a-mirror") {
+                    super::gap::hit(&g, &root);
+                }
+                if options.red_at.is_none() && !options.keep_red && options.only.is_none() {
+                    eprintln!("  `--keep-red` keeps the tests that fail first and reports the passing ones as guards");
+                }
+            }
+            anyhow::bail!(e);
+        }
+    };
+    report_guards(&root, &g.guards);
     let replaced_hash = replace.as_ref().and_then(|r| spec.sealed.get(&r.old_file).cloned());
     if let Some(r) = &replace {
         spec.sealed.remove(&r.old_file);
@@ -516,6 +548,21 @@ pub async fn tests(
     }
     println!("\n  Commit {}/{}.json. The tests are sealed: build the decision until they pass.", SPECS, a.id);
     Ok(())
+}
+
+/// Scenarios whose test passed before the code: their tests were left out
+/// and the scenarios stay pending. Said, and counted as the gap it is.
+fn report_guards(root: &Path, guards: &[String]) {
+    if guards.is_empty() {
+        return;
+    }
+    println!("  {} {} scenario(s) already hold, so their tests were left out and they stay pending:", "!".yellow(), guards.len());
+    for g in guards {
+        println!("      {g}");
+    }
+    if let Some(g) = hexa_core::ports::guide::find("guard-test-is-a-mirror") {
+        super::gap::hit(&g, root);
+    }
 }
 
 /// Append the amendment a `--replace` at the same path makes: the seal moved
@@ -610,10 +657,24 @@ pub async fn reprove(
     );
     println!("{} {} {} on {}", "\u{2b21} spec tests".cyan().bold(), a.id, only.join(", "), model);
     let options =
-        hexa_exec::spec_author::TestOptions { red_at, replace: None, only: Some(only.to_vec()), because: because.clone() };
-    let g = hexa_exec::generate_spec_tests(&model, &root, &spec, Path::new(krate), &path_env, &options)
-        .await
-        .map_err(|e| anyhow::anyhow!(e))?;
+        hexa_exec::spec_author::TestOptions { red_at, replace: None, only: Some(only.to_vec()), because: because.clone(), keep_red: false };
+    let g = match hexa_exec::generate_spec_tests(&model, &root, &spec, Path::new(krate), &path_env, &options).await {
+        Ok(g) => g,
+        Err(e) => {
+            // A generation refused for tests that already pass is the guard
+            // gap: say so, count it, and name the way to keep the red ones.
+            if e.contains("passes before the code exists") {
+                if let Some(g) = hexa_core::ports::guide::find("guard-test-is-a-mirror") {
+                    super::gap::hit(&g, &root);
+                }
+                if options.red_at.is_none() && !options.keep_red && options.only.is_none() {
+                    eprintln!("  `--keep-red` keeps the tests that fail first and reports the passing ones as guards");
+                }
+            }
+            anyhow::bail!(e);
+        }
+    };
+    report_guards(&root, &g.guards);
 
     // The superseded tests leave the files that held them.
     let mut by_file: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1021,6 +1082,14 @@ pub async fn verify(adr: Option<&str>, ci: bool, prove: bool, verbose: bool) -> 
     let unproven_fails = if ci { unproven } else { 0 };
     if failed + fatal + unproven_fails > 0 {
         anyhow::bail!("spec verification failed");
+    }
+    // Nothing passed and work is pending: no scenario was verified, and the
+    // workflow uses this verb as the loop's gate. A gate that measured nothing
+    // is a failed gate, as "running 0 tests" is.
+    if passed == 0 && pending > 0 {
+        anyhow::bail!(
+            "spec verification proved nothing: 0 passed and {pending} pending. Generate the tests (`hexa spec tests <ADR> --crate <dir>`) before using this as a gate"
+        );
     }
     Ok(())
 }

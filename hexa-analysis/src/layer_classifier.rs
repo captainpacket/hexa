@@ -76,8 +76,11 @@ fn match_filename(path: &str) -> Option<FilenameMatch> {
         return Some(FilenameMatch::BuildConfig);
     }
 
-    // Go special files
-    if basename.starts_with("composition-root") {
+    // The composition root by name, in either spelling: `composition-root.ts`
+    // / `.go`, and `composition_root.rs`, the only one a Rust module can
+    // have. `hexa analyze` named the Rust file the composition root and then
+    // counted it as a file with no layer, capping the grade.
+    if basename.starts_with("composition-root") || basename.starts_with("composition_root") {
         return Some(FilenameMatch::CompositionRoot);
     }
     if basename.ends_with("_adapter.go") {
@@ -441,6 +444,8 @@ mod tests {
     #[test]
     fn classify_special_files() {
         assert_eq!(classify_layer("src/lib.rs"), HexLayer::CompositionRoot);
+        assert_eq!(classify_layer("src/composition_root.rs"), HexLayer::CompositionRoot);
+        assert_eq!(classify_layer("src/composition-root.ts"), HexLayer::CompositionRoot);
         assert_eq!(classify_layer("src/main.rs"), HexLayer::EntryPoint);
     }
 
