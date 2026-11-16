@@ -538,31 +538,30 @@ fn s19_changing_routes_destructive() {
     }
 }
 
-/// S20: --yes does not skip confirmation for a destructive route
+/// S20: --yes skips confirmation for a destructive route; without it the route asks
 #[test]
-fn s20_yes_does_not_skip_destructive_confirmation() {
+fn s20_yes_skips_destructive_confirmation() {
     let r = expect_hexa("harden src/parser", "harden src/parser");
     assert!(r.destructive);
 
+    // Without --yes it asks, and a refusal runs nothing.
     let dir = temp_dir("s20");
     make_parser_tree(&dir);
     let before = snapshot(&dir);
-    let out = run_hey(&dir, &["--yes", "harden src/parser"], "n\n");
+    let out = run_hey(&dir, &["harden src/parser"], "n\n");
     let text = combined(&out);
-    let lower = text.to_lowercase();
-    assert!(
-        lower.contains("confirm")
-            || lower.contains("[y/n]")
-            || lower.contains("proceed")
-            || lower.contains("continue")
-            || text.contains('?'),
-        "no confirmation prompt: {text}"
-    );
-    assert!(
-        text.contains("harden src/parser"),
-        "prompt does not name the command: {text}"
-    );
+    assert!(text.contains("Proceed?"), "no confirmation prompt without --yes: {text}");
+    assert!(text.contains("harden src/parser"), "prompt does not name the command: {text}");
+    assert!(text.contains("aborted"), "a refused prompt says so: {text}");
     assert_eq!(before, snapshot(&dir), "harden ran despite refusal");
+
+    // With --yes the person has said yes in advance: no prompt, the route runs. It runs here
+    // without the --gate harden needs, so it fails at once and spends nothing; what matters is
+    // that it was run, not asked about (amended by gary, 2026-11-16).
+    let out = run_hey(&dir, &["--yes", "harden src/parser"], "");
+    let text = combined(&out);
+    assert!(!text.contains("Proceed?"), "--yes still asked: {text}");
+    assert!(!text.contains("aborted"), "--yes did not run the route: {text}");
     let _ = fs::remove_dir_all(&dir);
 }
 

@@ -345,10 +345,10 @@ fn as_set(v: Vec<&'static str>) -> BTreeSet<&'static str> {
 #[test]
 fn s14_rust_gitignore_lines() {
     let lines = gitignore_lines("rust");
-    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert_eq!(lines.len(), 5, "{lines:?}");
     assert_eq!(
         as_set(lines),
-        ["target/", ".hexa/loop.json", ".hexa/loop.lock"].into_iter().collect()
+        ["target/", ".hexa/loop.json", ".hexa/loop.lock", ".env*", "!.env.example"].into_iter().collect()
     );
 }
 
@@ -356,10 +356,10 @@ fn s14_rust_gitignore_lines() {
 #[test]
 fn s15_ts_gitignore_lines() {
     let lines = gitignore_lines("ts");
-    assert_eq!(lines.len(), 4, "{lines:?}");
+    assert_eq!(lines.len(), 6, "{lines:?}");
     assert_eq!(
         as_set(lines),
-        ["node_modules/", "dist/", ".hexa/loop.json", ".hexa/loop.lock"]
+        ["node_modules/", "dist/", ".hexa/loop.json", ".hexa/loop.lock", ".env*", "!.env.example"]
             .into_iter()
             .collect()
     );
@@ -369,13 +369,13 @@ fn s15_ts_gitignore_lines() {
 #[test]
 fn s16_go_gitignore_lines() {
     let lines = gitignore_lines("go");
-    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(lines.len(), 4, "{lines:?}");
     assert!(!lines.contains(&"target/"));
     assert!(!lines.contains(&"node_modules/"));
     assert!(!lines.contains(&"dist/"));
     assert_eq!(
         as_set(lines),
-        [".hexa/loop.json", ".hexa/loop.lock"].into_iter().collect()
+        [".hexa/loop.json", ".hexa/loop.lock", ".env*", "!.env.example"].into_iter().collect()
     );
 }
 
