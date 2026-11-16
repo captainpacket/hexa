@@ -19,6 +19,7 @@ use serde_json::{json, Value};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
+use crate::commands::lease_layers::{self, Arch};
 use crate::commands::{run_record, task_ledger};
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
@@ -42,6 +43,11 @@ impl Outcome {
 pub enum AgentAction {
     /// Claim a task and the paths it may edit; prints the task id. Refuses a lease that overlaps another task's, a sealed path, or a credential
     #[command(after_help = "\
+Layer slices: a lease whose first segment is domain, ports, usecases or adapters and that is not \
+an existing path resolves through the layer map to the paths it covers; a slice covering no file is refused.
+Contracts: a lease on domain or ports files is refused while a live lease covers a file that imports one \
+(Rust `crate::` paths, TS/JS relative imports, read from the files now). A use-case or adapter lease \
+records the contract files it imports as `frozen`, and waits while another task leases one of them.
 Binding: a session is held to its lease when HEXA_TASK=<id> is in its environment, \
 or when its Claude Code agent_id equals --owner. An unbound session is not constrained.
 Never leasable: any path a docs/specs/*.json lists as sealed, and credential-looking names \
@@ -51,7 +57,8 @@ Errors are JSON objects with code, message, hint, field, retryable.")]
         /// A short name for the task
         #[arg(long)]
         task: String,
-        /// A repo-relative file or directory this task may edit (repeatable; at least one)
+        /// A repo-relative file or directory this task may edit, or a layer slice such as
+        /// `usecases/billing` or `adapters/secondary/postgres` (repeatable; at least one)
         #[arg(long, num_args = 1.., action = clap::ArgAction::Append, value_name = "PATH")]
         lease: Vec<String>,
         /// The worktree the task works in
@@ -237,7 +244,7 @@ pub struct Register {
 fn task_json(t: &Task) -> Value {
     json!({
         "id": t.id, "name": t.name, "status": t.status, "owner": t.owner,
-        "leases": t.leases, "worktree": t.worktree, "gate": t.gate, "run": t.run,
+        "leases": t.leases, "frozen": t.frozen, "worktree": t.worktree, "gate": t.gate, "run": t.run,
         "outcome": t.outcome, "commit": t.commit, "note": t.note,
         "created": t.created, "updated": t.updated,
     })
@@ -248,6 +255,8 @@ fn check_register(
     ledger: &Ledger,
     leases: &[String],
     sealed: &[String],
+    arch: &Arch,
+    frozen: &[String],
 ) -> Result<(), LedgerError> {
     for l in leases {
         if let Some(e) = never_leasable(l, sealed) {
@@ -269,7 +278,7 @@ fn check_register(
             true,
         ));
     }
-    Ok(())
+    lease_layers::check_contracts(arch, ledger, leases, frozen)
 }
 
 pub fn register(cwd: &Path, req: &Register, dry_run: bool) -> Result<Value, LedgerError> {
@@ -291,11 +300,20 @@ pub fn register(cwd: &Path, req: &Register, dry_run: bool) -> Result<Value, Ledg
             false,
         ));
     }
+    // Slices resolve against the task's worktree when it has one, else the caller's checkout.
+    let arch_dir = req
+        .worktree
+        .as_deref()
+        .map(PathBuf::from)
+        .filter(|w| w.is_dir())
+        .unwrap_or_else(|| cwd.to_path_buf());
+    let arch = Arch::load(&arch_dir)?;
     let mut leases: Vec<String> = Vec::new();
     for l in &req.leases {
-        let n = normalize_lease(l)?;
-        if !leases.contains(&n) {
-            leases.push(n);
+        for n in arch.resolve(&normalize_lease(l)?)? {
+            if !leases.contains(&n) {
+                leases.push(n);
+            }
         }
     }
     let sealed = task_ledger::sealed(cwd);
@@ -304,6 +322,7 @@ pub fn register(cwd: &Path, req: &Register, dry_run: bool) -> Result<Value, Ledg
             return Err(e);
         }
     }
+    let frozen = arch.frozen_for(&leases)?;
     let worktree = req.worktree.as_ref().map(|w| {
         task_ledger::canonical_lenient(&PathBuf::from(w))
             .display()
@@ -312,10 +331,10 @@ pub fn register(cwd: &Path, req: &Register, dry_run: bool) -> Result<Value, Ledg
 
     if dry_run {
         let ledger = task_ledger::read(cwd)?;
-        check_register(&ledger, &leases, &sealed)?;
+        check_register(&ledger, &leases, &sealed, &arch, &frozen)?;
         return Ok(json!({
             "ok": true, "dry_run": true, "would_register": {
-                "name": req.name, "leases": leases, "owner": req.owner, "worktree": worktree, "gate": req.gate,
+                "name": req.name, "leases": leases, "frozen": frozen, "owner": req.owner, "worktree": worktree, "gate": req.gate,
             }
         }));
     }
@@ -323,7 +342,7 @@ pub fn register(cwd: &Path, req: &Register, dry_run: bool) -> Result<Value, Ledg
     let id = task_ledger::new_task_id();
     let root = task_ledger::main_root(cwd);
     let task = task_ledger::update(cwd, |ledger| {
-        check_register(ledger, &leases, &sealed)?;
+        check_register(ledger, &leases, &sealed, &arch, &frozen)?;
         let run =
             run_record::begin_for_task(&id, &req.name, req.gate.as_deref(), worktree.as_deref())
                 .map_err(|e| {
@@ -344,6 +363,7 @@ pub fn register(cwd: &Path, req: &Register, dry_run: bool) -> Result<Value, Ledg
             worktree: worktree.clone(),
             gate: req.gate.clone(),
             leases: leases.clone(),
+            frozen: frozen.clone(),
             status: TaskStatus::Claimed,
             run: Some(run),
             outcome: None,

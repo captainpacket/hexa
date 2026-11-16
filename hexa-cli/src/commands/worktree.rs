@@ -213,8 +213,9 @@ fn refuse_unfinished_tasks(candidates: &[(String, String)]) -> anyhow::Result<()
     )
 }
 
-/// `hexa dev worktree merge-order`: done tasks' worktrees in the order they
-/// finished, with every pair whose leases overlap named, and the worktrees
+/// `hexa dev worktree merge-order`: done tasks' worktrees inner layer first
+/// (domain, ports, use cases, adapters, composition root; ADR-2611160750 §4),
+/// in finish order within a layer, with every pair whose leases overlap named, and the worktrees
 /// that are not ready and why. Pure reading; no merge is run.
 async fn merge_order(json: bool) -> anyhow::Result<()> {
     use hexa_core::ports::ledger::{overlaps, TaskStatus};
@@ -236,6 +237,20 @@ async fn merge_order(json: bool) -> anyhow::Result<()> {
     let mut ready: Vec<&hexa_core::ports::ledger::Task> =
         ledger.tasks.iter().filter(|t| t.status == TaskStatus::Done && t.worktree.is_some()).collect();
     ready.sort_by(|a, b| a.updated.cmp(&b.updated).then(a.id.cmp(&b.id)));
+    // Inner to outer; a stable sort, so a tie keeps finish order. A task's
+    // layer is the innermost of its leases'.
+    let layers = match crate::commands::lease_layers::Arch::layer_map(&cwd) {
+        Ok(l) => l,
+        Err(e) => anyhow::bail!("{e}"),
+    };
+    let layer_of = |t: &hexa_core::ports::ledger::Task| {
+        t.leases
+            .iter()
+            .map(|l| layers.classify(l))
+            .min_by_key(|l| crate::commands::lease_layers::merge_rank(*l))
+            .unwrap_or(hexa_analysis::ports::HexLayer::Unknown)
+    };
+    ready.sort_by_key(|t| crate::commands::lease_layers::merge_rank(layer_of(t)));
     let mut conflicts: Vec<serde_json::Value> = Vec::new();
     for (i, a) in ready.iter().enumerate() {
         for b in ready.iter().skip(i + 1) {
@@ -262,6 +277,7 @@ async fn merge_order(json: bool) -> anyhow::Result<()> {
         .map(|(n, t)| serde_json::json!({
             "position": n + 1, "id": t.id, "name": t.name, "worktree": t.worktree,
             "commit": t.commit, "finished": t.updated, "leases": t.leases,
+            "layer": layer_of(t).to_string(),
         }))
         .collect();
     let report = serde_json::json!({
@@ -269,7 +285,7 @@ async fn merge_order(json: bool) -> anyhow::Result<()> {
         "order": order,
         "conflicts": conflicts,
         "not_ready": not_ready,
-        "note": "Disjoint leases merge in any order; the order is by finish time. This verb merges nothing: use `hexa dev worktree merge <branch> --force`.",
+        "note": "Inner layers merge first (domain, ports, use cases, adapters, composition root), each later task rebasing on the earlier and re-passing its gate; within a layer the order is by finish time. This verb merges nothing: use `hexa dev worktree merge <branch> --force`.",
     });
     if json || !std::io::stdout().is_terminal() {
         println!("{}", serde_json::to_string_pretty(&report)?);

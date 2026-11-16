@@ -36,6 +36,8 @@ Make the architecture the lease unit, and treat the inner layers as contracts.
 
 ## Implementation
 
+**Gate:** `cargo test -p hexa-cli --test leases_follow_the_architecture`
+
 Gates first, each a failing test against a temp repo with a hexagonal layout:
 
 1. `register --lease usecases/billing` resolves to that slice's files.

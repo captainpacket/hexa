@@ -90,6 +90,10 @@ pub struct Task {
     pub worktree: Option<String>,
     pub gate: Option<String>,
     pub leases: Vec<String>,
+    /// The port and domain files a use-case or adapter lease imports, frozen
+    /// for the task's life (ADR-2611160750 §3). Empty for other leases.
+    #[serde(default)]
+    pub frozen: Vec<String>,
     pub status: TaskStatus,
     /// The run record id (`~/.hexa/runs/<id>.json`).
     pub run: Option<String>,
@@ -316,6 +320,7 @@ mod tests {
             worktree: None,
             gate: None,
             leases: leases.iter().map(|s| s.to_string()).collect(),
+            frozen: Vec::new(),
             status: TaskStatus::Claimed,
             run: None,
             outcome: None,
