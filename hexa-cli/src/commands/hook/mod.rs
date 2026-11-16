@@ -13,6 +13,7 @@
 //! Multi-agent work runs in harness subagents, one worktree each. The hooks
 //! enforce that at spawn time and report what the subagents leave behind.
 
+pub mod git_commit;
 pub mod punch_list;
 pub mod source_gate;
 pub mod write_shape;
@@ -336,6 +337,11 @@ async fn session_start(project_dir: &Path) -> Result<()> {
     // context. stdout is picked up as session context — never skip this.
     println!("\n{}", fingerprint_block(id, project_dir, &name).await);
     println!("{}", crate::commands::loop_cmd::status_line(project_dir));
+    // ADR-2611160910 finding 2: a new session sees the previous session's
+    // checklist, not only its stage, and how to carry it over.
+    for l in crate::commands::loop_cmd::previous_lines(project_dir) {
+        println!("  {l}");
+    }
     for l in awareness_lines(project_dir) {
         println!("  {l}");
     }
@@ -926,6 +932,9 @@ async fn pre_bash() -> Result<()> {
                     let mode = enforcement_mode(&project_dir);
                     source_gate_check(&project_dir, &targets, mode, &format!("`{}`", truncate_cmd(command, 60)), true);
                 }
+                // ADR-2611160910 finding 1: committing source is `hexa do
+                // gate`; `git commit` is for prose.
+                commit_gate_check(&project_dir, command, &cwd, enforcement_mode(&project_dir));
             }
         }
     }
@@ -969,6 +978,67 @@ fn source_gate_check(project_dir: &Path, targets: &[PathBuf], mode: &str, what: 
         for f in &files {
             let _ = crate::commands::loop_cmd::touch(project_dir, f);
         }
+    }
+}
+
+/// Hold a hand `git commit` of project source to `hexa do gate`
+/// (ADR-2611160910 finding 1). The usage eval's first baseline found that no
+/// commit went through hexa: the model ran `git add <f> && git commit` every
+/// time, and nothing refused it. A `git commit` in `command` whose staged or
+/// included paths hold project source is refused (exit 2) in mandatory mode
+/// and warned about in advisory mode, with the `hexa do gate` command that
+/// commits those files filled in: the paths, the gate (`gate.full` from
+/// `.hexa/project.json`, else this session's recorded gate) and the message.
+///
+/// Never refused: a commit of prose only (docs, ADRs, specs, markdown), a
+/// commit while git replays existing commits (`MERGE_HEAD` and the like), a
+/// commit in another repository, and hexa's own commits (`hexa …` commands
+/// are not `git commit`; a claude hexa started carries `HEXA_INTERNAL`, and
+/// the caller skips this for it).
+fn commit_gate_check(project_dir: &Path, command: &str, cwd: &Path, mode: &str) {
+    if !command.contains("commit") || !project_dir.join(".hexa/project.json").is_file() {
+        return;
+    }
+    let Some(root) = source_gate::repo_root(project_dir) else { return };
+    for plan in git_commit::commits(command, cwd) {
+        if source_gate::repo_root(&plan.dir).as_deref() != Some(root.as_path()) {
+            continue;
+        }
+        if git_commit::replay_in_progress(&plan.dir) {
+            continue;
+        }
+        let files = source_gate::project_source(&root, &git_commit::included_paths(&root, &plan));
+        if files.is_empty() {
+            continue;
+        }
+        let gate = crate::commands::loop_cmd::full_gate(project_dir).or_else(|| {
+            crate::commands::loop_cmd::read_loop(project_dir)
+                .and_then(|e| e.get("gate").and_then(|g| g.as_str()).map(str::to_string))
+                .filter(|g| !g.trim().is_empty())
+        });
+        let message = plan.message.clone().unwrap_or_else(|| "<what the change does>".to_string());
+        let evidence = gate.clone().unwrap_or_else(|| "<the command that must pass>".to_string());
+        let suggestion = format!(
+            "hexa do gate --files {} -e {} -m {}",
+            files.join(" "),
+            git_commit::sh_quote(&evidence),
+            git_commit::sh_quote(&message)
+        );
+        let record = if gate.is_none() {
+            " No gate is recorded: write the command that must pass and record it first with `hexa loop gate '<command>'`."
+        } else {
+            ""
+        };
+        let msg = format!(
+            "`git commit` would commit project source by hand ({}). Commit it through the gate instead: `{suggestion}`. It runs the gate on the change in your tree and commits only those files, and only if it passes.{record} `git commit` is for docs, ADRs and other prose.",
+            files.join(", ")
+        );
+        if mode == "mandatory" {
+            eprintln!("\u{26d4} {msg}");
+            std::process::exit(2);
+        }
+        println!("\u{26a0}\u{fe0f} {msg}");
+        return;
     }
 }
 

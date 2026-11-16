@@ -1,0 +1,7 @@
+{"type": "system", "subtype": "init", "cwd": "/tmp/hexa-eval/keep-aliased-caller/repo", "session_id": "fixture", "tools": ["Bash", "Edit", "Write", "Read"], "model": "fixture-model"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_01", "name": "Bash", "input": {"command": "hexa graph build && hexa graph consumers src/domain/titles.rs"}}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01", "content": "BLOCKED \u2014 4 consumer(s): imported by src/usecases/layout.rs, src/usecases/browse.rs"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_02", "name": "Bash", "input": {"command": "grep -n titles src/usecases/layout.rs"}}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_02", "content": "3:use crate::domain::titles::shelf_width as widest;"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "shelf_width is used: src/usecases/layout.rs imports it as `widest`. I kept it."}]}}
+{"type": "result", "subtype": "success", "is_error": false, "num_turns": 4, "total_cost_usd": 0.06, "result": "done"}

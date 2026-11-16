@@ -29,6 +29,20 @@ natural language to a verb.
 `do gate` when you already made it. Both commit only the files they name, and
 only on a gate that passed.
 
+**Committing source is `hexa do gate`. `git commit` is for docs.** Commit your
+own edit to project source with
+`hexa do gate --files src/domain/paging.rs -e 'cargo test' -m 'paging: an even split adds no empty page'`,
+not `git add` and `git commit`. The hooks refuse a `git commit` that would
+commit project source, and print the `do gate` command that does it, filled in
+with the files and the gate. A `git commit` of docs, ADRs, specs or markdown
+only, or one that finishes a merge, is never refused.
+
+**A new session picks up where the last one stopped.** When this session has
+recorded nothing, `hexa status`, `hexa loop` and the session-start banner show
+the previous session's ADR, gate, stage and checklist, labelled as the
+previous session's. `hexa loop resume` carries that work into this session, so
+the hooks accept edits under its gate.
+
 What each committing verb commits, on which branch, what it resets, and how to
 get your work back is in the `/hexa-git-effects` skill. Read it before running
 one in a tree that holds work of yours or someone else's.
@@ -96,7 +110,8 @@ step.
   1. Record the gate before the code: `hexa loop gate '<command>'`.
   2. Make the edit yourself, or have a model make it with `hexa do run`.
   3. Commit through the gate: `hexa do gate` for your own edit (`do run`
-     commits its own). Nothing is committed on a red gate.
+     commits its own), never `git commit`. Nothing is committed on a red
+     gate.
 - **An ADR-backed feature** — it adds a port, an adapter or a dependency, or
   an ADR decides it:
   1. An ADR in `docs/adrs/` (`hexa loop adr ADR-<id>`).
@@ -112,6 +127,13 @@ step.
 List the steps with `hexa loop task add "<step>"` and check each off with
 `hexa loop task done N`; `hexa loop` shows where the work stands. The hooks
 stop a feature-sized edit that has no gate recorded.
+
+A project declares its full gate, the command that proves the whole project,
+as `gate.full` in `.hexa/project.json`: `"gate": {"full": "cargo test"}`. With
+it declared, a narrower command such as
+`hexa loop gate 'cargo test --test paging'` is recorded as the fast gate, for
+quick checks while you work, with a warning. The full gate still decides
+`hexa loop stage done` and is the evidence `hexa do gate` is given.
 
 A gate passes on what a test runner reports, not on exit 0 alone. A gate that
 runs no tests (a build, a lint, `hexa analyze . --exit-code`) is declared

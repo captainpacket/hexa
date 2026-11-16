@@ -175,6 +175,30 @@ pub fn next_step(lp: &Value, design: Option<&str>, gates: &Value) -> Value {
     if let Some(cmd) = design {
         return step("design", format!("design: {cmd}"), Some(cmd.to_string()));
     }
+    // ADR-2611160910 finding 2: this session has no work of its own and an
+    // ended session left some here. Its open task is the next step, carried
+    // over first so the hooks accept edits under its gate.
+    let prev = &lp["previous"];
+    if prev.is_object() {
+        let tasks = prev["checklist"].as_array().cloned().unwrap_or_default();
+        let pending = tasks.iter().find(|t| t["status"] == "doing").or_else(|| tasks.iter().find(|t| t["status"] != "done"));
+        let who = show(&prev["session"]);
+        let who = who.get(..8).unwrap_or(&who);
+        let text = match pending {
+            Some(t) => format!(
+                "the previous session ({who}) left task {}: {} open, under gate {} — carry its work into this session, then do it",
+                show(&t["n"]),
+                show(&t["title"]),
+                show(&prev["gate"])
+            ),
+            None => format!(
+                "the previous session ({who}) left work at stage {} under gate {} — carry it into this session",
+                show(&prev["stage"]),
+                show(&prev["gate"])
+            ),
+        };
+        return step("resume", text, Some("hexa loop resume".into()));
+    }
     let gate = lp["gate"].as_str().filter(|g| lp["recorded"] == true && !g.is_empty() && *g != "none");
     let Some(gate) = gate else {
         return step(
@@ -633,6 +657,29 @@ pub fn render_text(r: &Value) -> String {
     let l = &r["loop"];
     if l["readable"] == false {
         let _ = writeln!(o, "\n  Loop:    {} {}", "unreadable:".red(), show(&l["error"]));
+    } else if l["previous"].is_object() {
+        // ADR-2611160910 finding 2: nothing of this session's own; the
+        // previous session's work, labelled as such.
+        let p = &l["previous"];
+        let who = show(&p["session"]);
+        let _ = writeln!(o, "\n  Loop:    {}", "nothing recorded in this session".dimmed());
+        let _ = writeln!(
+            o,
+            "  Previous session {} (ended): stage {} · ADR {} · gate {}",
+            who.get(..8).unwrap_or(&who),
+            show(&p["stage"]),
+            show(&p["adr"]),
+            show(&p["gate"]),
+        );
+        for t in p["checklist"].as_array().into_iter().flatten() {
+            let box_ = match t["status"].as_str() {
+                Some("done") => "[x]",
+                Some("doing") => "[>]",
+                _ => "[ ]",
+            };
+            let _ = writeln!(o, "           {box_} {} {}", show(&t["n"]), show(&t["title"]));
+        }
+        let _ = writeln!(o, "           `hexa loop resume` carries it into this session");
     } else if l["recorded"] == true {
         let gate = show(&l["gate"]);
         let mark = match r["gates"][gate.as_str()]["passed"].as_bool() {

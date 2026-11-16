@@ -12,9 +12,11 @@ which failed until the code existed. This skill is that loop, verb by verb.
 ## Which path
 
 - **A small change** (a fix, one behaviour, no new port, adapter or
-  dependency): record a gate, make the edit, see the gate green. That is
-  `hexa loop gate '<command>'`, the edit, and the gate run (or `hexa do run`,
-  section 4). Sections 0–3 do not apply.
+  dependency): record a gate, make the edit, commit it through the gate. That
+  is `hexa loop gate 'cargo test'`, the edit, then
+  `hexa do gate --files src/domain/paging.rs -e 'cargo test' -m 'paging: an even split adds no empty page'`
+  (or `hexa do run`, section 4, which makes the edit and commits it).
+  Sections 0–3 do not apply.
 - **An ADR-backed feature** (a new port, adapter or dependency, or anything
   an ADR decides): sections 0–5 in order. Section 2 ends at a person: **an
   agent stops and asks; it never runs `hexa spec accept` itself.**
@@ -22,6 +24,25 @@ which failed until the code existed. This skill is that loop, verb by verb.
   `hexa issue sync`, `hexa gap pr`): by default they print what they would
   send. Pass `--send` only when the person has said to send it, in this
   conversation. `hexa forge status` reads the forge and sends nothing.
+
+**Committing source is `hexa do gate`; `git commit` is for docs.** `do gate`
+runs the gate on the change already in your tree and commits only the files
+you name, and only if the gate passes. The pre-bash hook refuses a
+`git commit` that would commit project source and prints the `do gate`
+command that does it, filled in. A `git commit` of docs, ADRs, specs or
+markdown only, or one that finishes a merge, is never refused.
+
+If the project declares its full gate (`"gate": {"full": "cargo test"}` in
+`.hexa/project.json`), recording a narrower command such as
+`hexa loop gate 'cargo test --test paging'` keeps it as the fast gate, for
+quick checks while you work. The full gate still decides
+`hexa loop stage done` and is the evidence `do gate` is given.
+
+**A new session picks up where the last one stopped.** When this session has
+recorded nothing, `hexa status`, `hexa loop` and the session-start banner show
+the previous session's ADR, gate, stage and checklist, labelled as the
+previous session's. `hexa loop resume` carries that work into this session, so
+the hooks accept edits under its gate.
 
 Several verbs commit, and some reset. Before running `do run`, `harden`,
 `build`, `spec tests`, `bench` or `gate coverage` in a tree with other work in
@@ -138,6 +159,8 @@ hexa loop stage done                    # writes the evidence into the ADR
 | Where am I: the loop (ADR, gate, stage, checklist), what is in flight in this repo, and the next step (JSON when piped; `--all` for every project) | `hexa status` |
 | The next step alone: the design draft's step, else record a gate, fix the red gate, or the pending task. Read-only | `hexa go` |
 | Where the work stands, this session's and every other's | `hexa loop` |
+| Carry the previous session's ADR, gate, stage and checklist into this one | `hexa loop resume` |
+| Commit an edit you made yourself, through the gate | `hexa do gate --files src/domain/paging.rs -e 'cargo test' -m 'paging: an even split adds no empty page'` |
 | The steps this work is made of | `hexa loop task` |
 | A plain-English request, routed to the verb it names | `hexa hey "who uses src/parser.rs"` — exits 1 when no verb matches; asks before anything that changes the tree, every time |
 | Which decisions are done, how far each is built (from evidence, not status), who is on it | `hexa adr board` (`--text` for a table, `--html <file>` for a page, `--strict` to fail when a status is behind its evidence) |
