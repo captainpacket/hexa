@@ -2,6 +2,10 @@
   "adr": "ADR-2611161600",
   "feature": "spec-acceptance-binds-committed-rust-specs",
   "description": "An acceptance binds committed text, spec drafting and acceptance are refused where spec tests cannot run, and a generation keeps its failing tests and sets aside the ones that already pass.",
+  "accepted": {
+    "by": "gary",
+    "sha256": "5598bf838b349d0df7408b1473e5ce6ac2dfb8bdb7bde941e896a2789a896b8c"
+  },
   "specs": [
     {
       "id": "S01",
