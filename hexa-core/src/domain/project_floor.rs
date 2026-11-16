@@ -49,6 +49,8 @@ pub fn gitignore_lines(lang: &str) -> Vec<&'static str> {
     };
     // One checkout's session state, never shared.
     lines.extend([".hexa/loop.json", ".hexa/loop.lock"]);
+    // A secrets file is never committed; its example stays tracked (ADR-2610281552 §3, amended 2026-11-16).
+    lines.extend([".env*", "!.env.example"]);
     lines
 }
 

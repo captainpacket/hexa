@@ -157,9 +157,9 @@ pub async fn run(args: InitArgs) -> Result<()> {
     let ignore = target.join(".gitignore");
     let existing = std::fs::read_to_string(&ignore).ok();
     let merged = hexa_core::ports::project_floor::merged_gitignore(existing.as_deref(), &args.lang);
-    let base = merged.as_deref().or(existing.as_deref());
-    let with_secrets = merged_secret_ignores(base);
-    if let Some(text) = with_secrets.or(merged) {
+    // The secrets lines are part of every language's lines, so an existing .gitignore that lacks them
+    // gets them too, whatever else it says about .env (ADR-2610281552 §3, amended 2026-11-16).
+    if let Some(text) = merged {
         std::fs::write(&ignore, text)?;
         println!("  {} .gitignore", "\u{2713}".green());
     }
@@ -677,41 +677,6 @@ fn create_dir_if_missing(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The `.gitignore` lines that keep secrets out of a commit: every `.env*`,
-/// except the `.env.example` the security rules ask for.
-const SECRET_IGNORES: &[&str] = &[".env*", "!.env.example"];
-
-/// `existing` with each missing [`SECRET_IGNORES`] line appended once, or
-/// `None` when nothing is missing.
-///
-/// A `.gitignore` that already has a line about `.env` (`.env`, `/.env.local`,
-/// `!.env.example`, …) states its own policy and is left as it is: ADR-2610281552
-/// S22 holds init to leaving a complete `.gitignore` byte-for-byte unchanged.
-fn merged_secret_ignores(existing: Option<&str>) -> Option<String> {
-    let text = existing.unwrap_or("");
-    let names_env = text.lines().any(|l| {
-        let l = l.trim().trim_start_matches('!').trim_start_matches('/');
-        l.starts_with(".env")
-    });
-    if names_env {
-        return None;
-    }
-    let missing: Vec<&str> =
-        SECRET_IGNORES.iter().copied().filter(|l| !text.lines().any(|x| x.trim() == *l)).collect();
-    if missing.is_empty() {
-        return None;
-    }
-    let mut out = text.to_string();
-    if !out.is_empty() && !out.ends_with('\n') {
-        out.push('\n');
-    }
-    for l in missing {
-        out.push_str(l);
-        out.push('\n');
-    }
-    Some(out)
-}
-
 /// The root of the git repository that contains `dir`, if any. `None` also
 /// when git is missing: init then tries `git init`, which says so.
 fn enclosing_git_root(dir: &Path) -> Option<PathBuf> {
@@ -854,12 +819,10 @@ mod scaffold_tests {
     }
 
     #[test]
-    fn secrets_are_ignored_once_and_the_example_is_not() {
-        let text = merged_secret_ignores(Some("target/")).expect("lines added");
-        assert_eq!(text, "target/\n.env*\n!.env.example\n");
-        assert_eq!(merged_secret_ignores(Some(&text)), None);
-        assert_eq!(merged_secret_ignores(Some("*.log\n.env\n")), None, "a stated .env policy is the user's");
-        assert!(merged_secret_ignores(None).is_some());
+    fn secrets_are_ignored_even_when_the_file_already_names_some_env_line() {
+        let text = hexa_core::ports::project_floor::merged_gitignore(Some("*.log\n.env\n"), "go").expect("lines added");
+        assert!(text.contains("\n.env*\n") && text.contains("!.env.example"), "{text}");
+        assert_eq!(hexa_core::ports::project_floor::merged_gitignore(Some(&text), "go"), None, "added once");
     }
 
     #[test]

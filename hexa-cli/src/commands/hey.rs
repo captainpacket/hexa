@@ -14,10 +14,10 @@ pub struct HeyArgs {
     /// (ADR-2611160730 §7).
     #[arg(long, hide = true)]
     pub queue: bool,
-    /// Changes nothing, and says so: every route that changes the tree, git or
-    /// the install is confirmed even with `--yes` (ADR-2610271308 §6), and a
-    /// read-only route asks nothing. Hidden; accepted so old scripts parse.
-    #[arg(long, short, hide = true)]
+    /// Say yes in advance: a route that changes the tree, git or the install
+    /// runs without asking (ADR-2610271308 §6, amended 2026-11-16). A request
+    /// that matches no rule still runs nothing.
+    #[arg(long, short)]
     pub yes: bool,
 }
 
@@ -338,12 +338,11 @@ pub async fn run(args: HeyArgs) -> anyhow::Result<()> {
     println!("  {} {}", "→".green(), description);
     println!("    {}: {}", kind.dimmed(), payload.dimmed());
 
-    // A route that changes the tree, git or the install is confirmed even with
-    // `--yes` (ADR-2610271308 §6).
-    if destructive {
-        if args.yes {
-            println!("  {}", "--yes does not skip this: a route that changes the tree is always confirmed".dimmed());
-        }
+    // A route that changes the tree, git or the install asks first, unless the
+    // person said yes in advance with `--yes` (ADR-2610271308 §6, amended).
+    if destructive && args.yes {
+        println!("  {}", "--yes: running without asking".dimmed());
+    } else if destructive {
         use std::io::Write;
         print!("  {} Proceed? [y/N]: ", "!".yellow().bold());
         std::io::stdout().flush()?;

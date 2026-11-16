@@ -404,7 +404,7 @@ fn s18_merge_keeps_existing_and_appends_missing() {
 #[test]
 fn s19_nothing_written_when_nothing_missing() {
     assert_eq!(
-        merged_gitignore(Some("target/\n.hexa/loop.json\n.hexa/loop.lock\n"), "rust"),
+        merged_gitignore(Some("target/\n.hexa/loop.json\n.hexa/loop.lock\n.env*\n!.env.example\n"), "rust"),
         None
     );
 }
