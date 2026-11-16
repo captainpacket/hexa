@@ -270,6 +270,69 @@ pub(crate) async fn measure(
     Ok(rows)
 }
 
+/// Why deletion cannot measure these modules, if it cannot: a deleted Rust or
+/// Go source is a compile error, so the gate fails for every one of them,
+/// tested or not.
+pub(crate) fn not_measurable_by_deletion(candidates: &[String]) -> Option<String> {
+    for (ext, lang) in [("rs", "rust"), ("go", "go")] {
+        let n = candidates.iter().filter(|c| c.ends_with(&format!(".{ext}"))).count();
+        if n > 0 {
+            return Some(format!(
+                "not measurable by deletion for {lang}: {n} .{ext} module(s), and deleting one is a compile error, \
+                 so every module would read as needed whether a test reaches it or not"
+            ));
+        }
+    }
+    None
+}
+
+/// The repository `target` sits in, else the working directory: where a
+/// repo-relative path such as `src/main.ts` is read from.
+fn repo_root_of(target: &Path) -> PathBuf {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(if target.is_dir() { target } else { Path::new(".") })
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// The composition root as a path relative to `target`, the form candidates
+/// are compared in. A path is read relative to `target` first, then to the
+/// repository root; one outside `target` excludes nothing. Looking only under
+/// `target` missed `src/lib.rs` for target `src`, and deleted it.
+pub(crate) fn resolve_composition_root(target: &Path, repo_root: &Path, given: Option<&str>) -> anyhow::Result<String> {
+    let canon = |p: &Path| std::fs::canonicalize(p).ok();
+    let target_abs = canon(target);
+    let relative_to_target = |file: &Path| -> Option<String> {
+        let file = canon(file)?;
+        let rel = file.strip_prefix(target_abs.as_ref()?).ok()?;
+        Some(rel.to_string_lossy().replace('\\', "/"))
+    };
+    let lookup = |c: &str| -> Option<String> {
+        let c = c.trim_start_matches("./");
+        [target.join(c), repo_root.join(c)].iter().filter(|p| p.is_file()).find_map(|p| relative_to_target(p))
+    };
+    match given {
+        Some(c) => lookup(c).ok_or_else(|| {
+            anyhow::anyhow!(
+                "--composition-root {c}: no such file under {} or the repository root {}",
+                target.display(),
+                repo_root.display()
+            )
+        }),
+        // A library crate's `lib.rs` is its composition root, as a binary's
+        // `main.rs` is (CLAUDE.md: each crate's lib.rs wires its adapters).
+        None => Ok(["src/main.ts", "src/main.rs", "main.go", "src/index.ts", "src/lib.rs", "main.ts", "index.ts", "lib.rs", "main.rs"]
+            .iter()
+            .find_map(|c| lookup(c))
+            .unwrap_or_default()),
+    }
+}
+
 /// `hexa gate coverage` — name every module the gate does not verify.
 pub async fn run(
     target: String,
@@ -280,16 +343,22 @@ pub async fn run(
     use hexa_core::ports::evidence::{read_evidence, Evidence, KNOWN_RUNNERS};
     let root = PathBuf::from(&target);
 
-    // A library crate's `lib.rs` is its composition root, as a binary's
-    // `main.rs` is (CLAUDE.md: each crate's lib.rs wires its adapters).
-    let composition_root = match composition_root {
-        Some(c) => c,
-        None => ["src/main.ts", "src/main.rs", "main.go", "src/index.ts", "src/lib.rs"]
-            .iter()
-            .find(|c| root.join(c).exists())
-            .map(|c| c.to_string())
-            .unwrap_or_default(),
-    };
+    let composition_root = resolve_composition_root(&root, &repo_root_of(&root), composition_root.as_deref())?;
+
+    // Deleting a Rust or Go file is a compile error, so every gate "needs"
+    // every module and an untested one reads as covered. Measured: an
+    // untested util.rs was counted as verified. Refuse rather than report a
+    // coverage the method cannot see.
+    let mut files = Vec::new();
+    collect_files(&root, &mut files)?;
+    let relative: Vec<PathBuf> = files.iter().map(|f| f.strip_prefix(&root).unwrap_or(f).to_path_buf()).collect();
+    let candidates = candidate_modules(&relative, &composition_root);
+    if let Some(why) = not_measurable_by_deletion(&candidates) {
+        println!("{} {}", "deletion coverage of".bold(), gate.cyan());
+        println!("  {} {why}", "✗".red());
+        println!("  nothing was deleted and no coverage is reported");
+        anyhow::bail!("{why}");
+    }
 
     // Coverage is measured from a gate that passes on the unmodified tree
     // (ADR-2611081151 §7): a gate that fails there survives every deletion
@@ -476,6 +545,28 @@ mod gate_coverage {
         ];
         assert_eq!(uncovered(&rows), vec!["src/adapters/secondary/cache.ts".to_string()],
             "a type-only module is not a hole; a runtime module the gate never needs is");
+    }
+
+    #[test]
+    fn rust_and_go_modules_are_refused_as_not_measurable_by_deletion() {
+        let why = super::not_measurable_by_deletion(&["src/util.rs".into()]).expect("refused");
+        assert!(why.contains("not measurable by deletion for rust"), "{why}");
+        let why = super::not_measurable_by_deletion(&["a.ts".into(), "store.go".into()]).expect("refused");
+        assert!(why.contains("for go"), "{why}");
+        assert!(super::not_measurable_by_deletion(&["a.ts".into(), "b.tsx".into()]).is_none());
+    }
+
+    #[test]
+    fn the_composition_root_is_found_from_the_repo_root_and_made_target_relative() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("src")).unwrap();
+        std::fs::write(d.path().join("src/main.ts"), "").unwrap();
+        let target = d.path().join("src");
+        assert_eq!(super::resolve_composition_root(&target, d.path(), Some("src/main.ts")).unwrap(), "main.ts");
+        assert_eq!(super::resolve_composition_root(&target, d.path(), Some("main.ts")).unwrap(), "main.ts");
+        assert_eq!(super::resolve_composition_root(&target, d.path(), None).unwrap(), "main.ts");
+        assert_eq!(super::resolve_composition_root(d.path(), d.path(), None).unwrap(), "src/main.ts");
+        assert!(super::resolve_composition_root(&target, d.path(), Some("nope.ts")).is_err());
     }
 
     #[test]

@@ -233,6 +233,12 @@ fn typescript_relative_imports_count_as_consumers() {
 fn merge_order_goes_domain_ports_usecases_adapters_composition_root_and_ties_keep_finish_order() {
     let (_t, home, repo) = rust_repo();
     let wt = |n: &str| repo.parent().unwrap().join(n).display().to_string();
+    let head = String::from_utf8(
+        std::process::Command::new("git").args(["rev-parse", "--short", "HEAD"]).current_dir(&repo).output().unwrap().stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
     // Finished outermost first, so finish order alone would be exactly backwards.
     let plan: [(&str, &str); 6] = [
         ("root", "src/lib.rs"),
@@ -248,9 +254,11 @@ fn merge_order_goes_domain_ports_usecases_adapters_composition_root_and_ties_kee
             // Finish times have one-second resolution.
             std::thread::sleep(std::time::Duration::from_millis(1100));
         }
-        let v = ok(&register(&home, &repo, name, &[lease], &["--worktree", &wt(name)]));
+        // `passed` is earned: a gate that passes, and a commit that exists.
+        let gate = "echo 'test result: ok. 1 passed; 0 failed; 0 ignored'";
+        let v = ok(&register(&home, &repo, name, &[lease], &["--worktree", &wt(name), "--gate", gate]));
         let id = v["id"].as_str().unwrap().to_string();
-        ok(&hexa(&home, &repo, &["agent", "report", "--id", &id, "--outcome", "passed", "--commit", "abcd123", "--json"]));
+        ok(&hexa(&home, &repo, &["agent", "report", "--id", &id, "--outcome", "passed", "--commit", &head, "--json"]));
         ids.insert(id, *name);
     }
     let order = json(&hexa(&home, &repo, &["dev", "worktree", "merge-order", "--json"]));

@@ -491,6 +491,14 @@ pub fn report(
             ));
         }
     }
+    if outcome == Outcome::Passed {
+        let ledger = task_ledger::read(cwd)?;
+        let t = ledger.get(id).ok_or_else(|| not_found(id))?;
+        if !t.status.is_active() {
+            return Err(not_active(t));
+        }
+        earn_passed(cwd, t, commit)?;
+    }
     let status = if outcome == Outcome::Passed {
         TaskStatus::Done
     } else {
@@ -505,6 +513,71 @@ pub fn report(
         note,
         dry_run,
     )
+}
+
+/// A `passed` is earned, not stated: the commit resolves to a commit, and the
+/// task's registered gate runs here and passes by the one evidence reader —
+/// exit 0 and at least one test, never "running 0 tests". It recorded done on
+/// `--commit deadbeef` with no check at all.
+fn earn_passed(cwd: &Path, t: &Task, commit: Option<&str>) -> Result<(), LedgerError> {
+    let dir = t
+        .worktree
+        .as_deref()
+        .map(PathBuf::from)
+        .filter(|w| w.is_dir())
+        .unwrap_or_else(|| cwd.to_path_buf());
+    if let Some(c) = commit {
+        let resolved = std::process::Command::new("git")
+            .args(["cat-file", "-e", &format!("{c}^{{commit}}")])
+            .current_dir(&dir)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !resolved {
+            return Err(LedgerError::new(
+                "commit_not_found",
+                format!("`{c}` is not a commit in {}", dir.display()),
+                "Pass the commit the task produced: --commit $(git rev-parse --short HEAD), from its worktree."
+                    .into(),
+                Some("commit"),
+                false,
+            ));
+        }
+    }
+    let Some(gate) = t.gate.as_deref().filter(|g| !g.trim().is_empty()) else {
+        return Err(LedgerError::new(
+            "gate_missing",
+            format!("task {} has no gate, so nothing can show it passed", t.id),
+            "Register the task with --gate '<command that must exit 0>', or report --outcome failed.".into(),
+            Some("outcome"),
+            false,
+        ));
+    };
+    let out = std::process::Command::new("bash")
+        .arg("-c")
+        .arg(format!("set -o pipefail; {gate}"))
+        .current_dir(&dir)
+        .output();
+    let (ok, text) = match out {
+        Ok(o) => (
+            o.status.success(),
+            format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)),
+        ),
+        Err(e) => (false, format!("the gate did not start: {e}")),
+    };
+    let verdict = hexa_exec::direct_exec::evidence_verdict(ok, &text, false);
+    if verdict.passes() {
+        return Ok(());
+    }
+    let why = hexa_exec::direct_exec::evidence_failure(gate, &verdict, "");
+    let tail: Vec<&str> = text.lines().rev().take(15).collect::<Vec<_>>().into_iter().rev().collect();
+    Err(LedgerError::new(
+        "gate_failed",
+        format!("task {}: {}", t.id, why.trim_end_matches(|c: char| c == ':' || c.is_whitespace() || c == '.').trim_end_matches(". Output")),
+        format!("The gate ran in {} and did not pass; fix it, or report --outcome failed. Its output ended:\n{}", dir.display(), tail.join("\n")),
+        Some("outcome"),
+        false,
+    ))
 }
 
 pub fn release(cwd: &Path, id: &str, dry_run: bool) -> Result<Value, LedgerError> {
@@ -605,21 +678,42 @@ mod tests {
         });
     }
 
+    /// A commit in `d`, so `passed` has something to resolve.
+    fn commit(d: &Path) -> String {
+        let git = |args: &[&str]| {
+            let o = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@x", "-c", "commit.gpgsign=false"])
+                .args(args)
+                .current_dir(d)
+                .output()
+                .unwrap();
+            assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+            String::from_utf8_lossy(&o.stdout).trim().to_string()
+        };
+        git(&["commit", "-q", "--allow-empty", "-m", "work"]);
+        git(&["rev-parse", "--short", "HEAD"])
+    }
+
+    const GREEN_GATE: &str = "echo 'test result: ok. 1 passed; 0 failed; 0 ignored'";
+
     #[test]
     fn report_closes_the_task_and_its_run_record_and_frees_the_lease() {
         let d = repo();
+        let sha = commit(d.path());
         with_home(|| {
-            let a = register(d.path(), &req("one", &["src/a"]), false).unwrap();
+            let mut with_gate = req("one", &["src/a"]);
+            with_gate.gate = Some(GREEN_GATE.into());
+            let a = register(d.path(), &with_gate, false).unwrap();
             let id = a["id"].as_str().unwrap();
             let run = a["run"].as_str().unwrap().to_string();
-            let r = report(d.path(), id, Outcome::Passed, Some("abc1234"), None, false).unwrap();
+            let r = report(d.path(), id, Outcome::Passed, Some(&sha), None, false).unwrap();
             assert_eq!(
                 (
                     r["status"].as_str(),
                     r["outcome"].as_str(),
                     r["commit"].as_str()
                 ),
-                (Some("done"), Some("passed"), Some("abc1234"))
+                (Some("done"), Some("passed"), Some(sha.as_str()))
             );
             assert_eq!(r["warnings"].as_array().unwrap().len(), 0, "{r}");
             let rec: Value = serde_json::from_str(
@@ -629,7 +723,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 (rec["outcome"].as_str(), rec["commit"].as_str()),
-                (Some("passed"), Some("abc1234"))
+                (Some("passed"), Some(sha.as_str()))
             );
             assert!(rec["ended"].is_string() && rec["task"] == id);
             register(d.path(), &req("reuse", &["src/a"]), false).expect("the lease is free again");
@@ -665,6 +759,34 @@ mod tests {
                 (e.code.as_str(), e.field.as_deref()),
                 ("commit_invalid", Some("commit"))
             );
+        });
+    }
+
+    #[test]
+    fn passed_is_refused_for_an_unknown_commit_a_failing_or_vacuous_gate_or_no_gate() {
+        let d = repo();
+        let sha = commit(d.path());
+        with_home(|| {
+            let task = |gate: Option<&str>| {
+                let mut r = req("one", &["src/a"]);
+                r.gate = gate.map(str::to_string);
+                register(d.path(), &r, false).unwrap()["id"].as_str().unwrap().to_string()
+            };
+            let id = task(Some(GREEN_GATE));
+            let e = report(d.path(), &id, Outcome::Passed, Some("deadbeef"), None, false).unwrap_err();
+            assert_eq!((e.code.as_str(), e.field.as_deref()), ("commit_not_found", Some("commit")));
+            release(d.path(), &id, false).unwrap();
+            for (gate, code) in [
+                (Some("false"), "gate_failed"),
+                (Some("echo 'test result: ok. 0 passed; 0 failed; 0 ignored'"), "gate_failed"),
+                (None, "gate_missing"),
+            ] {
+                let id = task(gate);
+                let e = report(d.path(), &id, Outcome::Passed, Some(&sha), None, false).unwrap_err();
+                assert_eq!(e.code, code, "{gate:?}: {}", e.message);
+                assert_eq!(list(d.path(), true).unwrap()["count"]["active"], 1, "the refused task stays open");
+                release(d.path(), &id, false).unwrap();
+            }
         });
     }
 

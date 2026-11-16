@@ -428,6 +428,10 @@ pub struct Generated {
     pub refs: BTreeMap<String, String>,
     /// The commit that holds the tests, while every one of them fails.
     pub red: String,
+    /// Scenarios whose generated test passed before the code existed, each
+    /// with why: guards of behaviour already in place. Their tests were left
+    /// out, so these scenarios stay pending; the kept tests all fail.
+    pub guards: Vec<String>,
 }
 
 /// The crate's library name, from its manifest: `[lib] name`, else the
@@ -621,11 +625,13 @@ async fn red_at(
         return Ok(RedCheck::DoesNotCompile(out));
     }
     let mut rejected = Vec::new();
+    let mut green = Vec::new();
     for (sid, r) in refs {
         match run_test_alone(&wt, path_env, r, Some(&target)).await {
             TestRun::Failed(_) => {}
             TestRun::Broken { tail, .. } => rejected.push(format!("{sid} never ran:\n{tail}")),
-            TestRun::Passed | TestRun::Ambiguous(_) => {
+            TestRun::Passed => green.push((sid.clone(), format!("{sid} ({r}) passes before the code exists, so it tests nothing"))),
+            TestRun::Ambiguous(_) => {
                 rejected.push(format!("{sid} ({r}) passes before the code exists, so it tests nothing"))
             }
             TestRun::NotFound(why) => rejected.push(format!("{sid}: {why}")),
@@ -634,7 +640,7 @@ async fn red_at(
         }
     }
     let _ = git(root, &["worktree", "remove", "--force", &wt_s]).await;
-    Ok(RedCheck::Rejected(rejected))
+    Ok(RedCheck::Rejected { why: rejected, green })
 }
 
 /// What the red check found.
@@ -642,8 +648,10 @@ async fn red_at(
 enum RedCheck {
     /// The test file does not compile; cargo's output.
     DoesNotCompile(String),
-    /// Why each rejected test is not red; empty when every one is.
-    Rejected(Vec<String>),
+    /// Why each rejected test is not red: `green` holds the scenarios whose
+    /// test ran alone and passed, `why` every other reason. Both empty when
+    /// every test is red.
+    Rejected { why: Vec<String>, green: Vec<(String, String)> },
 }
 
 impl RedCheck {
@@ -652,7 +660,10 @@ impl RedCheck {
     fn into_rejected(self) -> Vec<String> {
         match self {
             RedCheck::DoesNotCompile(out) => vec![format!("the test file does not compile:\n{out}")],
-            RedCheck::Rejected(r) => r,
+            RedCheck::Rejected { mut why, green } => {
+                why.extend(green.into_iter().map(|(_, r)| r));
+                why
+            }
         }
     }
 }
@@ -661,6 +672,9 @@ enum Rejection {
     /// Something a follow-up can carry back to the writer.
     Mendable(String),
     Final(Vec<String>),
+    /// Every test that did not fail ran and passed: scenario id → why. Those
+    /// are guards of behaviour already in place; the failing tests are kept.
+    Green(Vec<(String, String)>),
 }
 
 /// cargo's output when the test file at `file` does not build, else `None`.
@@ -700,7 +714,10 @@ async fn written_first(
         let one = BTreeMap::from([(sid.clone(), r.clone())]);
         match red_at(root, path_env, commit, file, &alone, &one).await? {
             RedCheck::DoesNotCompile(_) => {}
-            RedCheck::Rejected(r) => rejected.extend(r),
+            RedCheck::Rejected { why, green } => {
+                rejected.extend(why);
+                rejected.extend(green.into_iter().map(|(_, r)| r));
+            }
         }
     }
     Ok(rejected)
@@ -944,6 +961,7 @@ pub async fn generate_tests_with(
     // last reply and the error about it, never source from outside the test
     // file; each repaired file passes every check again from the start.
     const REPAIRS: usize = 2;
+    let mut guards: Vec<String> = Vec::new();
     let mut ask = user.clone();
     let mut repairs = 0;
     let (body, names, red_commit) = loop {
@@ -995,13 +1013,66 @@ pub async fn generate_tests_with(
                         "The test file does not compile (it does not build at HEAD):\n\n{}",
                         test_file_diagnostics(&out, &file)
                     ))),
-                    Ok(RedCheck::Rejected(r)) if !r.is_empty() => Err(Rejection::Final(r)),
-                    Ok(RedCheck::Rejected(_)) => Ok(red_commit),
+                    Ok(RedCheck::Rejected { mut why, green }) if !why.is_empty() => {
+                        why.extend(green.into_iter().map(|(_, r)| r));
+                        Err(Rejection::Final(why))
+                    }
+                    Ok(RedCheck::Rejected { green, .. }) if green.is_empty() => Ok(red_commit),
+                    // A test green before the code refuses the generation,
+                    // naming it (ADR-2610221540 S15), and always when red is
+                    // proved at an earlier commit (ADR-2610281442 §3).
+                    // `--keep-red` at HEAD keeps the red ones instead.
+                    Ok(RedCheck::Rejected { green, .. }) if base.is_some() || !options.keep_red => {
+                        Err(Rejection::Final(green.into_iter().map(|(_, r)| r).collect()))
+                    }
+                    Ok(RedCheck::Rejected { green, .. }) => Err(Rejection::Green(green)),
                 }
             }
         };
         match outcome {
             Ok(red_commit) => break (body, names, red_commit),
+            // Scenarios that already hold: their tests are guards, not gates.
+            // Throwing the whole generation away for them threw away the
+            // tests that do fail first. Keep those, drop the green ones, prove
+            // the rest red again, and report the guards.
+            Err(Rejection::Green(green)) => {
+                if green.len() >= names.len() {
+                    let r: Vec<String> = green.into_iter().map(|(_, r)| r).collect();
+                    return Err(format!("generation rejected, nothing kept: every test passes before the code exists:\n  {}", r.join("\n  ")));
+                }
+                let leaves: Vec<String> = green
+                    .iter()
+                    .filter_map(|(sid, _)| names.get(sid))
+                    .map(|f| f.rsplit("::").next().unwrap_or(f).to_string())
+                    .collect();
+                let trimmed = reformat(&hexa_core::domain::spec::without_tests(&body, &leaves), &spec.adr, edition.as_deref(), path_env);
+                let kept: BTreeMap<String, String> =
+                    names.iter().filter(|(sid, _)| !green.iter().any(|(g, _)| g == *sid)).map(|(a, b)| (a.clone(), b.clone())).collect();
+                let left_behind: Vec<&String> = leaves.iter().filter(|l| trimmed.contains(&format!("fn {l}("))).collect();
+                if !left_behind.is_empty() || tests_by_scenario(&trimmed, &kept.keys().map(String::as_str).collect::<Vec<_>>()).len() != kept.len() {
+                    let r: Vec<String> = green.into_iter().map(|(_, r)| r).collect();
+                    return Err(format!("generation rejected, nothing kept: the passing tests could not be separated from the failing ones:\n  {}", r.join("\n  ")));
+                }
+                let refs: BTreeMap<String, String> = kept.iter().map(|(sid, f)| (sid.clone(), format!("{file}::{f}"))).collect();
+                // Only reached when red is proved at HEAD: there is no red
+                // commit to rebuild, and the trimmed file is checked there.
+                match red_at(root, path_env, &head, &file, &trimmed, &refs).await? {
+                    RedCheck::Rejected { why, green: more } if why.is_empty() && more.is_empty() => {
+                        guards = green.into_iter().map(|(_, r)| r).collect();
+                        break (trimmed, kept, None);
+                    }
+                    RedCheck::Rejected { mut why, green: more } => {
+                        why.extend(more.into_iter().map(|(_, r)| r));
+                        return Err(format!("generation rejected, nothing kept:\n  {}", why.join("\n  ")));
+                    }
+                    RedCheck::DoesNotCompile(out) => {
+                        return Err(format!(
+                            "generation rejected, nothing kept: without its passing tests the file does not compile:\n{}",
+                            test_file_diagnostics(&out, &file)
+                        ))
+                    }
+                }
+            }
             Err(Rejection::Mendable(why)) if repairs < REPAIRS && !batched => {
                 repairs += 1;
                 ask = format!(
@@ -1032,7 +1103,7 @@ pub async fn generate_tests_with(
         let red = red_commit.ok_or("re-proving needs a red commit")?;
         git(root, &["update-ref", &format!("refs/hexa/red/{}", spec.adr), &red]).await?;
         let red = git(root, &["rev-parse", "--short", &red]).await?;
-        return Ok(Generated { file, refs, red });
+        return Ok(Generated { file, refs, red, guards });
     }
     let previous = options.replace.as_ref().and_then(|_| std::fs::read(&abs).ok());
     std::fs::write(&abs, &body).map_err(|e| e.to_string())?;
@@ -1064,7 +1135,7 @@ pub async fn generate_tests_with(
         }
         None => committed,
     };
-    Ok(Generated { file, refs, red })
+    Ok(Generated { file, refs, red, guards })
 }
 
 /// Why a reply's tests cannot be kept as they are, when the writer can mend it:
@@ -1111,7 +1182,13 @@ fn unmendable_reason(body: &str, ids: &[&str], names: &BTreeMap<String, String>)
 /// The file as it is sealed: the lint-exempt header, then rustfmt for the
 /// crate's edition. Unformatted when rustfmt is missing or fails.
 fn sealed_form(body: &str, adr: &str, edition: Option<&str>, path_env: &str) -> String {
-    let body = format!("{GENERATED_HEADER}\n{body}\n");
+    reformat(&format!("{GENERATED_HEADER}\n{body}\n"), adr, edition, path_env)
+}
+
+/// `body` through rustfmt for the crate's edition; unchanged when rustfmt is
+/// missing or fails.
+fn reformat(body: &str, adr: &str, edition: Option<&str>, path_env: &str) -> String {
+    let body = body.to_string();
     // Unique per call: generations run side by side in one process.
     static CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1189,6 +1266,11 @@ pub struct TestOptions {
     pub only: Option<Vec<String>>,
     /// Why they are re-proved; the writer is told.
     pub because: Option<String>,
+    /// Keep the tests that fail first when others already pass, rather than
+    /// refusing the generation: the passing ones are left out and reported
+    /// as guards, their scenarios pending. Off by default, where a green
+    /// test refuses the whole generation (ADR-2610221540 S15).
+    pub keep_red: bool,
 }
 
 #[derive(Debug, Clone)]

@@ -71,7 +71,11 @@ fn accept_rewrites_the_frontmatter_and_the_body_in_their_own_styles() {
     assert!(lines(&adr).contains(&"**Status:** Accepted"), "the body line moves too:\n{adr}");
     assert!(!adr.contains("Proposed") && !adr.contains("proposed"), "no line still says proposed:\n{adr}");
     assert!(adr.contains("The status of the thing is unclear."), "prose is left alone:\n{adr}");
-    assert_eq!(adr.lines().count(), PROPOSED.lines().count(), "no line added or lost:\n{adr}");
+    // One line is added: the rationale, dated, under the status. Nothing
+    // else is added or lost.
+    let notes: Vec<&str> = adr.lines().filter(|l| l.starts_with("> ") && l.contains("Accepted:")).collect();
+    assert_eq!(notes.len(), 1, "the rationale is recorded under the status:\n{adr}");
+    assert_eq!(adr.lines().count(), PROPOSED.lines().count() + 1, "no other line added or lost:\n{adr}");
 }
 
 #[test]

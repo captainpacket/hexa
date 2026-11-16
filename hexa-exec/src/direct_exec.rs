@@ -1692,7 +1692,7 @@ pub async fn gate_patch(
 /// target's package, that the old commit sweep would have carried into the
 /// agent's commit: not the target, not named with `--also`, not untracked
 /// (#36), not a credential, not hexa's or Claude's own state.
-pub fn pre_run_riders(repo_root: &std::path::Path, file: &str, also: &[String], start_dirty: &[String]) -> Vec<String> {
+fn pre_run_riders(repo_root: &std::path::Path, file: &str, also: &[String], start_dirty: &[String]) -> Vec<String> {
     let pkg = package_prefix(repo_root, file);
     let named: Vec<String> = also.iter().map(|p| normalize_also(p)).collect();
     start_dirty

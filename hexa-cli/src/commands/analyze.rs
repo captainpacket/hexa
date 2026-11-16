@@ -97,7 +97,7 @@ pub async fn run(
 
     // JSON mode: collect results and emit structured output
     if json_output {
-        return run_json(&root, strict, adr_compliance_only).await;
+        return run_json(&root, strict, adr_compliance_only, exit_code).await;
     }
 
     println!(
@@ -662,8 +662,15 @@ pub async fn run(
     let adr_errors = adr_violations.iter().filter(|v| v.severity == "error").count();
     let total_violations = all_violation_count + adr_errors;
 
-    // --exit-code: exit 1 on any boundary violation or ADR error
+    // --exit-code: exit 1 on any boundary violation or ADR error, and on a
+    // tree that was never graded: "no violations" over nothing read is the
+    // vacuous pass this flag exists to refuse.
     if exit_code && total_violations > 0 {
+        std::process::exit(1);
+    }
+    if exit_code && !adr_compliance_only && final_score.is_none() {
+        println!();
+        println!("  {} --exit-code: the tree was not graded, so nothing passed", "\u{2717}".red());
         std::process::exit(1);
     }
 
@@ -2154,7 +2161,7 @@ mod grade_tests {
 }
 
 /// JSON output mode for `hexa analyze --json`.
-async fn run_json(root: &Path, strict: bool, adr_compliance_only: bool) -> anyhow::Result<()> {
+async fn run_json(root: &Path, strict: bool, adr_compliance_only: bool, exit_code: bool) -> anyhow::Result<()> {
     let mut result = serde_json::json!({});
 
     if !adr_compliance_only {
@@ -2179,70 +2186,103 @@ async fn run_json(root: &Path, strict: bool, adr_compliance_only: bool) -> anyho
         // Full tree-sitter analysis, in-process (ADR-2608241500 P6.2).
         let mut score: Option<u64> = None;
         let mut boundary_errors: Vec<serde_json::Value> = Vec::new();
-        if let Ok(deep) = deep_analysis(root).await {
-            score = Some(deep.health_score as u64);
-            if !deep.violations.is_empty() {
-                boundary_errors.push(serde_json::json!({"count": deep.violations.len()}));
+        // Why there is no grade, when there is none. The human report says
+        // NOT GRADED here; the JSON said A+ — score 100 (an empty graph).
+        let mut not_graded: Option<String> = None;
+        // When the deep pass fails, the score is the import scan's, as in
+        // the human report, and `score_source` says so.
+        let mut deep_failed: Option<String> = None;
+        match deep_analysis(root).await {
+            Err(e) => deep_failed = Some(e.to_string()),
+            Ok(deep) if deep.file_count == 0 => {
+                not_graded = Some(format!(
+                    "{} source files scanned, 0 parsed: hexa parses Rust, Go and TypeScript, and nothing here was read",
+                    collect_source_files(root).len()
+                ))
             }
-            // The score's inputs, so a reader can see where the points went.
-            // Without this a score of 78 with zero violations was
-            // unexplainable from the output, and got misattributed.
-            // `rule_errors` belongs here for the same reason the rest do:
-            // without it the components sum to a different number than the
-            // score, and the difference is invisible (ADR-2609211430 §1).
-            result["score_components"] = serde_json::json!({
-                "violations": deep.violations.len(),
-                "rule_errors": rule_error_count(root) + deep.config_errors.len(),
-                "circular_deps": deep.circular_deps.len(),
-                "dead_exports": deep.dead_exports.len(),
-                "unused_ports": deep.unused_ports.len(),
-                "api_errors": deep.api.errors.len(),
-                "api_unserved": deep.api.unserved.len(),
-                "coverage_ceiling": deep.coverage.ceiling(),
-            });
-            // The API contract's findings, each traceable to a line
-            // (ADR-2610092245 §6).
-            result["api"] = serde_json::json!(deep.api);
-            // The whole result, as the analyzer returned it, for a consumer
-            // that reads the types rather than this summary (ADR-2610271649).
-            result["config_errors"] = serde_json::json!(deep.config_errors);
-            result["analysis"] = serde_json::to_value(&deep).unwrap_or_default();
-            // And the items themselves, so a count can be checked. This
-            // held for two of the four inputs and not for the two that
-            // carry the most weight: `violations` below is the import-scan
-            // list, which found 4 where the authoritative pass found 5, and
-            // cycles were serialized nowhere at all. A JSON consumer was
-            // handed a count it could not reconcile (ADR-2609140020).
-            result["unused_ports"] = serde_json::json!(deep.unused_ports);
-            result["coverage"] = serde_json::json!({
-                "classified": deep.coverage.classified,
-                "total": deep.coverage.total,
-                "unclassified": deep.coverage.unclassified,
-                "ceiling": deep.coverage.ceiling(),
-            });
-            result["dead_exports"] = serde_json::json!(deep.dead_exports);
-            result["circular_deps"] = serde_json::json!(deep.circular_deps);
-            result["boundary_violations"] = serde_json::json!(deep
-                .violations
-                .iter()
-                .map(|v| serde_json::json!({
-                    "from_file": v.edge.from_file,
-                    "to_file": v.edge.to_file,
-                    "import_path": v.edge.import_path,
-                    "line": v.edge.line,
-                    "rule": v.rule,
-                }))
-                .collect::<Vec<_>>());
+            Ok(deep) => {
+                score = Some(deep.health_score as u64);
+                if !deep.violations.is_empty() {
+                    boundary_errors.push(serde_json::json!({"count": deep.violations.len()}));
+                }
+                // The score's inputs, so a reader can see where the points went.
+                // Without this a score of 78 with zero violations was
+                // unexplainable from the output, and got misattributed.
+                // `rule_errors` belongs here for the same reason the rest do:
+                // without it the components sum to a different number than the
+                // score, and the difference is invisible (ADR-2609211430 §1).
+                result["score_components"] = serde_json::json!({
+                    "violations": deep.violations.len(),
+                    "rule_errors": rule_error_count(root) + deep.config_errors.len(),
+                    "circular_deps": deep.circular_deps.len(),
+                    "dead_exports": deep.dead_exports.len(),
+                    "unused_ports": deep.unused_ports.len(),
+                    "api_errors": deep.api.errors.len(),
+                    "api_unserved": deep.api.unserved.len(),
+                    "coverage_ceiling": deep.coverage.ceiling(),
+                });
+                // The API contract's findings, each traceable to a line
+                // (ADR-2610092245 §6).
+                result["api"] = serde_json::json!(deep.api);
+                // The whole result, as the analyzer returned it, for a consumer
+                // that reads the types rather than this summary (ADR-2610271649).
+                result["config_errors"] = serde_json::json!(deep.config_errors);
+                result["analysis"] = serde_json::to_value(&deep).unwrap_or_default();
+                // And the items themselves, so a count can be checked. This
+                // held for two of the four inputs and not for the two that
+                // carry the most weight: `violations` below is the import-scan
+                // list, which found 4 where the authoritative pass found 5, and
+                // cycles were serialized nowhere at all. A JSON consumer was
+                // handed a count it could not reconcile (ADR-2609140020).
+                result["unused_ports"] = serde_json::json!(deep.unused_ports);
+                result["coverage"] = serde_json::json!({
+                    "classified": deep.coverage.classified,
+                    "total": deep.coverage.total,
+                    "unclassified": deep.coverage.unclassified,
+                    "ceiling": deep.coverage.ceiling(),
+                });
+                result["dead_exports"] = serde_json::json!(deep.dead_exports);
+                result["circular_deps"] = serde_json::json!(deep.circular_deps);
+                result["boundary_violations"] = serde_json::json!(deep
+                    .violations
+                    .iter()
+                    .map(|v| serde_json::json!({
+                        "from_file": v.edge.from_file,
+                        "to_file": v.edge.to_file,
+                        "import_path": v.edge.import_path,
+                        "line": v.edge.line,
+                        "rule": v.rule,
+                    }))
+                    .collect::<Vec<_>>());
+            }
         }
 
-        // Compute local score if nexus didn't provide one
-        let total_violations = violations.len();
-        let final_score = score.unwrap_or_else(|| {
-            let v = total_violations as u64;
+        // No grade without a deep pass that read something. The import-scan
+        // count is not a grade: a fallback to it would turn "graded" into
+        // "nothing was found by a weaker scan" and print the same letter.
+        let fallback = || {
+            let v = violations.len() as u64;
             if v == 0 { 100 } else { 100u64.saturating_sub(v * 10) }
-        });
-        result["score"] = serde_json::json!(final_score);
-        result["grade"] = serde_json::json!(grade_letter(final_score));
+        };
+        let score = score.or_else(|| deep_failed.as_ref().map(|_| fallback()));
+        match (score, &not_graded) {
+            (Some(final_score), None) => {
+                result["graded"] = serde_json::json!(true);
+                result["score"] = serde_json::json!(final_score);
+                result["grade"] = serde_json::json!(grade_letter(final_score));
+                result["score_source"] = match &deep_failed {
+                    None => serde_json::json!("boundary-analysis"),
+                    Some(e) => serde_json::json!(format!("import-scan (the boundary analysis failed: {e})")),
+                };
+            }
+            _ => {
+                result["graded"] = serde_json::json!(false);
+                result["score"] = serde_json::Value::Null;
+                result["grade"] = serde_json::Value::Null;
+                result["not_graded_reason"] =
+                    serde_json::json!(not_graded.clone().unwrap_or_else(|| "no grade was computed".into()));
+            }
+        }
         result["health"] = health_json(root);
         result["explain"] = explain_json();
         result["violations"] = serde_json::Value::Array(violations);
@@ -2291,6 +2331,16 @@ async fn run_json(root: &Path, strict: bool, adr_compliance_only: bool) -> anyho
 
     if strict && !adr_violations.is_empty() {
         std::process::exit(1);
+    }
+    // --exit-code means what it means without --json: any violation, any
+    // rule error, or a tree that was never graded fails.
+    if exit_code {
+        let boundary = result.pointer("/score_components/violations").and_then(|v| v.as_u64()).unwrap_or(0)
+            + result["violations"].as_array().map_or(0, |v| v.len() as u64);
+        let ungraded = !adr_compliance_only && result["graded"] != serde_json::json!(true);
+        if ungraded || boundary > 0 || error_count > 0 {
+            std::process::exit(1);
+        }
     }
 
     Ok(())
