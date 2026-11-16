@@ -15,7 +15,7 @@ trigger: /hexa-ADR-search
    - **By status**: `grep -rl "Status.*{status}" docs/adrs/`
    - **By date**: `grep -rl "Date.*2026" docs/adrs/`
    - **Via CLI**: `hexa adr search {keyword}`
-   - **Via API**: `GET /api/adrs` then filter results
+   - **All, with status**: `hexa adr list`
 
 3. Display matching ADRs with:
    - ADR number and title

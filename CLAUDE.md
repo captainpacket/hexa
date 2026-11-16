@@ -207,7 +207,8 @@ harden` then found three real bugs its own passing tests missed.
 
 **Skills** (`hexa skill list`; embedded in the binary, `hexa skill sync` installs
 them): `/hexa-workflow` (the gate-first loop, verb by verb), `/hexa-maintain`
-(keeping the install and the project current), `/hexa-scaffold`, `/hexa-generate`, `/hexa-summarize`, `/hexa-analyze-deps`,
+(keeping the install and the project current), `/hexa-git-effects` (what each
+verb commits and resets, and how to recover), `/hexa-scaffold`, `/hexa-generate`, `/hexa-summarize`, `/hexa-analyze-deps`,
 `/hexa-analyze-arch`, `/hexa-inference`, `/hexa-review-gate`, `/hexa-project-output`,
 and the ADR skills `/hexa-adr-create`, `/hexa-adr-review`, `/hexa-adr-search`,
 `/hexa-adr-status`.

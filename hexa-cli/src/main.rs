@@ -363,8 +363,7 @@ ADRs are history and are not checked.")]
         #[command(subcommand)]
         action: commands::inference::InferenceAction,
     },
-    /// (hidden) Architecture health check — use `hexa dev analyze` instead
-    #[command(hide = true)]
+    /// Grade the architecture: boundary and rule violations, cycles, dead exports (also `hexa dev analyze`)
     Analyze {
         #[arg(default_value = ".")]
         path: String,
@@ -414,8 +413,7 @@ ADRs are history and are not checked.")]
         #[command(subcommand)]
         action: WorktreeAction,
     },
-    /// (hidden) Initialize hexa — use `hexa dev init` instead
-    #[command(hide = true)]
+    /// Initialize hexa in a project: .hexa/, CLAUDE.md, hooks and skills (also `hexa dev init`)
     Init(InitArgs),
     /// (hidden) New project — use `hexa dev new` instead
     #[command(hide = true)]
