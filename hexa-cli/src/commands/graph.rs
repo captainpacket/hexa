@@ -4,7 +4,7 @@
 //! here used to POST to the daemon's `/api/graph/*` routes, which then called
 //! the same library functions this file now calls directly. `consumers` was
 //! already standalone — and that asymmetry was the tell: the excision oracle
-//! read `graph-out/graph.json` off disk, while `build` could not run at all
+//! read the graph file off disk, while `build` could not run at all
 //! without a daemon, so the file the oracle depends on could go stale with no
 //! way to refresh it.
 //!
@@ -13,8 +13,8 @@
 //! # What was dropped
 //!
 //! `--persist`, which mirrored the graph into the `knowledge-graph`
-//! SpacetimeDB module. `graph-out/graph.json` was always the query source of
-//! truth; the mirror served the dashboard, which is going with the daemon.
+//! SpacetimeDB module. The graph file (now `.hexa/graph/graph.json`, formerly
+//! `graph-out/graph.json`) was always the query source of truth; the mirror served the dashboard, which is going with the daemon.
 
 use std::path::{Path, PathBuf};
 
@@ -29,8 +29,6 @@ use hexa_graph::semantic::{
 };
 use hexa_graph::{BuildOpts, Mode};
 
-const OUT_DIR: &str = "graph-out";
-const OUT_FILE: &str = "graph.json";
 
 #[derive(Debug, Subcommand)]
 pub enum GraphAction {
@@ -117,7 +115,7 @@ pub struct ConsumersArgs {
     /// Module or file to check (a repo-relative path like
     /// `hexa-exec/src/tools/delegate.rs`, or a node id/label).
     pub target: String,
-    /// Project directory holding `graph-out/graph.json` (default: detected root).
+    /// Project directory holding `.hexa/graph/graph.json` (default: detected root).
     #[arg(long, default_value = ".")]
     pub path: String,
     /// Max consumers listed per category.
@@ -174,8 +172,10 @@ fn resolve_root(path: &str) -> anyhow::Result<PathBuf> {
     }
 }
 
+/// The graph to read: `.hexa/graph/graph.json`, or the legacy
+/// `graph-out/graph.json` an older build left.
 fn graph_path(root: &Path) -> PathBuf {
-    root.join(OUT_DIR).join(OUT_FILE)
+    hexa_graph::graph_file(root)
 }
 
 /// Load the graph and warn on stderr when the source has moved past it.
@@ -342,7 +342,8 @@ async fn build(a: BuildArgs) -> anyhow::Result<()> {
     println!("{} building knowledge graph ({})…", "\u{2b21}".cyan(), a.mode);
     let graph = hexa_graph::build(&root, opts, semantic.as_ref()).await?;
 
-    let out_path = graph_path(&root);
+    // Always the current location; the legacy file is only ever read.
+    let out_path = root.join(hexa_graph::GRAPH_FILE);
     write_graph(&out_path, &graph)?;
 
     println!(
@@ -383,6 +384,11 @@ fn query(a: QueryArgs) -> anyhow::Result<()> {
 
 fn path(a: PathArgs) -> anyhow::Result<()> {
     let graph = load_graph(&a.path)?;
+    for end in [&a.from, &a.to] {
+        if graph.node(end).is_none() && graph.node_by_label(end).is_none() {
+            anyhow::bail!("node not found: {end} (give a node id or an exact label)");
+        }
+    }
     match gquery::shortest_path(&graph, &a.from, &a.to) {
         Some(ids) => {
             let labels: Vec<String> = ids

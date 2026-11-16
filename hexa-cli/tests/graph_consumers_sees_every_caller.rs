@@ -68,3 +68,32 @@ fn a_graph_older_than_the_source_is_reported_as_stale() {
     assert_eq!(v["newer_files"], serde_json::json!(["src/app.rs"]), "{v}");
     assert!(stderr.contains("hexa graph build"), "{stderr}");
 }
+
+#[test]
+fn build_writes_under_hexa_and_not_to_the_repo_root() {
+    let d = fixture("pub fn run() -> u32 { 4 }\n");
+    assert!(d.path().join(".hexa/graph/graph.json").is_file());
+    assert!(!d.path().join("graph-out").exists());
+}
+
+#[test]
+fn a_legacy_graph_is_still_read() {
+    let d = fixture("pub fn run() -> u32 { 4 }\n");
+    let r = d.path();
+    std::fs::create_dir_all(r.join("graph-out")).unwrap();
+    std::fs::rename(r.join(".hexa/graph/graph.json"), r.join("graph-out/graph.json")).unwrap();
+    let (v, _) = consumers_json(r, "src/domain/util.rs");
+    assert_eq!(v["safe_to_remove"], true, "{v}");
+}
+
+#[test]
+fn a_path_to_an_unknown_node_is_an_error() {
+    let d = fixture("pub fn run() -> u32 { 4 }\n");
+    let out = hexa(d.path(), &["graph", "path", "src/app.rs", "no_such_node"]);
+    assert!(!out.status.success(), "exit 1 for an unknown node");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("node not found") && err.contains("no_such_node"), "{err}");
+
+    let out = hexa(d.path(), &["graph", "path", "src/app.rs", "src/domain/util.rs"]);
+    assert!(out.status.success(), "two known nodes with no path still exit 0");
+}

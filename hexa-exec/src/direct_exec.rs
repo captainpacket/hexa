@@ -921,9 +921,10 @@ pub(crate) fn ground_window(content: &str, instruction: &str) -> String {
 pub(crate) async fn gather_context(memory: &dyn crate::ports::MemoryStore, task: &DirectTask) -> String {
     let mut out = String::new();
 
-    // (a) Graph neighbourhood for the target file, from graph-out/graph.json.
+    // (a) Graph neighbourhood for the target file, from the saved graph
+    // (`.hexa/graph/graph.json`, or a legacy `graph-out/graph.json`).
     let bundle = {
-        let graph_path = repo_root().join("graph-out").join("graph.json");
+        let graph_path = hexa_graph::graph_file(&repo_root());
         std::fs::read_to_string(&graph_path)
             .ok()
             .and_then(|raw| hexa_graph::model::KnowledgeGraph::from_json(&raw).ok())

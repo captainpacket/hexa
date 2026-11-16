@@ -83,7 +83,34 @@ impl Default for BuildOpts {
 /// as too noisy (prevents common names from forming false hubs).
 const MAX_AMBIGUOUS_REFS: usize = 3;
 
+/// Where `hexa graph build` writes the graph, relative to the project root.
+/// Under `.hexa/`, which a hexa project already ignores, so a build leaves no
+/// untracked directory at the repository root.
+pub const GRAPH_FILE: &str = ".hexa/graph/graph.json";
+
+/// Where the graph was written before it moved under `.hexa/`. Still read, so
+/// a graph built by an older hexa keeps answering until the next build.
+pub const LEGACY_GRAPH_FILE: &str = "graph-out/graph.json";
+
+/// The graph file to read for `root`: the current location when it exists,
+/// else the legacy one when that exists, else the current location (which a
+/// build would create, and which a "no graph" error should name).
+pub fn graph_file(root: &Path) -> std::path::PathBuf {
+    let current = root.join(GRAPH_FILE);
+    if current.is_file() {
+        return current;
+    }
+    let legacy = root.join(LEGACY_GRAPH_FILE);
+    if legacy.is_file() {
+        return legacy;
+    }
+    current
+}
+
 const EXCLUDE_DIRS: &[&str] = &[
+    // hexa's and Claude Code's own folders: skill docs and caches, not the
+    // project. Indexed, `.claude/` skills outranked project code in `query`.
+    ".claude",
     "node_modules",
     "target",
     "dist",

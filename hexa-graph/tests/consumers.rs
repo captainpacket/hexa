@@ -108,3 +108,25 @@ async fn a_source_newer_than_the_graph_is_reported() {
     let newer = hexa_graph::newer_sources(tmp.path(), built, 10);
     assert_eq!(newer, vec!["src/app.rs".to_string()]);
 }
+#[tokio::test]
+async fn hexa_and_claude_folders_are_not_indexed() {
+    let tmp = tempfile::tempdir().unwrap();
+    write(tmp.path(), "src/lib.rs", "pub fn real() {}\n");
+    write(tmp.path(), ".claude/skills/hexa-x/SKILL.md", "# Graph query skill\n");
+    write(tmp.path(), ".hexa/graph/x.rs", "pub fn cached() {}\n");
+    let g = graph_of(tmp.path()).await;
+    assert!(g.nodes.iter().all(|n| !n.file.starts_with(".claude/")), "{:?}",
+        g.nodes.iter().map(|n| &n.file).collect::<Vec<_>>());
+    assert!(g.nodes.iter().all(|n| !n.file.starts_with(".hexa/")));
+}
+
+#[test]
+fn the_graph_lives_under_hexa_and_the_old_file_is_still_read() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    assert_eq!(hexa_graph::graph_file(root), root.join(".hexa/graph/graph.json"));
+    write(root, "graph-out/graph.json", "{}");
+    assert_eq!(hexa_graph::graph_file(root), root.join("graph-out/graph.json"), "the legacy file is a fallback");
+    write(root, ".hexa/graph/graph.json", "{}");
+    assert_eq!(hexa_graph::graph_file(root), root.join(".hexa/graph/graph.json"), "the new file wins");
+}
