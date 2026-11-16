@@ -1,0 +1,24 @@
+# Where the work stands is a verb: `hexa status`, `hexa loop`, `hexa go`.
+# The setup leaves a gate and a task list, one task done and one open.
+prompt = """
+Where does the work in this repo stand, and what should I do next?
+"""
+setup = [
+  "hexa loop gate 'cargo test' >/dev/null",
+  "hexa loop task add 'Fix the page count for an even split' >/dev/null",
+  "hexa loop task add 'Show the page number in the CLI' >/dev/null",
+  "hexa loop task done 1 >/dev/null",
+]
+outcome = '''test -z "$(git status --porcelain -- src tests)"'''
+max_turns = 15
+budget_usd = 1.0
+
+[[expect_verbs]]
+id = "state"
+pattern = '''\bhexa\s+(status|loop|go|adr\s+board|plan\s+status)\b'''
+weight = 2
+
+[[expect_verbs]]
+id = "names-the-open-task"
+text = '''(?i)page number'''
+weight = 1

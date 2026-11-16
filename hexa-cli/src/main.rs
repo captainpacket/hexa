@@ -261,6 +261,11 @@ enum Commands {
     },
     /// What inference has cost: tokens and dollars, by source and model
     Spend(commands::spend_cmd::SpendArgs),
+    /// How well a model uses hexa: run scenarios through `claude -p` and score the transcripts (real runs cost money)
+    Eval {
+        #[command(subcommand)]
+        action: commands::eval::EvalAction,
+    },
     /// Architecture Decision Records: list, search, accept, and check every citation and gate
     Adr {
         #[command(subcommand)]
@@ -525,6 +530,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Pr { action } => commands::pr::run(action).await,
         Commands::Loop { action } => commands::loop_cmd::run(action).await,
         Commands::Spend(args) => commands::spend_cmd::run(args).await,
+        Commands::Eval { action } => commands::eval::run(action).await,
         Commands::Adr { action } => commands::adr::run(action).await,
         Commands::Gate { action } => match action {
             GateAction::Coverage { target, gate, composition_root, uncounted } => {

@@ -27,3 +27,5 @@ pub mod build_keys;
 // State port contract (IStatePort + focused sub-traits + DTOs). Relocated from
 // hexa-nexus where it was an anomaly — port traits belong in hexa-core with the
 // rest (ADR-2606071340 P1). Implemented by the STDB/SQLite adapters.
+// How a model used hexa, scored from a transcript (ADR-2611160910).
+pub mod usage_eval;

@@ -24,6 +24,7 @@ pub mod issue;
 pub mod pr;
 pub mod loop_cmd;
 pub mod spend_cmd;
+pub mod eval;
 pub mod plan;
 pub mod refresh;
 pub mod scaffold;

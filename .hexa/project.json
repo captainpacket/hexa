@@ -33,7 +33,8 @@
     "exclude": [
       "hexa-cli/assets/scaffold",
       "hexa-cli/assets/claude-mods",
-      "bench/fixtures"
+      "bench/fixtures",
+      "evals"
     ],
     "adapters": {
       "cli": ["hexa-cli/src/commands", "hexa-cli/src/fmt.rs", "hexa-cli/src/assets.rs"],
@@ -93,6 +94,7 @@
       "hexa-exec/src/telegram_notifier.rs": "adapters/secondary",
       "hexa-exec/src/tool_registry.rs": "usecases",
       "hexa-exec/src/tools": "adapters/secondary",
+      "hexa-exec/src/usage_eval.rs": "usecases",
       "hexa-git/src/history.rs": "adapters/secondary",
       "hexa-git/src/worktree.rs": "adapters/secondary",
       "hexa-graph/src/community.rs": "usecases",
