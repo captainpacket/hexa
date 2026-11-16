@@ -297,5 +297,6 @@
       "when": "`merged_gitignore(E, lang)` is called",
       "then": "it returns None exactly when E is Some and every line of `gitignore_lines(lang)` is already a whole line of E"
     }
-  ]
+  ],
+  "red": "cfef939"
 }

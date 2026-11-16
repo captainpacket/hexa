@@ -14,6 +14,9 @@
     "by": "gary",
     "sha256": "e7f14a811efe50fb8bc971e7d99e195b513942a726c52bd97ad14be5c3729df8"
   },
+  "sealed": {
+    "hexa-cli/tests/adr_2610271308_spec.rs": "bd6c4d2d1ee2e3cd77035b0209e8821c737a9be2ab5f48110ed934b8fffb5230"
+  },
   "specs": [
     {
       "id": "S01",
@@ -269,5 +272,6 @@
       "reason": "baseline (ADR-2611081151 §1): this seal moved before every move was recorded; history and the record agree on both ends",
       "to": "5ab28b3d7df46b4f839c4367b6720c90362e49fa2e0ebc0d83f9975b075db7f0"
     }
-  ]
+  ],
+  "red": "cfef939"
 }
