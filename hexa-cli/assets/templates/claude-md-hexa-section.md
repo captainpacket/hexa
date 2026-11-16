@@ -3,14 +3,17 @@
 hexa is one binary. There is no daemon, no database, and no dashboard. Nothing
 needs to be started. Every verb below runs in this process and exits.
 
-`hexa --help` lists the verbs. `hexa go` suggests the next action.
-`hexa hey <intent>` routes natural language to a verb.
+`hexa --help` lists the verbs. `hexa status` says where the work stands: the
+loop (ADR, gate, stage, checklist), what is in flight in this repo, and the
+next step (`hexa go` prints that step alone). `hexa hey <intent>` routes
+natural language to a verb.
 
 ### Route work through hexa where hexa has a verb for it
 
 | Don't do this by hand | Use this | Before you run it |
 |---|---|---|
-| edit, then hope it works | `hexa do run "<task>" --file <f> --evidence "<cmd>"` | Clean tree: it refuses while other tracked files in the package are modified. Name extra files with `--also`. Commits on this branch. Add `--uncounted` when `<cmd>` runs no tests |
+| edit, then hope it works | `hexa do run "<task>" --file <f> --evidence "<cmd>"` — a model makes the edit | Clean tree: it refuses while other tracked files in the package are modified. Name extra files with `--also`. Commits on this branch. Add `--uncounted` when `<cmd>` runs no tests |
+| wrote the patch yourself, then commit it by hand | `hexa do gate --files src/parser.rs -e 'cargo test --test parser' -m 'parser: accept empty input'` — you already made the edit | Each named file must have a change; only those files are committed, and only if the evidence reports passing tests. A red or vacuous gate commits nothing and leaves the patch. Add `--uncounted` when the evidence runs no tests |
 | build a whole component by hand | `hexa build '<challenge>' --target <dir> --gate '<cmd>'` | Clean tree, and no one else committing here: it commits every file that changes while it runs |
 | eyeball a diff for bugs | `hexa harden <path> --gate '<cmd>'` | Clean tree, and no other session in this checkout: it resets and reverts as it fixes. Use a worktree |
 | assert "the architecture is fine" | `hexa analyze .` | None; it writes nothing |
@@ -21,6 +24,10 @@ needs to be started. Every verb below runs in this process and exits.
 | guess which decisions are done, or what another agent is on | `hexa adr board` (progress from evidence) and `hexa agent list` (who holds which paths) | None |
 | edit paths another agent may be editing | `hexa agent register --task <name> --lease <path>`, and `hexa agent report` when done | Before the first edit |
 | wonder why a native (C/C++) dependency rebuilds per command | `hexa dev build-keys` | None |
+
+`do run` or `do gate`: use `do run` when a model should make the edit, and
+`do gate` when you already made it. Both commit only the files they name, and
+only on a gate that passed.
 
 What each committing verb commits, on which branch, what it resets, and how to
 get your work back is in the `/hexa-git-effects` skill. Read it before running
@@ -77,7 +84,7 @@ so the gap is counted and `hexa gap pr <id>` can turn it into a pull request.
    `hexa analyze .` names every item and its fix. Clear them, re-run, and
    report the new grade. The grade is a property of the tree, not of your
    diff: an item that predates your change is still yours to clear.
-7. **Prefer `hexa hey <intent>`** when the task maps cleanly to natural language.
+8. **Prefer `hexa hey <intent>`** when the task maps cleanly to natural language.
 
 ## Development pipeline (gate-first)
 
@@ -87,8 +94,9 @@ step.
 - **A small change** — a fix or one behaviour, no new port, adapter or
   dependency:
   1. Record the gate before the code: `hexa loop gate '<command>'`.
-  2. Make the edit (yourself, or `hexa do run`).
-  3. See the gate green. Then commit.
+  2. Make the edit yourself, or have a model make it with `hexa do run`.
+  3. Commit through the gate: `hexa do gate` for your own edit (`do run`
+     commits its own). Nothing is committed on a red gate.
 - **An ADR-backed feature** — it adds a port, an adapter or a dependency, or
   an ADR decides it:
   1. An ADR in `docs/adrs/` (`hexa loop adr ADR-<id>`).

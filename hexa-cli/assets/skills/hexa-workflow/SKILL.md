@@ -47,8 +47,8 @@ hexa design adr <draft>                  # a proposed ADR that cites it; the loo
 ```
 
 `hexa design adr` refuses a draft that is untracked, uncommitted, or changed
-since a review covering stages 5 to 8. `hexa go` prints the next of these
-steps. Skip this section for a small change: an ADR may be written directly.
+since a review covering stages 5 to 8. `hexa status` (or `hexa go`, which
+prints only the next step) names the next of these steps. Skip this section for a small change: an ADR may be written directly.
 
 ## 1. Decide
 
@@ -135,12 +135,12 @@ hexa loop stage done                    # writes the evidence into the ADR
 
 | Need | Verb |
 |---|---|
+| Where am I: the loop (ADR, gate, stage, checklist), what is in flight in this repo, and the next step (JSON when piped; `--all` for every project) | `hexa status` |
+| The next step alone: the design draft's step, else record a gate, fix the red gate, or the pending task. Read-only | `hexa go` |
 | Where the work stands, this session's and every other's | `hexa loop` |
 | The steps this work is made of | `hexa loop task` |
-| The next right thing | `hexa go` |
-| A plain-English request, routed to the verb it names | `hexa hey "<request>"` — says so when no verb matches; asks before anything that changes the tree, even with `--yes` |
+| A plain-English request, routed to the verb it names | `hexa hey "who uses src/parser.rs"` — exits 1 when no verb matches; asks before anything that changes the tree, every time |
 | Which decisions are done, how far each is built (from evidence, not status), who is on it | `hexa adr board` (`--text` for a table, `--html <file>` for a page, `--strict` to fail when a status is behind its evidence) |
-| Project and git state at a glance, runs and tasks in progress (JSON when piped) | `hexa status` |
 | Several agents in one repo: claim a task and the paths it may edit, close it, merge in order | `hexa agent register --task <name> --lease <path>`, `hexa agent report --id <id> --outcome passed --commit <sha>`, `hexa dev worktree merge-order` |
 | Whether a native C/C++ dependency (DuckDB, say) is rebuilt by each cargo command | `hexa dev build-keys` (`--selection "<cargo args>"` to compare commands) |
 | A lesson you will otherwise forget | `hexa memory store lesson:<topic> "<text>"` |

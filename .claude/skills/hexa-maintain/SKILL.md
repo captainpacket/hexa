@@ -64,7 +64,7 @@ hexa dev ci             # every hexa enforcement gate
 hexa dev validate       # build → test → analyze → validate
 hexa dev worktree list  # every active worktree
 hexa dev worktree cleanup   # remove worktrees whose branches are merged into main
-hexa status             # project, config and git state
+hexa status             # the loop, what is in flight in this repo, the next step
 ```
 
 ## Loose ends in transcripts

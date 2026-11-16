@@ -9,13 +9,15 @@ pub struct HeyArgs {
     /// Natural-language description of what you want hexa to do
     #[arg(required = true, num_args = 1..)]
     pub text: Vec<String>,
-    /// Ignored. There is no queue: `hexa hey` acts now. Hidden from `--help`
-    /// and kept only so an old script that passes it still parses
+    /// Refused. There is no queue: `hexa hey` acts now. Kept, hidden, only so
+    /// a script that passes it is told why instead of "unexpected argument"
     /// (ADR-2611160730 §7).
     #[arg(long, hide = true)]
     pub queue: bool,
-    /// Skip confirmation prompts
-    #[arg(long, short)]
+    /// Changes nothing, and says so: every route that changes the tree, git or
+    /// the install is confirmed even with `--yes` (ADR-2610271308 §6), and a
+    /// read-only route asks nothing. Hidden; accepted so old scripts parse.
+    #[arg(long, short, hide = true)]
     pub yes: bool,
 }
 
@@ -268,7 +270,18 @@ fn classify_intent(text: &str) -> TaskIntent {
     TaskIntent::Unknown(text.to_string())
 }
 
+/// What `hexa hey` says when it routes nothing, and the exit code: a script
+/// must be able to tell "did not understand" from "done".
+const NO_ROUTE: &str = "`hexa status` says where the work stands and the next step; `hexa --help` lists every verb.";
+
+fn refuse() -> ! {
+    std::process::exit(1)
+}
+
 pub async fn run(args: HeyArgs) -> anyhow::Result<()> {
+    if args.queue {
+        anyhow::bail!("there is no queue: `hexa hey` acts now, in this process. Drop --queue.");
+    }
     let text = args.text.join(" ");
     println!("⬡ {}: {}", "hey hexa".bold().cyan(), text.dimmed());
 
@@ -293,7 +306,7 @@ pub async fn run(args: HeyArgs) -> anyhow::Result<()> {
         TaskIntent::Rejected { command, reason } => {
             println!("  {} rejected: {}", "✗".red(), command.bold());
             println!("    {}", reason);
-            return Ok(());
+            refuse();
         }
         TaskIntent::Unknown(t) => {
             // Remote SSH intent: marker __SSH__<host>__<action>
@@ -307,17 +320,17 @@ pub async fn run(args: HeyArgs) -> anyhow::Result<()> {
                         }
                         Err(e) => {
                             println!("  {} LLM translation failed: {}", "✗".red(), e);
-                            return Ok(());
+                            refuse();
                         }
                     }
                 } else {
-                    return Ok(());
+                    refuse();
                 }
             } else {
                 // No rule matched. Say so; never run a nearest guess (ADR-2610271308 §5).
                 println!("  {} no hexa verb matches that request.", "✗".red());
-                println!("    `hexa --help` lists every verb; `hexa go` suggests the next one.");
-                return Ok(());
+                println!("    {NO_ROUTE}");
+                refuse();
             }
         }
     };
@@ -328,6 +341,9 @@ pub async fn run(args: HeyArgs) -> anyhow::Result<()> {
     // A route that changes the tree, git or the install is confirmed even with
     // `--yes` (ADR-2610271308 §6).
     if destructive {
+        if args.yes {
+            println!("  {}", "--yes does not skip this: a route that changes the tree is always confirmed".dimmed());
+        }
         use std::io::Write;
         print!("  {} Proceed? [y/N]: ", "!".yellow().bold());
         std::io::stdout().flush()?;
@@ -348,6 +364,7 @@ pub async fn run(args: HeyArgs) -> anyhow::Result<()> {
         }
     } else {
         println!("  {} failed: {}", "✗".red(), result);
+        refuse();
     }
 
     Ok(())
