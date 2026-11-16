@@ -33,7 +33,9 @@ enum Fix {
     Good,
     /// Append a line that breaks the gate.
     Breaks,
-    /// Append a line and commit it itself, as a frontier agent may.
+    /// Append a line and commit it itself under hexa's identity. A commit
+    /// under any other stops the pass (ADR-2611160730 §1;
+    /// tests/harden_concurrent.rs).
     CommitsItself,
 }
 
@@ -79,7 +81,7 @@ impl Frontier for FakeFrontier {
             std::fs::write(cwd.join(format!("tests/bug_{n}.txt")), format!("regression test for bug {n}\n")).unwrap();
             if self.fixes[n - 1] == Fix::CommitsItself {
                 git(cwd, &["add", "-A"]);
-                git(cwd, &["-c", "user.name=agent", "-c", "user.email=agent@x", "commit", "-qm", "agent commit"]);
+                git(cwd, &["-c", "user.name=hexa-factory", "-c", "user.email=factory@hexa.local", "commit", "-qm", "agent commit"]);
             }
             return Ok(format!("fixed bug-{n}"));
         }
@@ -169,7 +171,7 @@ async fn a_fix_the_agent_committed_itself_is_still_a_gated_fix() {
     .await;
 
     assert_eq!(report.fixed, vec!["bug-1", "bug-2"], "notes: {:?}", report.notes);
-    let authors = git(&dir, &["log", "--format=%an", "HEAD"]);
-    assert!(!authors.contains("agent"), "the agent's own commit is folded into the gated one: {authors}");
+    let subjects = git(&dir, &["log", "--format=%s", "HEAD"]);
+    assert!(!subjects.contains("agent commit"), "the agent's own commit is folded into the gated one: {subjects}");
     assert_eq!(git(&dir, &["status", "--porcelain"]), "");
 }

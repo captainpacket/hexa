@@ -112,10 +112,13 @@ fn tail_of(output: &str) -> String {
     tail
 }
 
-/// Run `gate` in `repo_root` and keep what it said.
-async fn run_gate(label: &str, gate: &str, repo_root: &Path) -> GateRun {
+/// Run `gate` in `repo_root` and keep what it said. A run that passed having
+/// run no tests did not pass, unless the gate is declared `uncounted`
+/// (ADR-2611160730 §5).
+async fn run_gate(label: &str, gate: &str, repo_root: &Path, uncounted: bool) -> GateRun {
     let started = std::time::Instant::now();
-    let (passed, output) = crate::direct_exec::run_evidence(gate, repo_root).await;
+    let (exit_ok, mut output) = crate::direct_exec::run_evidence(gate, repo_root).await;
+    let passed = gate_passes(exit_ok, &mut output, uncounted);
     GateRun { label: label.to_string(), passed, secs: started.elapsed().as_secs(), tail: tail_of(&output) }
 }
 
@@ -169,6 +172,13 @@ pub struct ReviewReport {
     /// The gate run on the tree with every failed fix reverted, when it was
     /// red: the gate is red without any fix, and the loop stopped (§5).
     pub red_without_fix: Option<GateRun>,
+    /// Why the pass refused to start, or stopped part-way, touching nothing
+    /// more: a dirty tracked tree, a detached HEAD, another run's lock, or a
+    /// commit hexa did not make (ADR-2611160730 §1).
+    pub stopped: Option<String>,
+    /// Fixed findings whose new test was never shown red without the fix:
+    /// committed, and reported `fixed (untested)` (ADR-2611160730 §5).
+    pub untested: Vec<String>,
 }
 
 /// One batch of fast-gated fixes and what its full gate said
@@ -215,6 +225,8 @@ impl Default for ReviewReport {
             baseline_skipped: false,
             gate_runs: Vec::new(),
             red_without_fix: None,
+            stopped: None,
+            untested: Vec::new(),
         }
     }
 }
@@ -239,6 +251,17 @@ impl ReviewReport {
 
     /// The headline: what this pass is entitled to claim.
     pub fn verdict_line(&self) -> String {
+        if let Some(why) = &self.stopped {
+            if self.lenses == 0 {
+                return format!("refused to start: {why}");
+            }
+            return format!("STOPPED: {why} · {}", self.counts_line());
+        }
+        self.counts_line()
+    }
+
+    /// The headline without a stop.
+    fn counts_line(&self) -> String {
         if self.baseline.is_some() {
             return "the gate is red before any fix: nothing was hunted, verified or fixed".to_string();
         }
@@ -262,11 +285,17 @@ impl ReviewReport {
         } else {
             format!(" · {} gate-passed, not committed", self.uncommitted.len())
         };
+        let untested = if self.untested.is_empty() {
+            String::new()
+        } else {
+            format!(", {} of them untested (no test shown red without the fix)", self.untested.len())
+        };
         format!(
-            "{} candidate(s) → {} confirmed real → {} fixed (gate-passed){}{}{}{}",
+            "{} candidate(s) → {} confirmed real → {} fixed (gate-passed){}{}{}{}{}",
             self.candidate,
             self.confirmed.len(),
             self.fixed.len(),
+            untested,
             held,
             scope,
             by,
@@ -852,7 +881,7 @@ async fn changed_files(repo_root: &Path) -> std::collections::BTreeMap<String, O
             // The source path of a rename or copy follows as its own entry.
             entries.next();
         }
-        if path.is_empty() || path == LOOP_STATE {
+        if path.is_empty() || path == LOOP_STATE || path.starts_with(&format!("{RESCUE_DIR}/")) {
             continue;
         }
         files.insert(path.to_string(), std::fs::read(repo_root.join(path)).ok());
@@ -886,27 +915,56 @@ async fn git_ok(repo_root: &Path, args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
+/// A snapshot of changed paths and their bytes, as [`changed_files`] reads it.
+type Snapshot = std::collections::BTreeMap<String, Option<Vec<u8>>>;
+
 /// Put each of `touched` back as it was in `before`: its old bytes, absent,
-/// or — not in `before` at all — as HEAD has it.
-async fn revert_paths(
-    repo_root: &Path,
-    touched: &[String],
-    before: &std::collections::BTreeMap<String, Option<Vec<u8>>>,
-) {
+/// or — not in `before` at all — as HEAD has it (ADR-2611160730 §1).
+///
+/// Only bytes the agent wrote are ever thrown away. A path whose bytes are no
+/// longer what they were when the agent returned (`after`) was changed by
+/// someone else since: it is left as it is, and named. Every other path is
+/// saved under [`RESCUE_DIR`] before it is reverted, because a person's edit
+/// made while the agent ran cannot be told from the agent's own.
+async fn revert_paths(repo_root: &Path, touched: &[String], before: &Snapshot, after: &Snapshot, notes: &mut Vec<String>) {
+    let mut rescued: Vec<&str> = Vec::new();
+    let mut left: Vec<&str> = Vec::new();
+    let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ").to_string();
+    let rescue_root = repo_root.join(RESCUE_DIR).join(&stamp);
     for p in touched {
         let full = repo_root.join(p);
+        let current = std::fs::read(&full).ok();
+        let wanted = desired_bytes(repo_root, p, before);
+        if current == wanted {
+            continue;
+        }
+        let agent_wrote = match after.get(p) {
+            Some(bytes) => bytes.clone(),
+            None => head_bytes(repo_root, p),
+        };
+        if current != agent_wrote {
+            left.push(p);
+            continue;
+        }
+        if let Some(bytes) = &current {
+            // The rescue directory ignores itself: a person's `git add -A`
+            // must not commit the copies, and `git status` stays theirs.
+            let ignore = repo_root.join(RESCUE_DIR).join(".gitignore");
+            if !ignore.exists() {
+                let _ = std::fs::create_dir_all(repo_root.join(RESCUE_DIR));
+                let _ = std::fs::write(&ignore, "*\n");
+            }
+            let dest = rescue_root.join(p);
+            let saved = dest.parent().is_some_and(|d| std::fs::create_dir_all(d).is_ok()) && std::fs::write(&dest, bytes).is_ok();
+            if !saved {
+                // Not saved, so not destroyed either.
+                left.push(p);
+                continue;
+            }
+            rescued.push(p);
+        }
         match before.get(p) {
-            Some(Some(bytes)) => {
-                if let Some(parent) = full.parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-                let _ = std::fs::write(&full, bytes);
-            }
-            Some(None) => {
-                if full.exists() {
-                    let _ = std::fs::remove_file(&full);
-                }
-            }
+            Some(_) => put_bytes(&full, wanted.as_deref()),
             None => {
                 let _ = git_ok(repo_root, &["reset", "-q", "--", p]).await;
                 if !git_ok(repo_root, &["checkout", "-q", "HEAD", "--", p]).await && full.exists() {
@@ -914,6 +972,381 @@ async fn revert_paths(
                 }
             }
         }
+    }
+    if !rescued.is_empty() {
+        notes.push(format!(
+            "saved {} to {RESCUE_DIR}/{stamp}/ before reverting: {}",
+            plural(rescued.len(), "file"),
+            rescued.join(", ")
+        ));
+    }
+    if !left.is_empty() {
+        notes.push(format!(
+            "not reverted, left as it is: {} changed after the agent returned, so the bytes are not the agent's",
+            left.join(", ")
+        ));
+    }
+}
+
+/// What `p` should hold to be as it was before the agent ran.
+fn desired_bytes(repo_root: &Path, p: &str, before: &Snapshot) -> Option<Vec<u8>> {
+    match before.get(p) {
+        Some(bytes) => bytes.clone(),
+        None => head_bytes(repo_root, p),
+    }
+}
+
+/// `p` as HEAD has it; `None` when HEAD does not have it.
+fn head_bytes(repo_root: &Path, p: &str) -> Option<Vec<u8>> {
+    let out = std::process::Command::new("git")
+        .args(["show", &format!("HEAD:{p}")])
+        .current_dir(repo_root)
+        .output()
+        .ok()?;
+    out.status.success().then_some(out.stdout)
+}
+
+/// Write `bytes` to `full`, or remove it for `None`.
+fn put_bytes(full: &Path, bytes: Option<&[u8]>) {
+    match bytes {
+        Some(b) => {
+            if let Some(parent) = full.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(full, b);
+        }
+        None => {
+            if full.exists() {
+                let _ = std::fs::remove_file(full);
+            }
+        }
+    }
+}
+
+// ── Running beside a person (ADR-2611160730 §1) ─────────────────────────────
+
+/// Where bytes are saved before a revert would destroy them (§1).
+const RESCUE_DIR: &str = ".hexa/harden-rescue";
+
+/// The identity hexa commits under (ADR-2606071323 §4): `commit_result` and
+/// hexa-git's cherry-pick both use it.
+const HEXA_NAME: &str = "hexa-factory";
+const HEXA_EMAIL: &str = "factory@hexa.local";
+
+/// The lock's file name, in the worktree's own git dir.
+const RUN_LOCK: &str = "hexa-harden.lock";
+
+/// git in `repo_root`, synchronously; its stdout when it exited 0.
+fn git_out(repo_root: &Path, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new("git").args(args).current_dir(repo_root).output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// One harden or build per worktree at a time: a file in the worktree's git
+/// dir holding the pid that took it. Released on drop.
+struct RunLock {
+    path: std::path::PathBuf,
+}
+
+impl Drop for RunLock {
+    fn drop(&mut self) {
+        let ours = std::fs::read_to_string(&self.path).is_ok_and(|s| s.trim() == std::process::id().to_string());
+        if ours {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+/// Whether a process with this pid is running.
+fn pid_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(true)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        true
+    }
+}
+
+/// Take the worktree's run lock, or say who holds it. A lock whose pid is
+/// gone is stale and is removed. The pid is written to a private file and
+/// hard-linked into place, so the lock never exists without its pid.
+fn take_run_lock(repo_root: &Path) -> Result<RunLock, String> {
+    let git_dir = git_out(repo_root, &["rev-parse", "--absolute-git-dir"])
+        .ok_or_else(|| format!("{} is not a git repository: harden and build commit their work, and need one", repo_root.display()))?;
+    let path = Path::new(&git_dir).join(RUN_LOCK);
+    // Unique per attempt: two runs in one process must not share it.
+    static ATTEMPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = ATTEMPT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let tmp = Path::new(&git_dir).join(format!("{RUN_LOCK}.{}.{n}", std::process::id()));
+    std::fs::write(&tmp, std::process::id().to_string()).map_err(|e| format!("could not write {}: {e}", tmp.display()))?;
+    let result = (|| {
+        for _ in 0..3 {
+            match std::fs::hard_link(&tmp, &path) {
+                Ok(()) => return Ok(RunLock { path: path.clone() }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let held = std::fs::read_to_string(&path).unwrap_or_default();
+                    match held.trim().parse::<u32>() {
+                        Ok(pid) if pid_alive(pid) => {
+                            return Err(format!(
+                                "another hexa harden or build (pid {pid}) is running in this worktree: it holds {}. \
+                                 Wait for it to finish, or run this one in its own worktree (`git worktree add <dir> <branch>`)",
+                                path.display()
+                            ))
+                        }
+                        // Gone, or unreadable: stale.
+                        _ => {
+                            let _ = std::fs::remove_file(&path);
+                        }
+                    }
+                }
+                Err(e) => return Err(format!("could not take {}: {e}", path.display())),
+            }
+        }
+        Err(format!("could not take {}: it kept reappearing", path.display()))
+    })();
+    let _ = std::fs::remove_file(&tmp);
+    result
+}
+
+/// What a pass may start on: the current branch's name and the untracked
+/// paths it found, or why it refuses (§1). Tracked changes are refused,
+/// because the pass commits, reverts and resets files and cannot tell a
+/// person's edit from its agent's. hexa's own loop state is not a change.
+fn start_check(repo_root: &Path) -> Result<(String, Vec<String>), String> {
+    let branch = git_out(repo_root, &["symbolic-ref", "-q", "--short", "HEAD"]).ok_or_else(|| {
+        "HEAD is detached: harden and build commit their work to a branch, and a commit on a detached HEAD is easily lost. \
+         Check out a branch (`git switch <branch>`), or run in a worktree on one (`git worktree add -b <branch> <dir>`)"
+            .to_string()
+    })?;
+    let status = std::process::Command::new("git")
+        .args(["status", "--porcelain=v1", "-z", "-uall"])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("git status failed: {e}"))?;
+    if !status.status.success() {
+        return Err(format!("git status failed: {}", String::from_utf8_lossy(&status.stderr).trim()));
+    }
+    let stdout = String::from_utf8_lossy(&status.stdout).into_owned();
+    let (mut tracked, mut untracked) = (Vec::new(), Vec::new());
+    let mut entries = stdout.split('\0');
+    while let Some(entry) = entries.next() {
+        let (Some(xy), Some(path)) = (entry.get(..2), entry.get(3..)) else { continue };
+        if xy.starts_with('R') || xy.starts_with('C') {
+            entries.next();
+        }
+        if path.is_empty() || path == LOOP_STATE || path.starts_with(&format!("{RESCUE_DIR}/")) {
+            continue;
+        }
+        if xy == "??" {
+            untracked.push(path.to_string());
+        } else {
+            tracked.push(path.to_string());
+        }
+    }
+    if !tracked.is_empty() {
+        return Err(format!(
+            "the working tree has uncommitted changes to tracked files: {}. harden and build commit and revert files \
+             while they run, and would fold in or undo these. Commit or stash them first (`git stash push -m <note>`), \
+             or run in a worktree of your own (`git worktree add <dir> {branch}`)",
+            shown_paths(&tracked)
+        ));
+    }
+    Ok((branch, untracked))
+}
+
+/// At most five paths, then a count.
+fn shown_paths(paths: &[String]) -> String {
+    let mut s = paths.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+    if paths.len() > 5 {
+        s += &format!(" and {} more", paths.len() - 5);
+    }
+    s
+}
+
+/// Take the lock and check the tree. On success: the lock, the branch, and
+/// a note naming any untracked files the pass will leave alone.
+fn begin_run(repo_root: &Path) -> Result<(RunLock, String, Option<String>), String> {
+    let lock = take_run_lock(repo_root)?;
+    let (branch, untracked) = start_check(repo_root)?;
+    let note = (!untracked.is_empty()).then(|| {
+        format!(
+            "{} untracked file(s) in the tree, left alone unless an agent writes them: {}",
+            untracked.len(),
+            shown_paths(&untracked)
+        )
+    });
+    Ok((lock, branch, note))
+}
+
+/// Every commit reachable from HEAD and not from `base` that hexa did not
+/// make, as `<short sha> by <name> <email>: <subject>`. A commit is hexa's
+/// when its author or committer carries hexa's identity.
+fn commits_not_by_hexa(repo_root: &Path, base: &str) -> Result<Vec<String>, String> {
+    let range = format!("{base}..HEAD");
+    let log = git_out(repo_root, &["log", "--format=%h%x1f%an%x1f%ae%x1f%cn%x1f%ce%x1f%s", &range])
+        .ok_or_else(|| format!("git log {range} failed"))?;
+    Ok(log
+        .lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\x1f').collect();
+            let [sha, an, ae, cn, ce, subject] = f[..] else { return None };
+            let hexa = an == HEXA_NAME || ae == HEXA_EMAIL || cn == HEXA_NAME || ce == HEXA_EMAIL;
+            (!hexa).then(|| format!("{sha} by {an} <{ae}>: {subject}"))
+        })
+        .collect())
+}
+
+/// What became of HEAD while an agent ran (§1).
+#[derive(Debug, PartialEq)]
+enum HeadMove {
+    Same,
+    /// It moved forward by commits hexa made: fold them back to be gated.
+    FoldBack,
+    /// It moved some other way. Nothing may be reset or reverted.
+    Stop(String),
+}
+
+/// Did HEAD move from `before` on `branch`, and may the move be folded back?
+fn head_move(repo_root: &Path, before: &str, branch: &str, during: &str) -> HeadMove {
+    let now_branch = git_out(repo_root, &["symbolic-ref", "-q", "--short", "HEAD"]);
+    if now_branch.as_deref() != Some(branch) {
+        return HeadMove::Stop(format!(
+            "the branch changed during {during}: it was {branch}, it is now {}. harden stopped and touched nothing",
+            now_branch.unwrap_or_else(|| "a detached HEAD".to_string())
+        ));
+    }
+    let Some(now) = git_out(repo_root, &["rev-parse", "HEAD"]) else {
+        return HeadMove::Stop(format!("HEAD cannot be read after {during}; harden stopped and touched nothing"));
+    };
+    if now == before {
+        return HeadMove::Same;
+    }
+    if git_out(repo_root, &["merge-base", "--is-ancestor", before, "HEAD"]).is_none() {
+        return HeadMove::Stop(format!(
+            "HEAD moved during {during} to {now}, which does not descend from {before}: the branch was reset or rebased. \
+             harden stopped and touched nothing"
+        ));
+    }
+    match commits_not_by_hexa(repo_root, before) {
+        Ok(foreign) if foreign.is_empty() => HeadMove::FoldBack,
+        Ok(foreign) => HeadMove::Stop(format!(
+            "HEAD moved during {during}: {} not made by hexa ({}). harden stopped and touched nothing: \
+             the commits stand, and any uncommitted edit is left in the tree for you to judge",
+            plural(foreign.len(), "commit"),
+            foreign.join("; ")
+        )),
+        Err(e) => HeadMove::Stop(format!("HEAD moved during {during} and its commits cannot be read: {e}; harden stopped")),
+    }
+}
+
+// ── No false greens (ADR-2611160730 §5) ─────────────────────────────────────
+
+/// Whether `gate` is recorded in the loop as uncounted (`hexa loop gate
+/// --uncounted`), the escape hatch of ADR-2611081151 §6: then its exit
+/// status alone decides.
+fn gate_uncounted(repo_root: &Path, gate: &str) -> bool {
+    fn any(v: &serde_json::Value, gate: &str) -> bool {
+        match v {
+            serde_json::Value::Object(m) => {
+                (m.get("gate").and_then(|g| g.as_str()) == Some(gate)
+                    && m.get("gate_uncounted").and_then(|u| u.as_bool()) == Some(true))
+                    || m.values().any(|x| any(x, gate))
+            }
+            serde_json::Value::Array(a) => a.iter().any(|x| any(x, gate)),
+            _ => false,
+        }
+    }
+    std::fs::read_to_string(repo_root.join(LOOP_STATE))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .is_some_and(|v| any(&v, gate))
+}
+
+/// What the run is told when its gate exited 0 having run nothing.
+const VACUOUS_NOTE: &str = "hexa: the gate exited 0 but ran no tests (vacuous), and a gate that runs nothing proves nothing. \
+     Make it run the tests, or record it with `hexa loop gate --uncounted '<cmd>'` if it is meant to";
+
+/// Judge one gate run: it passes when it exited 0, unless a test runner says
+/// it ran no tests and the gate is not declared uncounted. A vacuous pass
+/// is a fail, and the output says why. Output no runner wrote is still
+/// judged by its exit status here: harden's gates are often scripts.
+fn gate_passes(exit_ok: bool, output: &mut String, uncounted: bool) -> bool {
+    if exit_ok
+        && !uncounted
+        && crate::direct_exec::evidence_verdict(exit_ok, output, false) == hexa_core::domain::evidence::Evidence::Vacuous
+    {
+        output.push('\n');
+        output.push_str(VACUOUS_NOTE);
+        return false;
+    }
+    exit_ok
+}
+
+/// Whether `p` is a test file: under a test directory, or named as one.
+fn is_test_path(p: &str) -> bool {
+    let lower = p.to_ascii_lowercase();
+    let parts: Vec<&str> = lower.split('/').collect();
+    let (name, dirs) = parts.split_last().unwrap_or((&"", &[]));
+    dirs.iter().any(|d| matches!(*d, "tests" | "test" | "__tests__" | "spec" | "testdata"))
+        || name.starts_with("test_")
+        || name.contains("_test.")
+        || name.contains(".test.")
+        || name.contains("_spec.")
+        || name.contains(".spec.")
+}
+
+/// Show that the fix's new test fails without the fix (§5): take the fix's
+/// non-test files back to how they were, run `cmd` — the fast gate over the
+/// test files when there is one, else the gate — and put them back. `Ok`
+/// when the gate failed without the fix; otherwise why the fix is untested.
+async fn red_first(
+    repo_root: &Path,
+    touched: &[String],
+    before: &Snapshot,
+    after: &Snapshot,
+    gate: &str,
+    fast_gate: Option<&str>,
+) -> Result<(), String> {
+    let tests: Vec<String> =
+        touched.iter().filter(|p| is_test_path(p) && matches!(after.get(*p), Some(Some(_)))).cloned().collect();
+    if tests.is_empty() {
+        return Err("no test file changed, so no test was shown red without the fix".to_string());
+    }
+    let code: Vec<&String> = touched.iter().filter(|p| !is_test_path(p)).collect();
+    if code.is_empty() {
+        return Err("only test files changed: there is no fix to take away".to_string());
+    }
+    let agent_bytes = |p: &str| match after.get(p) {
+        Some(b) => b.clone(),
+        None => head_bytes(repo_root, p),
+    };
+    if code.iter().any(|p| std::fs::read(repo_root.join(p)).ok() != agent_bytes(p)) {
+        return Err("a file of the fix changed after the agent returned; the test was not run without it".to_string());
+    }
+    for p in &code {
+        put_bytes(&repo_root.join(p), desired_bytes(repo_root, p, before).as_deref());
+    }
+    let cmd = match fast_gate {
+        Some(f) => crate::direct_exec::substitute_touched(f, &tests),
+        None => gate.to_string(),
+    };
+    let (passed, _) = crate::direct_exec::run_evidence(&cmd, repo_root).await;
+    for p in &code {
+        put_bytes(&repo_root.join(p), agent_bytes(p).as_deref());
+    }
+    if passed {
+        Err(format!("its test ({}) passes without the fix", tests.join(", ")))
+    } else {
+        Ok(())
     }
 }
 
@@ -1072,8 +1505,30 @@ async fn review(
 ) -> ReviewReport {
     let gate = gates.gate.as_str();
     let mut report = ReviewReport::default();
-    // What the operator had already changed. A fix that touches any of these
-    // is left in the tree for review, never committed over the operator's work.
+    // One pass per worktree, on a branch, on a tree with no tracked change of
+    // anyone's: the pass commits, reverts and resets files, and cannot tell
+    // a person's edit from its agent's (ADR-2611160730 §1).
+    let (_lock, branch) = match begin_run(repo_root) {
+        Ok((lock, branch, note)) => {
+            report.notes.extend(note);
+            (lock, branch)
+        }
+        Err(why) => {
+            reporter(Progress { phase: "refused", message: why.clone(), elapsed: Duration::ZERO });
+            report.notes.push(why.clone());
+            report.stopped = Some(why);
+            return report;
+        }
+    };
+    // A gate the loop records as uncounted is judged by its exit status; any
+    // other that runs no tests fails (§5).
+    let uncounted = gate_uncounted(repo_root, gate);
+    if uncounted {
+        report.notes.push("the gate is recorded uncounted in the loop: its exit status alone decides".to_string());
+    }
+    // What the operator had already changed: untracked files only, now. A fix
+    // that touches any of these is left in the tree for review, never
+    // committed over the operator's work.
     let dirty_before: std::collections::BTreeSet<String> = changed_files(repo_root).await.into_keys().collect();
 
     // ── Phase 0: the gate on the tree as it is (ADR-2611151645 §1 to §3) ────
@@ -1082,13 +1537,13 @@ async fn review(
     // pass spent. Red once is run again: a flake is not a red tree.
     if gates.baseline {
         let base = Phase::start(&reporter, "baseline", format!("the gate on the tree as it is: {gate}"), HEARTBEAT);
-        let first = run_gate("baseline", gate, repo_root).await;
+        let first = run_gate("baseline", gate, repo_root, uncounted).await;
         report.gate_runs.push(first.clone());
         if first.passed {
             base.finish("passed");
         } else {
             base.note(format!("gate FAILED, running it once more: {}", first.shown()));
-            let second = run_gate("baseline", gate, repo_root).await;
+            let second = run_gate("baseline", gate, repo_root, uncounted).await;
             report.gate_runs.push(second.clone());
             if second.passed {
                 report.flakes.push("baseline: the gate failed, then passed on its second run".to_string());
@@ -1249,6 +1704,9 @@ async fn review(
             retry: Vec::new(),
             last_green: None,
             green_changes: Default::default(),
+            branch: branch.clone(),
+            uncounted,
+            stopped: None,
         }),
         _ => None,
     };
@@ -1273,15 +1731,27 @@ async fn review(
         let before = changed_files(repo_root).await;
         match claude_run_retry(&*frontier, &prompt, repo_root, 900, DEFAULT_RETRIES).await {
             Ok(reply) => {
+                // HEAD moved while the agent ran: fold it back only when every
+                // new commit is hexa's own; anyone else's stops the pass with
+                // nothing touched (ADR-2611160730 §1).
                 if let Some(bh) = &before_head {
-                    if head(repo_root).await.as_ref() != Some(bh)
-                        && git_ok(repo_root, &["reset", "-q", "--soft", bh]).await
-                    {
-                        fix.note(format!("agent committed its own change: {}", f.title));
-                        report.notes.push(format!(
-                            "the agent committed its own change for '{}'; folded back to be gated",
-                            f.title
-                        ));
+                    match head_move(repo_root, bh, &branch, &format!("the fix for '{}'", f.title)) {
+                        HeadMove::Same => {}
+                        HeadMove::FoldBack => {
+                            if git_ok(repo_root, &["reset", "-q", "--soft", bh]).await {
+                                fix.note(format!("agent committed its own change: {}", f.title));
+                                report.notes.push(format!(
+                                    "the agent committed its own change for '{}' as hexa; folded back to be gated",
+                                    f.title
+                                ));
+                            }
+                        }
+                        HeadMove::Stop(why) => {
+                            fix.finish(format!("STOPPED: {why}"));
+                            report.notes.push(why.clone());
+                            report.stopped = Some(why);
+                            return report;
+                        }
                     }
                 }
                 let after = changed_files(repo_root).await;
@@ -1302,7 +1772,7 @@ async fn review(
                 // (ADR-2610221540 §6): refused before any gate, batched or not.
                 let broken = crate::direct_exec::broken_seals(repo_root);
                 if !broken.is_empty() {
-                    revert_paths(repo_root, &touched, &before).await;
+                    revert_paths(repo_root, &touched, &before, &after, &mut report.notes).await;
                     fix.note(format!("REFUSED — {} edited sealed test(s): {}", f.title, broken.join(", ")));
                     report.notes.push(format!(
                         "fix for '{}' edited sealed test(s) {}: reverted, not committed (ADR-2610221540 §6)",
@@ -1312,14 +1782,20 @@ async fn review(
                     continue;
                 }
                 if let Some(b) = batching.as_mut() {
-                    b.gate_fix(f, &touched, &before, before_head.as_deref(), &dirty_before, &fix, &mut report).await;
-                    if b.batch.is_some_and(|n| b.pending.len() >= n) {
+                    b.gate_fix(f, &touched, &before, &after, before_head.as_deref(), &dirty_before, &fix, &mut report).await;
+                    if b.batch.is_some_and(|n| b.pending.len() >= n) && b.stopped.is_none() {
                         b.close(&reporter, &mut report).await;
+                    }
+                    if let Some(why) = b.stopped.clone() {
+                        fix.finish(format!("STOPPED: {why}"));
+                        report.notes.push(why.clone());
+                        report.stopped = Some(why);
+                        return report;
                     }
                     continue;
                 }
                 fix.note(format!("gate after fix: {gate}"));
-                let run = run_gate(&f.title, gate, repo_root).await;
+                let run = run_gate(&f.title, gate, repo_root, uncounted).await;
                 let passed = run.passed;
                 report.gate_runs.push(run.clone());
                 if passed {
@@ -1339,6 +1815,8 @@ async fn review(
                         ));
                         continue;
                     }
+                    // Red first (§5): the new test must fail without the fix.
+                    let red = red_first(repo_root, &touched, &before, &after, gate, None).await;
                     let mut scratch = Vec::new();
                     if commit_result(
                         repo_root,
@@ -1352,6 +1830,7 @@ async fn review(
                     {
                         fix.note(format!("committed: {}", f.title));
                         report.fixed.push(f.title.clone());
+                        note_red_first(&mut report, &f.title, red, &fix);
                     } else {
                         report.uncommitted.push(f.title.clone());
                         report.notes.extend(scratch);
@@ -1361,7 +1840,7 @@ async fn review(
                     for line in run.shown_lines() {
                         fix.note(format!("  │ {line}"));
                     }
-                    revert_paths(repo_root, &touched, &before).await;
+                    revert_paths(repo_root, &touched, &before, &after, &mut report.notes).await;
                     report.notes.push(format!(
                         "fix for '{}' did not pass the gate — reverted; the gate said: {}",
                         f.title,
@@ -1369,7 +1848,7 @@ async fn review(
                     ));
                     failed_in_a_row += 1;
                     if failed_in_a_row >= 2 {
-                        let check = run_gate("without any fix", gate, repo_root).await;
+                        let check = run_gate("without any fix", gate, repo_root, uncounted).await;
                         report.gate_runs.push(check.clone());
                         if check.passed {
                             fix.note("the gate is green without those fixes: they failed on their own");
@@ -1397,7 +1876,14 @@ async fn review(
 
     if let Some(b) = batching.as_mut() {
         b.close(&reporter, &mut report).await;
-        b.last_chance(&reporter, &mut report).await;
+        if b.stopped.is_none() {
+            b.last_chance(&reporter, &mut report).await;
+        }
+        if let Some(why) = b.stopped.clone() {
+            report.notes.push(why.clone());
+            report.stopped = Some(why);
+            return report;
+        }
     }
 
     // ── Final gate ───────────────────────────────────────────────────────────
@@ -1417,7 +1903,7 @@ async fn review(
         }
     }
     let final_gate = Phase::start(&reporter, "gate", format!("running: {gate}"), HEARTBEAT);
-    let run = run_gate("final", gate, repo_root).await;
+    let run = run_gate("final", gate, repo_root, uncounted).await;
     let passed = run.passed;
     report.gate_runs.push(run);
     if batching.is_some() {
@@ -1427,6 +1913,15 @@ async fn review(
     report.gate_run = true;
     final_gate.finish(if passed { "passed" } else { "FAILED" });
     report
+}
+
+/// Record what the red-first check showed for a committed fix (§5).
+fn note_red_first(report: &mut ReviewReport, title: &str, red: Result<(), String>, fix: &Phase) {
+    if let Err(why) = red {
+        fix.note(format!("fixed (untested): {title} — {why}"));
+        report.untested.push(title.to_string());
+        report.notes.push(format!("fixed (untested): '{title}' — {why}; the commit is kept"));
+    }
 }
 
 /// A fix hexa committed under the fast gate, or committed and set aside
@@ -1462,12 +1957,20 @@ struct Batching<'a> {
     last_green: Option<String>,
     /// The uncommitted changes in the tree that gate passed on (§7).
     green_changes: std::collections::BTreeMap<String, Option<Vec<u8>>>,
+    /// The branch the pass started on (ADR-2611160730 §1).
+    branch: String,
+    /// The full gate is recorded uncounted (ADR-2611160730 §5).
+    uncounted: bool,
+    /// Why the pass must stop: a reset would have dropped a commit hexa did
+    /// not make (ADR-2611160730 §1). Set, nothing more is reset or picked.
+    stopped: Option<String>,
 }
 
 impl Batching<'_> {
     /// One full-gate run, counted; a pass records the tree it passed on.
     async fn full_gate(&mut self, report: &mut ReviewReport) -> (bool, String) {
-        let (passed, out) = crate::direct_exec::run_evidence(self.gate, self.repo_root).await;
+        let (exit_ok, mut out) = crate::direct_exec::run_evidence(self.gate, self.repo_root).await;
+        let passed = gate_passes(exit_ok, &mut out, self.uncounted);
         report.full_gates += 1;
         if passed {
             self.last_green = head(self.repo_root).await;
@@ -1488,9 +1991,52 @@ impl Batching<'_> {
         (passed && !vacuous, vacuous)
     }
 
+    /// May the branch be reset to `sha`? Only while it is still the branch
+    /// the pass started on, and only when every commit the reset would drop
+    /// is hexa's own (ADR-2611160730 §1). When not, the pass is stopped.
+    fn may_reset_to(&mut self, sha: &str) -> bool {
+        if self.stopped.is_some() {
+            return false;
+        }
+        let now = git_out(self.repo_root, &["symbolic-ref", "-q", "--short", "HEAD"]);
+        if now.as_deref() != Some(self.branch.as_str()) {
+            self.stopped = Some(format!(
+                "the branch changed while harden ran: it was {}, it is now {}. harden stopped before resetting anything",
+                self.branch,
+                now.unwrap_or_else(|| "a detached HEAD".to_string())
+            ));
+            return false;
+        }
+        match commits_not_by_hexa(self.repo_root, sha) {
+            Ok(foreign) if foreign.is_empty() => true,
+            Ok(foreign) => {
+                let short: String = sha.chars().take(12).collect();
+                self.stopped = Some(format!(
+                    "harden stopped before resetting the branch to {short}: that would drop {} not made by hexa ({}). \
+                     Nothing was reset; the branch is as it was, with hexa's own commits on it",
+                    plural(foreign.len(), "commit"),
+                    foreign.join("; ")
+                ));
+                false
+            }
+            Err(e) => {
+                self.stopped = Some(format!("harden stopped before a reset: the commits it would drop cannot be read: {e}"));
+                false
+            }
+        }
+    }
+
+    /// Reset the branch to `sha`, if [`Batching::may_reset_to`] allows it.
+    fn reset_checked(&mut self, sha: &str) -> Result<(), String> {
+        if !self.may_reset_to(sha) {
+            return Err(self.stopped.clone().unwrap_or_default());
+        }
+        self.history.reset_to(self.repo_root, sha)
+    }
+
     /// The branch at `base` plus `fixes`, cherry-picked in order (§4).
-    fn build(&self, base: &str, fixes: &[Landed]) -> Result<(), String> {
-        self.history.reset_to(self.repo_root, base)?;
+    fn build(&mut self, base: &str, fixes: &[Landed]) -> Result<(), String> {
+        self.reset_checked(base)?;
         for l in fixes {
             self.history.cherry_pick(self.repo_root, &l.sha).map_err(|e| format!("'{}' did not apply: {e}", l.title))?;
         }
@@ -1514,7 +2060,8 @@ impl Batching<'_> {
         &mut self,
         f: &Finding,
         touched: &[String],
-        before: &std::collections::BTreeMap<String, Option<Vec<u8>>>,
+        before: &Snapshot,
+        after: &Snapshot,
         before_head: Option<&str>,
         dirty_before: &std::collections::BTreeSet<String>,
         fix: &Phase,
@@ -1535,10 +2082,13 @@ impl Batching<'_> {
                 ));
                 return;
             }
+            // Red first, under the fast gate only (ADR-2611160730 §5).
+            let red = red_first(self.repo_root, touched, before, after, self.gate, Some(self.fast_gate)).await;
             let mut scratch = Vec::new();
             if commit_result(self.repo_root, touched, &subject, "hexa-harden", &["Hexa-Gate: fast"], &mut scratch).await {
                 fix.note(format!("committed: {}", f.title));
                 report.fixed.push(f.title.clone());
+                note_red_first(report, &f.title, red, fix);
                 if let Some(sha) = head(self.repo_root).await {
                     self.pending.push(Landed { title: f.title.clone(), sha, touched: touched.to_vec() });
                 }
@@ -1553,18 +2103,26 @@ impl Batching<'_> {
         // Kept retryable as a commit, then reset away. Only when every path
         // was clean before the fix: a reset must never meet a file someone
         // else had already changed (ADR-2610141733 §6).
+        // Asked before the commit: a commit that could not be reset away
+        // would leave a failed fix on the branch (ADR-2611160730 §1).
         if let Some(bh) = before_head.filter(|_| touched.iter().all(|p| !before.contains_key(p))) {
+            if !self.may_reset_to(bh) {
+                return;
+            }
             let mut scratch = Vec::new();
             if commit_result(self.repo_root, touched, &subject, "hexa-harden", &["Hexa-Gate: fast"], &mut scratch).await {
                 if let Some(sha) = head(self.repo_root).await {
                     self.retry.push(Landed { title: f.title.clone(), sha, touched: touched.to_vec() });
                 }
-                if self.history.reset_to(self.repo_root, bh).is_err() {
+                if self.reset_checked(bh).is_err() {
+                    if self.stopped.is_some() {
+                        return;
+                    }
                     let _ = git_ok(self.repo_root, &["reset", "-q", "--soft", bh]).await;
                 }
             }
         }
-        revert_paths(self.repo_root, touched, before).await;
+        revert_paths(self.repo_root, touched, before, after, &mut report.notes).await;
         report.notes.push(format!("fix for '{}' {why} — reverted", f.title));
     }
 
@@ -1598,6 +2156,10 @@ impl Batching<'_> {
                 let mid = (lo + hi) / 2;
                 phase.note(format!("bisecting: prefix {mid} of {}", batch.len()));
                 let (g, _) = self.probe(&base, &batch[..mid], report).await;
+                if self.stopped.is_some() {
+                    phase.finish("STOPPED: a reset would have dropped a commit hexa did not make");
+                    return;
+                }
                 if g {
                     lo = mid;
                 } else {
@@ -1609,11 +2171,15 @@ impl Batching<'_> {
             phase.note(format!("confirming '{}': prefix {} then prefix {k}", culprit.title, k - 1));
             let (before_green, before_out) = self.probe(&base, &batch[..k - 1], report).await;
             let (at_green, at_out) = self.probe(&base, &batch[..k], report).await;
+            if self.stopped.is_some() {
+                phase.finish("STOPPED: a reset would have dropped a commit hexa did not make");
+                return;
+            }
             if !before_green || at_green {
                 // It did not reproduce: the gate is flaky, and no innocent fix
                 // is dropped for it (§5).
                 let restored = match &batch_head {
-                    Some(sha) => self.history.reset_to(self.repo_root, sha),
+                    Some(sha) => self.reset_checked(sha),
                     None => self.build(&base, &batch),
                 };
                 if let Err(e) = restored {
@@ -1639,6 +2205,10 @@ impl Batching<'_> {
             // Rebuild: prefix k−1, then fixes k+1..n on top.
             let mut rebuilt = batch[..k - 1].to_vec();
             if let Err(e) = self.build(&base, &rebuilt) {
+                if self.stopped.is_some() {
+                    phase.finish("STOPPED: a reset would have dropped a commit hexa did not make");
+                    return;
+                }
                 report.notes.push(format!("could not rebuild the batch: {e}"));
             }
             for l in &batch[k..] {
@@ -1713,14 +2283,48 @@ impl Batching<'_> {
             } else {
                 phase.note(format!("still fails: {}", l.title));
                 let which = if fast { "the full gate" } else { "the fast gate" };
-                if let Err(e) = self.history.reset_to(self.repo_root, &prev) {
-                    report.notes.push(format!("could not reset away '{}': {e}", l.title));
+                if let Err(e) = self.reset_checked(&prev) {
+                    report.notes.push(format!("could not reset away '{}', which still fails {which}: {e}", l.title));
+                    if self.stopped.is_some() {
+                        phase.finish("STOPPED: a reset would have dropped a commit hexa did not make");
+                        return;
+                    }
                 }
                 report.notes.push(format!("last chance for '{}': it still fails {which} — not committed", l.title));
             }
         }
         phase.finish(format!("{landed} landed"));
     }
+}
+
+/// Whether `path` (repo-relative) is under the build's `target`: the target
+/// directory, or the directory of a target file. `.` or empty is the whole
+/// repository, which the operator then asked for.
+fn under_target(path: &str, target: &str, repo_root: &Path) -> bool {
+    let t = Path::new(target);
+    let rel = if t.is_absolute() {
+        let root = std::fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
+        let abs = std::fs::canonicalize(t).unwrap_or_else(|_| t.to_path_buf());
+        match abs.strip_prefix(&root).or_else(|_| t.strip_prefix(repo_root)) {
+            Ok(r) => r.to_string_lossy().into_owned(),
+            Err(_) => return false,
+        }
+    } else {
+        target.to_string()
+    };
+    let rel = rel.trim_start_matches("./").trim_end_matches('/').to_string();
+    if rel.is_empty() || rel == "." {
+        return true;
+    }
+    let scope = if repo_root.join(&rel).is_file() {
+        match Path::new(&rel).parent() {
+            Some(p) if !p.as_os_str().is_empty() => p.to_string_lossy().into_owned(),
+            _ => return path == rel,
+        }
+    } else {
+        rel
+    };
+    path == scope || path.starts_with(&format!("{scope}/"))
 }
 
 /// Outcome of a cooperative build run.
@@ -1731,6 +2335,10 @@ pub struct BuildReport {
     pub spec_chars: usize,
     pub build_ok: bool,
     pub notes: Vec<String>,
+    /// Why the build refused to start, or stopped before committing: a dirty
+    /// tracked tree, a detached HEAD, another run's lock, or a commit hexa did
+    /// not make (ADR-2611160730 §1).
+    pub stopped: Option<String>,
 }
 
 /// Competing design priorities — the divergence that makes the red-team meaningful.
@@ -1771,6 +2379,25 @@ pub async fn run_build_with(
     reporter: Reporter,
 ) -> BuildReport {
     let mut report = BuildReport::default();
+    // The same start as harden's: one run per worktree, on a branch, on a
+    // tree with no tracked change of anyone's (ADR-2611160730 §1).
+    let (_lock, branch) = match begin_run(repo_root) {
+        Ok((lock, branch, note)) => {
+            report.notes.extend(note);
+            (lock, branch)
+        }
+        Err(why) => {
+            reporter(Progress { phase: "refused", message: why.clone(), elapsed: Duration::ZERO });
+            report.notes.push(why.clone());
+            report.stopped = Some(why);
+            return report;
+        }
+    };
+    let start_head = head(repo_root).await;
+    let uncounted = gate_uncounted(repo_root, gate);
+    if uncounted {
+        report.notes.push("the gate is recorded uncounted in the loop: its exit status alone decides".to_string());
+    }
     // Per file (`-uall`): a directory-level entry would hide an operator's
     // file inside the build's target directory.
     let dirty_before: std::collections::BTreeSet<String> = changed_files(repo_root).await.into_keys().collect();
@@ -1876,19 +2503,56 @@ pub async fn run_build_with(
         build.note(format!("build agent error: {e}"));
         report.notes.push(format!("build agent error: {e}"));
     }
+    // HEAD moved while the build ran: only hexa's own commits are folded
+    // back; anyone else's stops the build with nothing committed (§1).
+    if let Some(sh) = &start_head {
+        match head_move(repo_root, sh, &branch, "the build") {
+            HeadMove::Same => {}
+            HeadMove::FoldBack => {
+                let _ = git_ok(repo_root, &["reset", "-q", "--soft", sh]).await;
+            }
+            HeadMove::Stop(why) => {
+                build.finish(format!("STOPPED: {why}"));
+                report.notes.push(why.clone());
+                report.stopped = Some(why);
+                return report;
+            }
+        }
+    }
     build.note(format!("gate: {gate}"));
-    let (ok, _) = crate::direct_exec::run_evidence(gate, repo_root).await;
+    let (exit_ok, mut out) = crate::direct_exec::run_evidence(gate, repo_root).await;
+    let ok = gate_passes(exit_ok, &mut out, uncounted);
+    if exit_ok && !ok {
+        report.notes.push(format!("the gate `{gate}` exited 0 but ran no tests (vacuous): the build is not green, and nothing was committed"));
+    }
     report.build_ok = ok;
     build.finish(if ok { "gate passed" } else { "gate FAILED" });
     if ok {
-        // Only the files the build changed. The target is not added back: it
-        // is a pathspec, and would commit the operator's own edits to it or
-        // to any file under it.
-        let paths: Vec<String> = changed_files(repo_root)
+        // A build may make a sealed test pass, never change it
+        // (ADR-2610221540 §6), as do and harden refuse.
+        let broken = crate::direct_exec::broken_seals(repo_root);
+        if !broken.is_empty() {
+            report.build_ok = false;
+            report.notes.push(format!(
+                "the build edited sealed test(s) {}: not committed, left in the tree (ADR-2610221540 §6)",
+                broken.join(", ")
+            ));
+            return report;
+        }
+        // Only the files the build changed, and only under its target. The
+        // target is not added back: it is a pathspec, and would commit the
+        // operator's own edits to it or to any file under it.
+        let (paths, outside): (Vec<String>, Vec<String>) = changed_files(repo_root)
             .await
             .into_keys()
             .filter(|p| !dirty_before.contains(p))
-            .collect();
+            .partition(|p| under_target(p, target, repo_root));
+        if !outside.is_empty() {
+            report.notes.push(format!(
+                "changed outside the target `{target}`, not committed, left in the tree: {}",
+                shown_paths(&outside)
+            ));
+        }
         commit_result(
             repo_root,
             &paths,
