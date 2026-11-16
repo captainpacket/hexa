@@ -271,6 +271,73 @@ fn spec_draft_refuses_a_project_with_no_cargo_toml_before_the_paid_call() {
     assert!(!d.path().join(format!("docs/specs/{id}.json")).exists(), "nothing drafted");
 }
 
+/// The spec file of `spec_repo`, relative to its root.
+fn spec_rel() -> String {
+    format!("docs/specs/{}.json", adr_id(SPEC_DIGITS))
+}
+
+#[test]
+fn spec_accept_refuses_an_untracked_spec_and_names_the_commit_to_make() {
+    let d = spec_repo(true, false);
+    let id = adr_id(SPEC_DIGITS);
+    git(d.path(), &["rm", "-q", "--cached", &spec_rel()]);
+    git(d.path(), &["commit", "-qm", "untrack the spec"]);
+    let before = std::fs::read_to_string(d.path().join(spec_rel())).unwrap();
+    let r = run(d.path(), &["spec", "accept", &id, "--by", "a reviewer"]);
+    assert_ne!(r.code, 0, "an acceptance of text no commit holds:\n{}", r.out);
+    assert!(r.out.contains("untracked") && r.out.contains("git add") && r.out.contains("git commit"), "{}", r.out);
+    assert_eq!(std::fs::read_to_string(d.path().join(spec_rel())).unwrap(), before, "nothing is recorded");
+}
+
+#[test]
+fn spec_accept_refuses_a_modified_spec_that_head_holds_no_acceptance_of() {
+    let d = spec_repo(true, false);
+    let id = adr_id(SPEC_DIGITS);
+    let p = d.path().join(spec_rel());
+    let edited = std::fs::read_to_string(&p).unwrap().replacen("\"then\":\"t\"", "\"then\":\"t, edited\"", 1);
+    assert!(edited.contains("t, edited"), "the edit landed:\n{edited}");
+    std::fs::write(&p, &edited).unwrap();
+    let r = run(d.path(), &["spec", "accept", &id, "--by", "a reviewer"]);
+    assert_ne!(r.code, 0, "{}", r.out);
+    assert!(r.out.contains("modified") && r.out.contains("git commit"), "{}", r.out);
+    assert_eq!(std::fs::read_to_string(&p).unwrap(), edited, "nothing is recorded");
+}
+
+#[test]
+fn spec_accept_takes_an_edited_spec_whose_acceptance_head_holds() {
+    let d = spec_repo(true, false);
+    let id = adr_id(SPEC_DIGITS);
+    let r = run(d.path(), &["spec", "accept", &id, "--by", "a reviewer"]);
+    assert_eq!(r.code, 0, "a committed spec is accepted:\n{}", r.out);
+    git(d.path(), &["commit", "-qam", "accept"]);
+    let p = d.path().join(spec_rel());
+    let edited = std::fs::read_to_string(&p).unwrap().replacen("\"then\": \"t\"", "\"then\": \"t, edited\"", 1);
+    assert!(edited.contains("t, edited"), "the edit landed:\n{edited}");
+    std::fs::write(&p, edited).unwrap();
+    let r = run(d.path(), &["spec", "accept", &id, "--by", "a reviewer"]);
+    assert_eq!(r.code, 0, "a re-acceptance's predecessor is anchored in HEAD:\n{}", r.out);
+}
+
+#[test]
+fn spec_accept_refuses_a_project_with_no_cargo_toml() {
+    let d = spec_repo(false, false);
+    let id = adr_id(SPEC_DIGITS);
+    let before = std::fs::read_to_string(d.path().join(spec_rel())).unwrap();
+    let r = run(d.path(), &["spec", "accept", &id, "--by", "a reviewer"]);
+    assert_ne!(r.code, 0, "{}", r.out);
+    assert!(r.out.contains("Cargo.toml") && r.out.contains("Rust"), "accept says why, as draft does:\n{}", r.out);
+    assert_eq!(std::fs::read_to_string(d.path().join(spec_rel())).unwrap(), before, "nothing is recorded");
+}
+
+#[test]
+fn spec_tests_keeps_the_red_tests_by_default_and_has_no_keep_red_flag() {
+    let d = repo(&[("README.md", "x\n")]);
+    let r = run(d.path(), &["spec", "tests", "--help"]);
+    assert_eq!(r.code, 0, "{}", r.out);
+    assert!(!r.out.contains("--keep-red"), "keeping the red tests is the default, not an opt-in:\n{}", r.out);
+    assert!(r.out.contains("guard"), "the help says passing tests are set aside as guards:\n{}", r.out);
+}
+
 // ── 5. plan ──────────────────────────────────────────────────────────────────
 
 #[test]
