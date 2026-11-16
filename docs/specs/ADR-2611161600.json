@@ -142,5 +142,16 @@
       "when": "`hexa spec verify <ADR>` runs",
       "then": "it fails, reporting the seal broken"
     }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-16T16:15:02.330314+00:00",
+      "base_commit": "85f982f6e413fa395479463f53e525608fb0a60a",
+      "by": "gary",
+      "file": "hexa-cli/tests/a_verb_reports_only_the_success_it_earned.rs",
+      "from": "e9ef16b22bf122a3c096afae9145ea3b3783d34829455a0c1a552c5dbc7eb0a0",
+      "reason": "The file was added by the false-success fixes (ADR-2611160730 §5) and extended at de4be6f with ADR-2611161600's tests, written first and red there; accepted by gary on 2026-11-16.",
+      "to": "71fd053cdb0b43aaaaf8d339e327e9f335754960796d99ec3bc5682cef7c859d"
+    }
   ]
 }
