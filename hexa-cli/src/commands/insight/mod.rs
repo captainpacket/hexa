@@ -35,96 +35,149 @@ pub enum InsightAction {
         /// (`{findings: [{line_no, raw, classification, severity}]}`).
         #[arg(long)]
         json: bool,
+        /// Scan every project's transcripts, not only this repository's.
+        #[arg(long)]
+        all_projects: bool,
+        /// Another Claude Code config directory to read transcripts from
+        /// (its `projects/` folder), in addition to `$CLAUDE_CONFIG_DIR` and
+        /// `~/.claude`. Repeatable.
+        #[arg(long = "config-dir", value_name = "DIR")]
+        config_dirs: Vec<std::path::PathBuf>,
     },
 }
 
 pub async fn run(action: InsightAction) -> anyhow::Result<()> {
     match action {
-        InsightAction::PunchList { json } => punch_list_run(json).await,
+        InsightAction::PunchList { json, all_projects, config_dirs } => {
+            punch_list_run(json, all_projects, &config_dirs).await
+        }
     }
 }
 
-/// Scan the most recent Claude Code transcript JSONL files for assistant
-/// turns and extract punch-list items via the existing `extract_punch_list`
-/// pure function in `commands::hook::punch_list`. Read-only.
+/// The transcript roots to scan, deduplicated, in order: each `--config-dir`,
+/// then `$CLAUDE_CONFIG_DIR`, then `~/.claude`. Claude Code keeps a profile's
+/// transcripts under its config dir, and a shell that runs hexa need not have
+/// the variable a session set, so both the variable and the default are read.
+fn transcript_roots(extra: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {
+    use crate::commands::claude_paths::claude_projects_root;
+    let home = dirs::home_dir();
+    let config_dir = std::env::var("CLAUDE_CONFIG_DIR").ok();
+    let mut roots: Vec<std::path::PathBuf> = extra.iter().map(|d| d.join("projects")).collect();
+    roots.extend(claude_projects_root(config_dir.as_deref(), home.as_deref()));
+    roots.extend(claude_projects_root(None, home.as_deref()));
+    let mut out: Vec<std::path::PathBuf> = Vec::new();
+    for r in roots {
+        let key = r.canonicalize().unwrap_or_else(|_| r.clone());
+        if r.is_dir() && !out.iter().any(|o| o.canonicalize().unwrap_or_else(|_| o.clone()) == key) {
+            out.push(r);
+        }
+    }
+    out
+}
+
+/// The repository root of the working directory: the nearest ancestor that
+/// holds `.git` (a directory, or a worktree's file), canonicalized, because
+/// Claude Code names a project folder after the path it was started in.
+fn repo_root() -> Option<std::path::PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    let cwd = cwd.canonicalize().unwrap_or(cwd);
+    cwd.ancestors().find(|d| d.join(".git").exists()).map(|d| d.to_path_buf()).or(Some(cwd))
+}
+
+/// The assistant text of one transcript line, or `None` for any other line.
 ///
-/// Transcripts live at `~/.claude/projects/<project>/*.jsonl` per Claude
-/// Code conventions. We scan the most recent file (or files modified in
-/// the last hour) so the detector reflects current-session gaps, not
-/// historical ones the user has already routed elsewhere.
-async fn punch_list_run(json: bool) -> anyhow::Result<()> {
+/// Claude Code writes `{"type":"assistant","message":{"role":"assistant",
+/// "content":[{"type":"text","text":…}]}}`. The role sits under `message`; a
+/// top-level `role` (the shape this read before) is accepted too.
+fn assistant_text(turn: &serde_json::Value) -> Option<String> {
+    let body = turn.get("message").filter(|m| m.is_object()).unwrap_or(turn);
+    let role = body.get("role").or_else(|| turn.get("role")).and_then(|v| v.as_str());
+    if role != Some("assistant") {
+        return None;
+    }
+    let content = body.get("content")?;
+    if let Some(s) = content.as_str() {
+        return Some(s.to_string());
+    }
+    let blocks = content.as_array()?;
+    Some(
+        blocks
+            .iter()
+            .filter(|b| b.get("type").and_then(|t| t.as_str()).is_none_or(|t| t == "text"))
+            .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
+/// Scan recent Claude Code transcript JSONL files for assistant turns and
+/// extract punch-list items via the existing `extract_punch_list` pure
+/// function in `commands::hook::punch_list`. Read-only.
+///
+/// Transcripts live at `<config dir>/projects/<project>/*.jsonl`. By default
+/// only this repository's project folder is read; `--all-projects` reads
+/// every one. Only files modified in the last hour are read, so the list
+/// reflects current-session gaps, not historical ones the user has already
+/// routed elsewhere.
+async fn punch_list_run(json: bool, all_projects: bool, config_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
+    use crate::commands::claude_paths::project_dir_name;
     use crate::commands::hook::punch_list::{extract_punch_list, Reference};
     use std::path::PathBuf;
 
     let mut findings: Vec<serde_json::Value> = Vec::new();
+    let only = if all_projects { None } else { repo_root().map(|r| project_dir_name(&r)) };
 
-    let config_dir = std::env::var("CLAUDE_CONFIG_DIR").ok();
-    let transcripts_root: Option<PathBuf> = crate::commands::claude_paths::claude_projects_root(config_dir.as_deref(), dirs::home_dir().as_deref());
-    if let Some(root) = transcripts_root.filter(|r| r.is_dir()) {
-        // Find recently-modified JSONL files across all project dirs.
-        let cutoff = std::time::SystemTime::now()
-            .checked_sub(std::time::Duration::from_secs(60 * 60))
-            .unwrap_or(std::time::UNIX_EPOCH);
-        let mut recent_files: Vec<PathBuf> = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(&root) {
-            for project in entries.flatten() {
-                let project_path = project.path();
-                if !project_path.is_dir() {
+    let cutoff = std::time::SystemTime::now()
+        .checked_sub(std::time::Duration::from_secs(60 * 60))
+        .unwrap_or(std::time::UNIX_EPOCH);
+    let mut recent_files: Vec<PathBuf> = Vec::new();
+    for root in transcript_roots(config_dirs) {
+        let Ok(entries) = std::fs::read_dir(&root) else { continue };
+        for project in entries.flatten() {
+            let project_path = project.path();
+            if !project_path.is_dir() {
+                continue;
+            }
+            if let Some(name) = &only {
+                if project.file_name().to_string_lossy() != name.as_str() {
                     continue;
                 }
-                let Ok(jsonls) = std::fs::read_dir(&project_path) else { continue };
-                for j in jsonls.flatten() {
-                    let p = j.path();
-                    if p.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-                        continue;
-                    }
-                    let Ok(meta) = j.metadata() else { continue };
-                    if let Ok(modified) = meta.modified() {
-                        if modified >= cutoff {
-                            recent_files.push(p);
-                        }
-                    }
+            }
+            let Ok(jsonls) = std::fs::read_dir(&project_path) else { continue };
+            for j in jsonls.flatten() {
+                let p = j.path();
+                if p.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                    continue;
+                }
+                let Ok(meta) = j.metadata() else { continue };
+                if meta.modified().is_ok_and(|m| m >= cutoff) {
+                    recent_files.push(p);
                 }
             }
         }
+    }
+    recent_files.sort();
 
-        for path in recent_files {
-            let Ok(content) = std::fs::read_to_string(&path) else { continue };
-            for line in content.lines() {
-                let Ok(turn): Result<serde_json::Value, _> = serde_json::from_str(line) else { continue };
-                // Claude Code transcript format: assistant turns have
-                // `role == "assistant"` and `content` either a string or
-                // an array of content blocks with `text` fields.
-                if turn.get("role").and_then(|v| v.as_str()) != Some("assistant") {
+    for path in recent_files {
+        let Ok(content) = std::fs::read_to_string(&path) else { continue };
+        for line in content.lines() {
+            let Ok(turn): Result<serde_json::Value, _> = serde_json::from_str(line) else { continue };
+            let Some(text) = assistant_text(&turn) else { continue };
+            for item in extract_punch_list(&text) {
+                let unrouted = item
+                    .references
+                    .iter()
+                    .all(|r| matches!(r, Reference::None));
+                if !unrouted {
                     continue;
                 }
-                let text = if let Some(s) = turn.get("content").and_then(|v| v.as_str()) {
-                    s.to_string()
-                } else if let Some(blocks) = turn.get("content").and_then(|v| v.as_array()) {
-                    blocks
-                        .iter()
-                        .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                } else {
-                    continue;
-                };
-                for item in extract_punch_list(&text) {
-                    let unrouted = item
-                        .references
-                        .iter()
-                        .all(|r| matches!(r, Reference::None));
-                    if !unrouted {
-                        continue;
-                    }
-                    findings.push(serde_json::json!({
-                        "line_no": item.line_no,
-                        "raw": item.raw,
-                        "classification": format!("{:?}", item.classification),
-                        "severity": "warning",
-                        "remediation": "add a task id, draft path, or (out-of-scope) tag",
-                    }));
-                }
+                findings.push(serde_json::json!({
+                    "line_no": item.line_no,
+                    "raw": item.raw,
+                    "classification": format!("{:?}", item.classification),
+                    "severity": "warning",
+                    "remediation": "add a task id, draft path, or (out-of-scope) tag",
+                }));
             }
         }
     }
@@ -142,6 +195,26 @@ async fn punch_list_run(json: bool) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod punch_list_tests {
+    use super::assistant_text;
+    use serde_json::json;
+
+    #[test]
+    fn the_role_is_read_from_the_message() {
+        let line = json!({"type":"assistant","message":{"role":"assistant","content":[
+            {"type":"text","text":"a"},{"type":"tool_use","name":"x"},{"type":"text","text":"b"}]}});
+        assert_eq!(assistant_text(&line).as_deref(), Some("a\nb"));
+    }
+
+    #[test]
+    fn a_top_level_role_still_reads_and_a_user_turn_does_not() {
+        assert_eq!(assistant_text(&json!({"role":"assistant","content":"x"})).as_deref(), Some("x"));
+        assert_eq!(assistant_text(&json!({"message":{"role":"user","content":"x"}})), None);
+        assert_eq!(assistant_text(&json!({"type":"summary"})), None);
+    }
 }
 
 /// A single extracted insight — either structured (parsed from YAML) or a

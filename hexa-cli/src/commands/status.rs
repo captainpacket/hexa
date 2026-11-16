@@ -11,7 +11,14 @@
 //! - the subagents in progress, from the start/stop rows the hooks already
 //!   append to `~/.hexa/agent-runs.jsonl`,
 //! - the last five outcomes, from both, without counting a run twice,
-//! - a `count` of what is running.
+//! - a `count` of what is running,
+//! - the `next` step, read from the loop: record a gate, fix the red gate,
+//!   or the pending task (`hexa go` prints this alone).
+//!
+//! Runs, subagents and outcomes are this repository's by default: a record
+//! counts when it was made in this checkout or one of its linked worktrees.
+//! `--all` lists every project's. What the scope left out is counted in
+//! `count.other_repos`, never dropped silently.
 //!
 //! A count is never a guess. When a source cannot be read its count is `null`
 //! and `unreadable` says why; "zero because I could not look" is a different
@@ -44,6 +51,9 @@ pub struct StatusArgs {
     /// Also ask the remote for the branch head (opt-in: it uses the network).
     #[arg(long)]
     pub remote: bool,
+    /// List runs, subagents and outcomes from every project, not only this repository.
+    #[arg(long)]
+    pub all: bool,
 }
 
 pub async fn run(args: StatusArgs) -> anyhow::Result<()> {
@@ -59,7 +69,7 @@ pub async fn run_text() -> anyhow::Result<()> {
 
 fn emit(args: &StatusArgs, as_json: bool) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
-    let report = gather(&cwd, args.remote);
+    let report = gather(&cwd, args.remote, args.all);
     if as_json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -68,20 +78,170 @@ fn emit(args: &StatusArgs, as_json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn gather(cwd: &Path, remote: bool) -> Value {
+fn gather(cwd: &Path, remote: bool, all: bool) -> Value {
+    let mut report = gather_core(cwd, all);
+    let obj = report.as_object_mut().expect("report is an object");
+    obj.insert("project".into(), json!(cwd.display().to_string()));
+    obj.insert("hexa_dir".into(), json!(cwd.join(".hexa").is_dir()));
+    obj.insert("git".into(), git_state(cwd, remote));
+    report
+}
+
+/// The runs, the loop and the next step: what `hexa go` needs, with no git
+/// state beyond the list of this repository's worktrees.
+fn gather_core(cwd: &Path, all: bool) -> Value {
+    let scope = if all { None } else { Some(repo_roots(cwd)) };
     let mut report = build_report(&Inputs {
         runs_dir: run_record::runs_dir(),
         agent_log: hexa_exec::ports::RunLog::read_checked(&hexa_exec::run_log()),
         ledger: task_ledger::read(cwd),
         now: Utc::now(),
         alive: &run_record::process_alive,
+        scope,
     });
+    let lp = crate::commands::loop_cmd::loop_summary(cwd);
+    let design = design_command(cwd);
+    let next = next_step(&lp, design.as_deref(), &report["gates"]);
     let obj = report.as_object_mut().expect("report is an object");
-    obj.insert("project".into(), json!(cwd.display().to_string()));
-    obj.insert("hexa_dir".into(), json!(cwd.join(".hexa").is_dir()));
-    obj.insert("git".into(), git_state(cwd, remote));
-    obj.insert("loop".into(), crate::commands::loop_cmd::loop_summary(cwd));
+    obj.insert("loop".into(), lp);
+    obj.insert("next".into(), next);
     report
+}
+
+/// The next step alone, as text lines: `hexa go`.
+pub fn next_text(cwd: &Path) -> String {
+    render_next(&gather_core(cwd, false)["next"])
+}
+
+/// The design step the loop records, if a draft is recorded and has one
+/// (ADR-2610281011 §5): review it, commit it, or turn it into an ADR.
+fn design_command(cwd: &Path) -> Option<String> {
+    let draft = crate::commands::loop_cmd::read_loop(cwd)
+        .and_then(|st| st.get("design").and_then(|v| v.as_str()).map(String::from))?;
+    let ws = hexa_exec::egm::Workspace::at(cwd.to_path_buf()).ok()?;
+    hexa_exec::egm::next_design_command(&ws, Some(&draft))
+}
+
+/// This repository's checkouts: the main one and every linked worktree, from
+/// `git worktree list` (read-only). Outside git, the directory itself.
+fn repo_roots(cwd: &Path) -> Vec<std::path::PathBuf> {
+    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let mut roots: Vec<std::path::PathBuf> = git(cwd, &["worktree", "list", "--porcelain"])
+        .map(|out| {
+            out.lines()
+                .filter_map(|l| l.strip_prefix("worktree "))
+                .map(|p| canon(Path::new(p)))
+                .collect()
+        })
+        .unwrap_or_default();
+    if roots.is_empty() {
+        roots.push(match git(cwd, &["rev-parse", "--show-toplevel"]) {
+            Ok(top) => canon(Path::new(&top)),
+            Err(_) => canon(cwd),
+        });
+    }
+    roots
+}
+
+/// Whether a recorded directory is inside one of `roots`. Compared by path
+/// component, so `/a/hexa-old` is not inside `/a/hexa`.
+fn in_scope(dir: Option<&str>, roots: &[std::path::PathBuf]) -> bool {
+    let Some(d) = dir.filter(|d| !d.is_empty()) else { return false };
+    let p = Path::new(d);
+    let p = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    roots.iter().any(|r| p.starts_with(r))
+}
+
+/// The stage after `stage`, on the loop's track.
+fn stage_after(stage: &str) -> &'static str {
+    match stage {
+        "design" => "decide",
+        "decide" => "gate",
+        "gate" => "build",
+        "build" => "harden",
+        _ => "done",
+    }
+}
+
+/// The one next step, read from the loop and the gate's last run here, in
+/// this order: a loop that cannot be read; the recorded design draft's step;
+/// no gate recorded; the gate red; the task in progress or next; otherwise
+/// the next stage. Pure in its inputs.
+pub fn next_step(lp: &Value, design: Option<&str>, gates: &Value) -> Value {
+    let step = |kind: &str, text: String, command: Option<String>| json!({ "kind": kind, "text": text, "command": command });
+    if lp["readable"] == false {
+        return step("loop-unreadable", format!("the loop file cannot be read: {} — fix or remove .hexa/loop.json", show(&lp["error"])), None);
+    }
+    if let Some(cmd) = design {
+        return step("design", format!("design: {cmd}"), Some(cmd.to_string()));
+    }
+    // ADR-2611160910 finding 2: this session has no work of its own and an
+    // ended session left some here. Its open task is the next step, carried
+    // over first so the hooks accept edits under its gate.
+    let prev = &lp["previous"];
+    if prev.is_object() {
+        let tasks = prev["checklist"].as_array().cloned().unwrap_or_default();
+        let pending = tasks.iter().find(|t| t["status"] == "doing").or_else(|| tasks.iter().find(|t| t["status"] != "done"));
+        let who = show(&prev["session"]);
+        let who = who.get(..8).unwrap_or(&who);
+        let text = match pending {
+            Some(t) => format!(
+                "the previous session ({who}) left task {}: {} open, under gate {} — carry its work into this session, then do it",
+                show(&t["n"]),
+                show(&t["title"]),
+                show(&prev["gate"])
+            ),
+            None => format!(
+                "the previous session ({who}) left work at stage {} under gate {} — carry it into this session",
+                show(&prev["stage"]),
+                show(&prev["gate"])
+            ),
+        };
+        return step("resume", text, Some("hexa loop resume".into()));
+    }
+    let gate = lp["gate"].as_str().filter(|g| lp["recorded"] == true && !g.is_empty() && *g != "none");
+    let Some(gate) = gate else {
+        return step(
+            "record-gate",
+            "no gate recorded: write the command that must pass before the code".into(),
+            Some("hexa loop gate 'cargo test --test my_feature'".into()),
+        );
+    };
+    if gates[gate]["passed"] == false {
+        return step(
+            "fix-gate",
+            format!("the gate is red (last run: {} {}): fix what it reports, then run it again", show(&gates[gate]["verb"]), show(&gates[gate]["target"])),
+            Some(gate.to_string()),
+        );
+    }
+    let tasks = lp["checklist"].as_array().cloned().unwrap_or_default();
+    let pending = tasks
+        .iter()
+        .find(|t| t["status"] == "doing")
+        .or_else(|| tasks.iter().find(|t| t["status"] != "done"));
+    if let Some(t) = pending {
+        let n = show(&t["n"]);
+        return step("task", format!("task {n}: {}", show(&t["title"])), Some(format!("hexa loop task done {n}")));
+    }
+    let stage = lp["stage"].as_str().unwrap_or("decide");
+    if stage == "done" {
+        return step("done", "the loop is done: nothing is pending".into(), None);
+    }
+    let after = stage_after(stage);
+    step(
+        "advance",
+        format!("stage {stage}: the gate is recorded and no task is pending — move to {after}"),
+        Some(format!("hexa loop stage {after}")),
+    )
+}
+
+/// The next step as lines: what to do, then the command for it.
+fn render_next(n: &Value) -> String {
+    let mut o = format!("  {} {}\n", "\u{2192}".yellow(), show(&n["text"]));
+    if let Some(c) = n["command"].as_str() {
+        o.push_str(&format!("    {}\n", c.bold()));
+    }
+    o
 }
 
 /// What the report is built from, passed in so a test can supply a temporary
@@ -93,6 +253,9 @@ pub struct Inputs<'a> {
     pub ledger: Result<Ledger, LedgerError>,
     pub now: DateTime<Utc>,
     pub alive: &'a dyn Fn(u64, Option<u64>) -> bool,
+    /// This repository's checkouts. `Some`: runs, subagents and outcomes made
+    /// elsewhere are left out and counted in `count.other_repos`. `None`: all.
+    pub scope: Option<Vec<std::path::PathBuf>>,
 }
 
 fn parse_ts(v: Option<&Value>) -> Option<DateTime<Utc>> {
@@ -116,6 +279,10 @@ pub fn build_report(i: &Inputs) -> Value {
     let mut running: Vec<Value> = Vec::new();
     let mut finished: Vec<(String, Value)> = Vec::new(); // (sort key, entry)
     let mut abandoned = 0usize;
+    let mut other_repos = 0usize;
+    let mine = |dir: Option<&str>| i.scope.as_deref().is_none_or(|roots| in_scope(dir, roots));
+    // The last finished run of each gate here: (sort key, entry).
+    let mut gates: std::collections::BTreeMap<String, (String, Value)> = std::collections::BTreeMap::new();
     let mut earliest_record: Option<String> = None;
     let runs_count: Value = match run_record::read_all(&i.runs_dir) {
         Err(e) => {
@@ -136,6 +303,10 @@ pub fn build_report(i: &Inputs) -> Value {
                 }));
             }
             for rec in &read.records {
+                if !mine(rec.worktree.as_deref()) {
+                    other_repos += 1;
+                    continue;
+                }
                 earliest_record = match earliest_record {
                     Some(e) if e <= rec.started => Some(e),
                     _ => Some(rec.started.clone()),
@@ -147,6 +318,19 @@ pub fn build_report(i: &Inputs) -> Value {
                     continue;
                 }
                 let state = run_record::effective_state(rec, i.alive);
+                let passed = match (&rec.gate_result, state.as_str()) {
+                    (Some(g), _) => Some(g.passed),
+                    (None, "passed") => Some(true),
+                    (None, "failed") => Some(false),
+                    _ => None,
+                };
+                if let (Some(g), Some(passed)) = (rec.gate.as_deref().filter(|g| !g.is_empty()), passed) {
+                    let key = rec.ended.clone().unwrap_or_else(|| rec.started.clone());
+                    if gates.get(g).is_none_or(|(k, _)| *k < key) {
+                        let e = json!({ "passed": passed, "at": key, "verb": rec.verb, "target": rec.target, "id": rec.id });
+                        gates.insert(g.to_string(), (key, e));
+                    }
+                }
                 let started = parse_ts(Some(&json!(rec.started)));
                 let mut entry = run_entry(rec, &state);
                 entry["age_secs"] = age_secs(started, i.now);
@@ -198,6 +382,10 @@ pub fn build_report(i: &Inputs) -> Value {
                 if row["event"] != "start" {
                     continue;
                 }
+                if !mine(row["cwd"].as_str()) {
+                    other_repos += 1;
+                    continue;
+                }
                 let ts = parse_ts(row.get("ts"));
                 let fresh = ts.is_some_and(|t| (i.now - t).num_hours() < AGENT_FRESH_HOURS);
                 if !fresh {
@@ -225,6 +413,12 @@ pub fn build_report(i: &Inputs) -> Value {
                 }
                 let started = row["started_at"].as_str().unwrap_or("");
                 if earliest_record.as_deref().is_some_and(|e| started >= e) {
+                    continue;
+                }
+                // Rows from before run records name no directory; an absolute
+                // `file` is the only place they say where they ran.
+                if !mine(row["cwd"].as_str().or(row["file"].as_str().filter(|f| f.starts_with('/')))) {
+                    other_repos += 1;
                     continue;
                 }
                 finished.push((
@@ -273,17 +467,21 @@ pub fn build_report(i: &Inputs) -> Value {
     let recent: Vec<Value> = finished.into_iter().take(RECENT).map(|(_, e)| e).collect();
     running.sort_by(|a, b| a["started"].as_str().cmp(&b["started"].as_str()));
 
+    let gates: serde_json::Map<String, Value> = gates.into_iter().map(|(g, (_, e))| (g, e)).collect();
     json!({
+        "scope": if i.scope.is_some() { "repo" } else { "all" },
         "runs": running,
         "agents": agents,
         "tasks": tasks,
         "recent": recent,
+        "gates": gates,
         "count": {
             "runs": runs_count,
             "agents": agents_count,
             "tasks": tasks_count,
             "abandoned": if runs_count.is_null() { Value::Null } else { json!(abandoned) },
             "stale_agents": stale_count,
+            "other_repos": other_repos,
         },
         "unreadable": unreadable,
         "warnings": warnings,
@@ -434,17 +632,7 @@ fn show(v: &Value) -> String {
 pub fn render_text(r: &Value) -> String {
     use std::fmt::Write;
     let mut o = String::new();
-    let _ = writeln!(o, "{} hexa project status\n", "\u{2b21}".cyan());
-    let _ = writeln!(o, "  Project: {}", show(&r["project"]));
-    let _ = writeln!(
-        o,
-        "  Config:  {}",
-        if r["hexa_dir"] == true {
-            ".hexa/ found".green()
-        } else {
-            "no .hexa/ directory".yellow()
-        }
-    );
+    let _ = writeln!(o, "{} hexa status  {}\n", "\u{2b21}".cyan(), show(&r["project"]).dimmed());
     let g = &r["git"];
     if g["repo"] == true {
         let mut line = format!("{} on {}", show(&g["head"]), show(&g["branch"]));
@@ -452,68 +640,81 @@ pub fn render_text(r: &Value) -> String {
             let _ = write!(line, " · {} dirty", g["dirty"]);
         }
         if !g["ahead"].is_null() {
-            let _ = write!(
-                line,
-                " · {} ahead, {} behind {}",
-                g["ahead"],
-                g["behind"],
-                show(&g["upstream"])
-            );
+            let _ = write!(line, " · {} ahead, {} behind {}", g["ahead"], g["behind"], show(&g["upstream"]));
         }
         if g.get("remote_head").is_some() {
             let _ = write!(line, " · remote head {}", show(&g["remote_head"]));
         }
         let _ = writeln!(o, "  Git:     {line}");
-        for w in g["could_not_tell"].as_array().into_iter().flatten() {
-            let _ = writeln!(
-                o,
-                "           {}",
-                format!("could not tell: {}", show(w)).dimmed()
-            );
-        }
-    } else {
+    } else if !g.is_null() {
         let _ = writeln!(o, "  Git:     {}", "not a git repository".dimmed());
     }
+    if r["hexa_dir"] == false {
+        let _ = writeln!(o, "  Config:  {}", "no .hexa/ directory (hexa init .)".yellow());
+    }
+
+    // 1. The loop: ADR, gate, stage, checklist.
     let l = &r["loop"];
     if l["readable"] == false {
+        let _ = writeln!(o, "\n  Loop:    {} {}", "unreadable:".red(), show(&l["error"]));
+    } else if l["previous"].is_object() {
+        // ADR-2611160910 finding 2: nothing of this session's own; the
+        // previous session's work, labelled as such.
+        let p = &l["previous"];
+        let who = show(&p["session"]);
+        let _ = writeln!(o, "\n  Loop:    {}", "nothing recorded in this session".dimmed());
         let _ = writeln!(
             o,
-            "  Loop:    {} {}",
-            "unreadable:".red(),
-            show(&l["error"])
+            "  Previous session {} (ended): stage {} · ADR {} · gate {}",
+            who.get(..8).unwrap_or(&who),
+            show(&p["stage"]),
+            show(&p["adr"]),
+            show(&p["gate"]),
         );
+        for t in p["checklist"].as_array().into_iter().flatten() {
+            let box_ = match t["status"].as_str() {
+                Some("done") => "[x]",
+                Some("doing") => "[>]",
+                _ => "[ ]",
+            };
+            let _ = writeln!(o, "           {box_} {} {}", show(&t["n"]), show(&t["title"]));
+        }
+        let _ = writeln!(o, "           `hexa loop resume` carries it into this session");
     } else if l["recorded"] == true {
+        let gate = show(&l["gate"]);
+        let mark = match r["gates"][gate.as_str()]["passed"].as_bool() {
+            Some(true) => " (green)".green().to_string(),
+            Some(false) => " (red)".red().to_string(),
+            None => String::new(),
+        };
         let _ = writeln!(
             o,
-            "  Loop:    stage {} · ADR {} · gate {} · checklist {}/{}",
+            "\n  Loop:    stage {} · ADR {} · gate {gate}{mark}",
             show(&l["stage"]),
             show(&l["adr"]),
-            show(&l["gate"]),
-            l["checklist_done"],
-            l["checklist"].as_array().map_or(0, Vec::len)
         );
+        for t in l["checklist"].as_array().into_iter().flatten() {
+            let box_ = match t["status"].as_str() {
+                Some("done") => "[x]",
+                Some("doing") => "[>]",
+                _ => "[ ]",
+            };
+            let _ = writeln!(o, "           {box_} {} {}", show(&t["n"]), show(&t["title"]));
+        }
         if let Some(run) = l["running"].as_str() {
             let _ = writeln!(o, "           {run}");
         }
     } else {
-        let _ = writeln!(
-            o,
-            "  Loop:    {}",
-            "nothing recorded (hexa loop adr <ID>)".dimmed()
-        );
+        let _ = writeln!(o, "\n  Loop:    {}", "nothing recorded".dimmed());
     }
 
+    // 2. What is in flight in this repository.
     let c = &r["count"];
-    let n = |v: &Value| {
-        if v.is_null() {
-            "unreadable".red().to_string()
-        } else {
-            v.to_string()
-        }
-    };
+    let n = |v: &Value| if v.is_null() { "unreadable".red().to_string() } else { v.to_string() };
+    let scope = if r["scope"] == "all" { "every project" } else { "this repo" };
     let _ = writeln!(
         o,
-        "\n  Running: {} run(s) · {} agent(s) · {} task(s) · {} abandoned",
+        "\n  In flight ({scope}): {} run(s) · {} agent(s) · {} task(s) · {} abandoned",
         n(&c["runs"]),
         n(&c["agents"]),
         n(&c["tasks"]),
@@ -554,18 +755,12 @@ pub fn render_text(r: &Value) -> String {
         let _ = writeln!(
             o,
             "    {}",
-            format!(
-                "{} older subagent start(s) have no stop and are not counted as running",
-                c["stale_agents"]
-            )
-            .dimmed()
+            format!("{} older subagent start(s) have no stop and are not counted as running", c["stale_agents"]).dimmed()
         );
     }
     let recent = r["recent"].as_array().cloned().unwrap_or_default();
-    if recent.is_empty() {
-        let _ = writeln!(o, "\n  Last outcomes: {}", "none recorded".dimmed());
-    } else {
-        let _ = writeln!(o, "\n  Last outcomes:");
+    if !recent.is_empty() {
+        let _ = writeln!(o, "    last outcomes:");
         for e in &recent {
             let outcome = show(&e["outcome"]);
             let colored = match outcome.as_str() {
@@ -575,7 +770,7 @@ pub fn render_text(r: &Value) -> String {
             };
             let _ = writeln!(
                 o,
-                "    {:<9} {:<8} {}  {}",
+                "      {:<9} {:<8} {}  {}",
                 colored,
                 show(&e["verb"]),
                 show(&e["target"]),
@@ -583,23 +778,23 @@ pub fn render_text(r: &Value) -> String {
             );
         }
     }
+    if let Some(k) = c["other_repos"].as_u64().filter(|k| *k > 0) {
+        let _ = writeln!(o, "    {}", format!("{k} record(s) from other projects not shown (hexa status --all)").dimmed());
+    }
+
+    // 3. The next step.
+    if r.get("next").is_some() {
+        let _ = write!(o, "\n  Next:\n{}", render_next(&r["next"]));
+    }
+
+    for w in g["could_not_tell"].as_array().into_iter().flatten() {
+        let _ = writeln!(o, "  {}", format!("could not tell: {}", show(w)).dimmed());
+    }
     for p in r["unreadable"].as_array().into_iter().flatten() {
-        let _ = writeln!(
-            o,
-            "\n  {} {}: {}",
-            "UNREADABLE".red().bold(),
-            show(&p["source"]),
-            show(&p["reason"])
-        );
+        let _ = writeln!(o, "\n  {} {}: {}", "UNREADABLE".red().bold(), show(&p["source"]), show(&p["reason"]));
     }
     for w in r["warnings"].as_array().into_iter().flatten() {
-        let _ = writeln!(
-            o,
-            "  {} {}: {}",
-            "warning".yellow(),
-            show(&w["source"]),
-            show(&w["reason"])
-        );
+        let _ = writeln!(o, "  {} {}: {}", "warning".yellow(), show(&w["source"]), show(&w["reason"]));
     }
     o
 }
@@ -660,6 +855,7 @@ mod tests {
             ledger: Ok(Ledger::default()),
             now: now(),
             alive,
+            scope: None,
         }
     }
 
@@ -870,6 +1066,36 @@ mod tests {
         assert!(r["count"]["tasks"].is_null(), "{r}");
         assert_eq!(r["ok"], false);
         assert_eq!(r["unreadable"][0]["code"], "ledger_unreadable");
+    }
+
+    /// A directory belongs to a root by path component: `/a/hexa-old` is not
+    /// inside `/a/hexa`, and a record with no directory belongs to no repo.
+    #[test]
+    fn scope_matches_by_path_component() {
+        let roots = vec![std::path::PathBuf::from("/nonexistent-x/hexa")];
+        assert!(in_scope(Some("/nonexistent-x/hexa"), &roots));
+        assert!(in_scope(Some("/nonexistent-x/hexa/sub/dir"), &roots));
+        assert!(!in_scope(Some("/nonexistent-x/hexa-old"), &roots));
+        assert!(!in_scope(None, &roots));
+        assert!(!in_scope(Some(""), &roots));
+    }
+
+    /// The next step's order: design, no gate, red gate, pending task, stage.
+    #[test]
+    fn next_step_reads_the_loop_in_order() {
+        let none = json!({});
+        let lp = |gate: &str, tasks: Value| json!({"readable": true, "recorded": true, "gate": gate, "stage": "gate", "checklist": tasks});
+        let kind = |v: Value| v["kind"].as_str().unwrap().to_string();
+        assert_eq!(kind(next_step(&json!({"readable": false, "error": "bad"}), None, &none)), "loop-unreadable");
+        assert_eq!(kind(next_step(&json!({"readable": true, "recorded": false}), Some("hexa design review d.md"), &none)), "design");
+        assert_eq!(kind(next_step(&json!({"readable": true, "recorded": false}), None, &none)), "record-gate");
+        assert_eq!(kind(next_step(&lp("none", json!([])), None, &none)), "record-gate");
+        let tasks = json!([{"n": 1, "title": "a", "status": "done"}, {"n": 2, "title": "b", "status": "todo"}]);
+        assert_eq!(kind(next_step(&lp("g", tasks.clone()), None, &json!({"g": {"passed": false}}))), "fix-gate");
+        let t = next_step(&lp("g", tasks), None, &json!({"g": {"passed": true}}));
+        assert_eq!((kind(t.clone()), t["command"].clone()), ("task".to_string(), json!("hexa loop task done 2")));
+        let a = next_step(&lp("g", json!([])), None, &none);
+        assert_eq!((kind(a.clone()), a["command"].clone()), ("advance".to_string(), json!("hexa loop stage build")));
     }
 
     /// The record of a registered task is read through its task: a dead

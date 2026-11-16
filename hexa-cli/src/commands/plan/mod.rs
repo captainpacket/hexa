@@ -115,14 +115,14 @@ pub enum PlanAction {
     /// Validate workplan evidence (ADR-2026-04-14-2200, wp-enforce-workplan-evidence E3.1).
     ///
     /// Runs `validate_workplan_evidence` on one workplan or on every
-    /// `docs/workplans/wp-*.json`. Reports violations (task id + kind +
+    /// `docs/workplans/*.json`. Reports violations (task id + kind +
     /// remediation hint) in a table. Exit 0 when clean, non-zero when
     /// any violation is found. Intended for pre-commit hooks and CI.
     Lint {
         /// Path to a specific workplan JSON. Mutually exclusive with --all.
         #[arg(conflicts_with = "all")]
         file: Option<String>,
-        /// Lint every docs/workplans/wp-*.json file.
+        /// Lint every docs/workplans/*.json file.
         #[arg(long, default_value_t = false)]
         all: bool,
     },
@@ -655,23 +655,42 @@ async fn ready_check(json: bool, no_tests: bool) -> anyhow::Result<()> {
             }
         }
     } else if is_rust {
-        let out = std::process::Command::new("cargo")
-            .args(["check", "--quiet"])
-            .current_dir(&cwd)
-            .output();
-        if let Ok(o) = out {
-            if !o.status.success() {
-                let stderr = String::from_utf8_lossy(&o.stderr).into_owned();
-                let preview: String = stderr.lines().take(20).collect::<Vec<_>>().join("\n");
-                findings.push(serde_json::json!({
-                    "gate": "typecheck",
-                    "kind": "typecheck_failed",
+        let mut cargo = |gate: &str, kind: &str, args: &[&str]| {
+            match std::process::Command::new("cargo").args(args).current_dir(&cwd).output() {
+                Ok(o) if o.status.success() => {}
+                Ok(o) => {
+                    let combined = format!("{}\n{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+                    let preview: String = combined.trim().lines().take(20).collect::<Vec<_>>().join("\n");
+                    findings.push(serde_json::json!({
+                        "gate": gate,
+                        "kind": kind,
+                        "severity": "error",
+                        "language": "rust",
+                        "errors_preview": preview,
+                    }));
+                }
+                // A gate that could not run did not pass.
+                Err(e) => findings.push(serde_json::json!({
+                    "gate": gate,
+                    "kind": format!("{gate}_unavailable"),
                     "severity": "error",
-                    "language": "rust",
-                    "errors_preview": preview,
-                }));
+                    "detail": e.to_string(),
+                })),
             }
+        };
+        cargo("typecheck", "typecheck_failed", &["check", "--quiet"]);
+        if !no_tests {
+            cargo("tests", "tests_failed", &["test", "--quiet"]);
         }
+    } else {
+        // Nothing here is a project this verb can check: zero failing gates
+        // would be a readiness nothing measured.
+        findings.push(serde_json::json!({
+            "gate": "project",
+            "kind": "no_project",
+            "severity": "error",
+            "detail": "no package.json or Cargo.toml here: there is nothing to typecheck or test",
+        }));
     }
 
     if json {
@@ -685,6 +704,11 @@ async fn ready_check(json: bool, no_tests: bool) -> anyhow::Result<()> {
                 f.get("kind").and_then(|v| v.as_str()).unwrap_or("")
             );
         }
+    }
+    // A failing gate, or one that could not run, is not readiness. Any
+    // finding fails the verb, as its report says.
+    if !findings.is_empty() {
+        anyhow::bail!("not ready: {} gate(s) failing", findings.len());
     }
     Ok(())
 }
@@ -1269,26 +1293,31 @@ async fn create_plan(requirements: &[String], lang: &str, adr: Option<&str>, no_
             }
             Some(adr_ref) => {
                 let adr_dir = Path::new("docs/adrs");
-                if adr_dir.is_dir() {
-                    let adr_slug = adr_ref.to_uppercase().replace(' ', "-");
-                    let found = std::fs::read_dir(adr_dir)?
-                        .filter_map(|e| e.ok())
-                        .any(|e| {
-                            let name = e.file_name().to_string_lossy().to_uppercase();
-                            name.contains(&adr_slug)
-                        });
-                    if !found {
-                        anyhow::bail!(
-                            "ADR '{}' not found in docs/adrs/. Create the ADR first.\n\
-                             Pipeline: ADR → Workplan → subagents, one worktree each",
-                            adr_ref
-                        );
-                    }
-                    println!("  {} ADR {} verified", "\u{2713}".green(), adr_ref);
+                if !adr_dir.is_dir() {
+                    anyhow::bail!(
+                        "--adr {adr_ref}: there is no docs/adrs/ here to find it in. Run from the repository root, \
+                         or create the ADR first.\n Pipeline: ADR → Workplan → subagents, one worktree each"
+                    );
                 }
+                // The id exactly, never a substring: `--adr` with the first two
+                // digits of a year matched every ADR of that year.
+                let wanted = super::adr::canonical_adr_id(adr_ref);
+                let found = std::fs::read_dir(adr_dir)?
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("md"))
+                    .find(|e| super::adr::adr_id_of_file(&e.file_name().to_string_lossy()).as_deref() == Some(wanted.as_str()));
+                if found.is_none() {
+                    anyhow::bail!(
+                        "ADR '{}' not found in docs/adrs/ (ids match exactly). Create the ADR first.\n\
+                         Pipeline: ADR → Workplan → subagents, one worktree each",
+                        adr_ref
+                    );
+                }
+                println!("  {} ADR {} verified", "\u{2713}".green(), wanted);
             }
         }
     }
+    let adr_id = if no_adr { None } else { adr.map(super::adr::canonical_adr_id) };
 
     println!(
         "{} Creating workplan ({} requirement(s), language: {})",
@@ -1367,9 +1396,12 @@ async fn create_plan(requirements: &[String], lang: &str, adr: Option<&str>, no_
         "\u{2192}".dimmed()
     );
 
-    // Save to docs/workplans/
+    // Save to docs/workplans/, made if it is missing. A plan printed and not
+    // saved used to exit 0, as if it had been.
     let workplans_dir = Path::new("docs/workplans");
-    if workplans_dir.is_dir() {
+    std::fs::create_dir_all(workplans_dir)
+        .map_err(|e| anyhow::anyhow!("the workplan was not saved: {} could not be created: {e}", workplans_dir.display()))?;
+    {
         let slug: String = requirements
             .first()
             .map(|r| {
@@ -1393,14 +1425,18 @@ async fn create_plan(requirements: &[String], lang: &str, adr: Option<&str>, no_
             steps,
             phases: Vec::new(),
             created_at: chrono::Utc::now().to_rfc3339(),
-            adr: String::new(),
+            adr: adr_id.clone().unwrap_or_default(),
             description: String::new(),
             priority: String::new(),
             superseded_by: String::new(),
         };
 
+        if path.exists() {
+            anyhow::bail!("the workplan was not saved: {} already exists", path.display());
+        }
         let json = serde_json::to_string_pretty(&plan)?;
-        std::fs::write(&path, &json)?;
+        std::fs::write(&path, &json)
+            .map_err(|e| anyhow::anyhow!("the workplan was not saved to {}: {e}", path.display()))?;
         println!(
             "  {} Saved to {}",
             "\u{2713}".green(),
@@ -1818,7 +1854,7 @@ fn slug_from_prompt(prompt: &str) -> String {
 /// The stub is a minimal JSON document capturing the original prompt,
 /// the tier classification, and a "pending-planner" status. The hook
 /// router auto-invokes this on T3-sized prompts; the draft surfaces in
-/// Claude Code context so the agent can pick it up via /hexa-feature-dev
+/// Claude Code context so the agent can pick it up via /hexa-workflow
 /// (or the user can approve/edit it manually).
 ///
 /// Scan every `docs/workplans/wp-*.json` for evidence drift and report
@@ -1998,16 +2034,17 @@ async fn draft_plan(prompt_parts: &[String], background: bool) -> anyhow::Result
     let dir = drafts_dir();
     std::fs::create_dir_all(&dir)?;
 
-    // Build a timestamped filename: draft-YYMMDDHHMM-<slug>.json
+    // draft-YYMMDDHHMM-<slug>-<suffix>.json, created with `create_new`. The
+    // name was the minute and four words, opened with `File::create`, so two
+    // sessions drafting the same prompt in the same minute wrote one file
+    // and the first draft was lost without a word.
     let ts = chrono::Local::now().format("%y%m%d%H%M").to_string();
     let slug = slug_from_prompt(trimmed);
-    let filename = format!("draft-{}-{}.json", ts, slug);
-    let path = dir.join(&filename);
+    let (path, filename, mut file) = create_unique_draft(&dir, &ts, &slug)?;
 
     // Draft stub: captures prompt, tier, origin, and pending status.
-    // Deliberately minimal — the planner agent will expand this into a
-    // full workplan when the user (or Claude Code) picks it up.
-    let draft_id = format!("draft-{}-{}", ts, slug);
+    // Deliberately minimal — it is expanded when someone picks it up.
+    let draft_id = filename.trim_end_matches(".json").to_string();
     let draft = serde_json::json!({
         "id": draft_id,
         "kind": "workplan-draft",
@@ -2017,27 +2054,55 @@ async fn draft_plan(prompt_parts: &[String], background: bool) -> anyhow::Result
         "origin": "auto-invoke",
         "prompt": trimmed,
         "next_steps": [
-            "Run /hexa-feature-dev to expand this draft into a full workplan",
+            "Run /hexa-workflow to take this through the gate-first loop: decide, gate, build, harden",
             format!("Or run `hexa plan drafts approve {}`", filename),
-            format!("Or run `hexa plan drafts clear --name {}`", filename.trim_end_matches(".json")),
+            format!("Or run `hexa plan drafts clear --name {}`", draft_id),
         ],
-        "notes": "This is a draft created by ADR-2026-04-11-0227 auto-invoke. It contains only the original prompt — no specs, steps, or tiers have been generated yet. The planner agent will fill these in when the draft is picked up."
+        "notes": "This is a draft created by ADR-2026-04-11-0227 auto-invoke. It contains only the original prompt — no specs, steps, or tiers have been generated yet."
     });
 
-    let mut file = std::fs::File::create(&path)?;
     file.write_all(serde_json::to_string_pretty(&draft)?.as_bytes())?;
 
-    if !background {
+    if background {
+        // The route hook reads the path from here; nothing else is printed.
+        println!("{}", path.display());
+    } else {
         println!(
             "{} draft created: {}",
             "\u{2713}".green(),
             path.display().to_string().cyan()
         );
-        println!("  {} run `/hexa-feature-dev` to expand into a full workplan", "\u{2192}".dimmed());
+        println!("  {} run `/hexa-workflow` to take it through the gate-first loop", "\u{2192}".dimmed());
         println!("  {} run `hexa plan drafts list` to see all drafts", "\u{2192}".dimmed());
     }
 
     Ok(())
+}
+
+/// Create a new draft file that no other writer holds: a short suffix from
+/// the clock and the pid, retried on a collision. Never opens an existing
+/// file.
+fn create_unique_draft(
+    dir: &std::path::Path,
+    ts: &str,
+    slug: &str,
+) -> anyhow::Result<(std::path::PathBuf, String, std::fs::File)> {
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0)
+        ^ std::process::id().rotate_left(16);
+    for attempt in 0u32..64 {
+        let suffix = format!("{:06x}", seed.wrapping_add(attempt.wrapping_mul(0x9e37_79b9)) & 0xff_ffff);
+        let filename = format!("draft-{ts}-{slug}-{suffix}.json");
+        let path = dir.join(&filename);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(f) => return Ok((path, filename, f)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    anyhow::bail!("hexa plan draft: no free draft name in {}", dir.display())
 }
 
 async fn drafts_dispatch(action: DraftsAction) -> anyhow::Result<()> {
@@ -2186,7 +2251,7 @@ async fn approve_draft(name: &str) -> anyhow::Result<()> {
         dst.display().to_string().cyan()
     );
     println!(
-        "  {} the draft still needs expansion into real specs + steps — run `/hexa-feature-dev` or edit the file directly",
+        "  {} the draft still needs expansion into real specs + steps — run `/hexa-workflow` or edit the file directly",
         "\u{2192}".dimmed()
     );
 

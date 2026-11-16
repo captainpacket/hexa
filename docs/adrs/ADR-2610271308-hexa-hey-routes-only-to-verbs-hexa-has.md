@@ -20,7 +20,7 @@ date: 2026-10-27
 3. **The dead routes are gone.** Nothing routes to `brain`, `sched`, `inbox`, `brief`, `report` or `secrets`. Requests for git state route to `Shell` commands (`git status`, `git log --oneline -20`, `git diff --stat`), which are not hexa's.
 4. **The core verbs have routes.** Asking for the architecture grade routes to `analyze .`; where the work stands to `loop`; what to do next to `go`; checking every decision's gate to `adr gates`; checking the install to `doctor`; updating hexa to `self-update --check`; hardening or bug-hunting a path to `harden <path>`; searching what was learned to `memory search <words>`. A route that needs an argument the request does not contain is not routed.
 5. **No match is said, not guessed.** When no rule matches, `route` returns `Routed::None`, and `hexa hey` prints that it found no verb and points at `hexa --help`. It never runs a nearest guess.
-6. **What changes or deletes is marked.** A route whose command changes the tree, git or the install (`harden`, `self-update` without `--check`, `dev worktree cleanup`) is `destructive: true`, and `hey` asks before running it even with `--yes`.
+6. **What changes or deletes is marked.** A route whose command changes the tree, git or the install (`harden`, `self-update` without `--check`, `dev worktree cleanup`) is `destructive: true`, and `hey` asks before running it, unless `--yes` is given: `--yes` is the person saying yes in advance (amended 2026-11-16 by gary: the earlier rule made `--yes` a flag that changed nothing). A request that matches no rule still runs nothing, with or without `--yes` (§5).
 
 ## Consequences
 

@@ -61,7 +61,10 @@ c1c() { local o f; mkdir -p "$TMP/empty-corpus"
   f="$HOME/.hexa/runs/$(echo "$o" | jq -r '.recent[0].id').json"
   jq -e '.pid_start!=null and .pid_start_unknown==false and .ended!=null and .outcome=="passed"' "$f" >/dev/null 2>&1 \
     || { WHY="run record $f lacks pid_start or ended"; return 1; }; }
-c2() { T1="$(H agent register --task one --lease src/a/ --json 2>&1)" && T2="$(H agent register --task two --lease src/b/ --json 2>&1)" \
+# Task one carries a gate whose output is a passing test run: `agent report --outcome passed` runs the gate and
+# refuses a done it did not earn (no gate, or a run of no tests). The fixture only tests the ledger, so the gate is a stand-in run.
+PASSING_GATE="printf 'TAP version 13\\nok 1 - fixture\\n1..1\\n# pass 1\\n# fail 0\\n'"
+c2() { T1="$(H agent register --task one --lease src/a/ --gate "$PASSING_GATE" --json 2>&1)" && T2="$(H agent register --task two --lease src/b/ --json 2>&1)" \
     || { WHY="register failed: $(echo "${T1:-}" | head -1)"; return 1; }
   ID1="$(echo "$T1" | jq -er .id)" && ID2="$(echo "$T2" | jq -er .id)" && [ "$ID1" != "$ID2" ] || { WHY="no distinct ids in output"; return 1; }; }
 c3() { local o; o="$(H status --json 2>&1)" || { WHY="status failed"; return 1; }
@@ -97,12 +100,13 @@ c7() { cargo_passes -p hexa-exec --test do_commit_scope; }
 # #50: a sealed path absent at HEAD and after the run is not an edit (main's own fix and test).
 c8() { cargo_passes -p hexa-exec --test a_sealed_test_is_never_committed a_sealed_file_absent_at_head_and_after_the_run_is_not_an_edit; }
 c9() { local o f
-  o="$(H agent report --id "${ID1:-none}" --outcome passed --commit abc1234 --json 2>&1)" || { WHY="report failed: $(echo "$o" | head -1)"; return 1; }
+  C="$(git rev-parse --short HEAD)" # a commit that exists: report refuses one that does not
+  o="$(H agent report --id "${ID1:-none}" --outcome passed --commit "$C" --json 2>&1)" || { WHY="report failed: $(echo "$o" | head -1)"; return 1; }
   o="$(H status --json 2>&1)"
   echo "$o" | jq -e --arg a "${ID1:-x}" '(.tasks[]|select(.id==$a)|.status=="done") and .count.tasks==1' >/dev/null \
     || { WHY="task one not done or running-task count not 1: $(echo "$o" | head -c 120)"; return 1; }
   f="$HOME/.hexa/runs/$(echo "$o" | jq -r --arg a "${ID1:-x}" '.tasks[]|select(.id==$a)|.run')".json
-  jq -e '.outcome=="passed" and .commit=="abc1234" and (.pid_start!=null) and (.ended!=null)' "$f" >/dev/null 2>&1 \
+  jq -e --arg c "$C" '.outcome=="passed" and .commit==$c and (.pid_start!=null) and (.ended!=null)' "$f" >/dev/null 2>&1 \
     || { WHY="run record $f lacks outcome/commit/pid_start/ended"; return 1; }; }
 
 check "1 empty state reports zero runs and zero tasks"            1 c1

@@ -74,9 +74,10 @@ async fn builds_nodes_edges_and_communities() {
         "expected b.ts -> a.ts import edge"
     );
 
-    // Imports edge: lib.rs → thing.rs (Rust `mod thing;` resolved).
+    // Declares edge: lib.rs → thing.rs (Rust `mod thing;` resolved). A module
+    // declaration wires the module in; it is not an import of its items.
     assert!(
-        g.edges.iter().any(|e| e.kind == EdgeKind::Imports
+        g.edges.iter().any(|e| e.kind == EdgeKind::Declares
             && e.src == "file:src/lib.rs"
             && e.dst == "file:src/thing.rs"),
         "expected lib.rs -> thing.rs mod edge"

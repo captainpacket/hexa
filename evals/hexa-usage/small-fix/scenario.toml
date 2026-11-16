@@ -1,0 +1,33 @@
+# An off-by-one, with the failing test given. A model that uses hexa records
+# the gate before it edits, and commits through `hexa do gate` or `do run`.
+prompt = """
+The page count is wrong when the number of titles divides evenly by the page size: `cargo test` shows the failing tests in tests/paging.rs. Please fix the bug and commit the fix.
+"""
+# The project declares its full gate (`gate.full`, ADR-2611160910 finding 3),
+# added after the first baseline, so a narrower gate is kept as the fast gate.
+setup = [
+  "sed -i.bak '1s/^{/{\"gate\":{\"full\":\"cargo test\"},/' .hexa/project.json && rm .hexa/project.json.bak && git commit -qm 'declare the full gate' -- .hexa/project.json",
+]
+outcome = '''cargo test --quiet && test "$(git show --name-only --format= HEAD)" = "src/domain/paging.rs"'''
+outcome_fails_at_start = true
+max_turns = 15
+budget_usd = 1.0
+
+[[expect_verbs]]
+id = "gate"
+pattern = '''\bhexa\s+(loop\s+gate|do\s+run)\b'''
+weight = 1
+before_first_edit = true
+
+[[expect_verbs]]
+id = "commit"
+pattern = '''\bhexa\s+do\s+(gate|run)\b'''
+weight = 1
+
+[[forbid]]
+label = "script write into source"
+pattern = '''(?s)\b(python3?|node|ruby)\b.*src/.*(\.write\(|write_text\(|writeFileSync)|(?s)\b(python3?|node|ruby)\b.*(\.write\(|write_text\(|writeFileSync).*src/'''
+
+[[forbid]]
+label = "sweeping commit"
+pattern = '''\bgit\s+(add\s+(-A|--all|\.(\s|$))|commit\s+(-[a-zA-Z]*a\b|--all))'''

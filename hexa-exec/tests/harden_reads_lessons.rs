@@ -71,7 +71,7 @@ async fn with_nothing_learned_the_prompts_have_no_lessons_section() {
 async fn build_prompts_carry_the_lessons_too() {
     let (_tmp, dir) = repo();
     let rec = Arc::new(Recording { inner: Fake::new(0, good_fix()), prompts: Mutex::new(Vec::new()) });
-    let _ = run_build_with(rec.clone(), "make it", "src", GATE, 1, &dir, 5, 0, Arc::new(|_| {}), &lessons()).await;
+    let _ = run_build_with(rec.clone(), "make it", "src", GATE, 2, &dir, 5, 0, Arc::new(|_| {}), &lessons()).await;
     let prompts = rec.prompts.lock().unwrap().clone();
     assert!(!prompts.is_empty(), "build asked the frontier something");
     assert!(prompts[0].contains("lesson:async-staleness"), "the first build prompt carries the lessons:\n{}", prompts[0]);

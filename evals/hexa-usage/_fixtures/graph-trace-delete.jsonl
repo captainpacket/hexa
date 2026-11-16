@@ -1,0 +1,15 @@
+{"type": "system", "subtype": "init", "cwd": "/tmp/hexa-eval/delete-unused-name/repo", "session_id": "fixture", "tools": ["Bash", "Edit", "Write", "Read"], "model": "fixture-model"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_01", "name": "Bash", "input": {"command": "hexa graph build"}}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01", "content": "graph: .hexa/graph/graph.json"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_02", "name": "Bash", "input": {"command": "hexa graph consumers src/domain/titles.rs"}}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_02", "content": "BLOCKED \u2014 3 consumer(s): src/usecases/browse.rs (uses sort_key), src/usecases/browse.rs (uses tidy)"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_03", "name": "Bash", "input": {"command": "grep -rn legacy_label src tests"}}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_03", "content": "src/adapters/secondary/memory_store.rs:16: pub fn legacy_label(&self) -> &str {\ntests/store.rs:6: store.legacy_label()"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_04", "name": "Bash", "input": {"command": "hexa loop gate 'cargo test'"}}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_04", "content": "Loop (repo): stage gate"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_05", "name": "Edit", "input": {"file_path": "/tmp/hexa-eval/delete-unused-name/repo/src/domain/titles.rs", "old_string": "\n/// The label the old terminal view printed beside a title: the title in\n/// brackets.\npub fn legacy_label(title: &str) -> String {\n    format!(\"[{}]\", tidy(title))\n}\n", "new_string": ""}}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_05", "content": "ok"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_06", "name": "Bash", "input": {"command": "cargo test 2>&1 | tail -3"}}]}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_06", "content": "test result: ok. 4 passed"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Removed titles::legacy_label: no file uses it. MemoryStore::legacy_label is a different function and stays."}]}}
+{"type": "result", "subtype": "success", "is_error": false, "num_turns": 7, "total_cost_usd": 0.15, "result": "done"}

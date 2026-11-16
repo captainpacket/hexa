@@ -12,12 +12,12 @@
   ],
   "accepted": {
     "by": "gary",
-    "sha256": "c379e37992bcb2dd1417851a5dd35c99d1b41b11410792a07beaa9cb4ea8eca0"
+    "sha256": "e7f14a811efe50fb8bc971e7d99e195b513942a726c52bd97ad14be5c3729df8"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2610271308_spec.rs": "5ab28b3d7df46b4f839c4367b6720c90362e49fa2e0ebc0d83f9975b075db7f0"
+    "hexa-cli/tests/adr_2610271308_spec.rs": "bd6c4d2d1ee2e3cd77035b0209e8821c737a9be2ab5f48110ed934b8fffb5230"
   },
-  "red": "09ffe4f",
+  "red": "cfef939",
   "specs": [
     {
       "id": "S01",
@@ -253,11 +253,11 @@
         "§6"
       ],
       "kind": "negative",
-      "description": "--yes does not skip confirmation for a destructive route",
+      "description": "--yes skips confirmation for a destructive route; without it the route asks",
       "given": "a request that routes to \"harden src/parser\" (destructive: true)",
-      "when": "`hexa hey --yes \"harden src/parser\"` is run and the confirmation prompt is refused",
-      "then": "it asks for confirmation, and when refused it does not run `hexa harden src/parser`",
-      "test": "hexa-cli/tests/adr_2610271308_spec.rs::s20_yes_does_not_skip_destructive_confirmation"
+      "when": "`hexa hey --yes \"harden src/parser\"` is run, and separately `hexa hey \"harden src/parser\"` is run and the prompt is refused",
+      "then": "with --yes it runs `hexa harden src/parser` without asking; without --yes it asks, and when refused it does not run it",
+      "test": "hexa-cli/tests/adr_2610271308_spec.rs::s20_yes_skips_destructive_confirmation"
     },
     {
       "id": "S21",
@@ -286,13 +286,22 @@
   ],
   "amendments": [
     {
+      "at": "2026-11-08T18:02:25.490444+00:00",
+      "base_commit": "7c2037939731658d84d41c64805d6dcfebd8641e",
+      "by": "gary (baseline run by Claude on gary's instruction)",
       "file": "hexa-cli/tests/adr_2610271308_spec.rs",
       "from": "d5ae065b97f4aba5b6b4bbb0256d1cc662b768ff28a4f7ce30e678e923ca4734",
-      "to": "5ab28b3d7df46b4f839c4367b6720c90362e49fa2e0ebc0d83f9975b075db7f0",
-      "by": "gary (baseline run by Claude on gary's instruction)",
       "reason": "baseline (ADR-2611081151 §1): this seal moved before every move was recorded; history and the record agree on both ends",
-      "at": "2026-11-08T18:02:25.490444+00:00",
-      "base_commit": "7c2037939731658d84d41c64805d6dcfebd8641e"
+      "to": "5ab28b3d7df46b4f839c4367b6720c90362e49fa2e0ebc0d83f9975b075db7f0"
+    },
+    {
+      "at": "2026-11-16T14:49:18.334608+00:00",
+      "base_commit": "3e32da0c6a3c427723c2bae5cae45a38aac8fc3e",
+      "by": "gary",
+      "file": "hexa-cli/tests/adr_2610271308_spec.rs",
+      "from": "5ab28b3d7df46b4f839c4367b6720c90362e49fa2e0ebc0d83f9975b075db7f0",
+      "reason": "S20 (2610271308) and S14-S16, S19 (2610281552) amended and re-accepted by gary on 2026-11-16: --yes skips confirmation; .env* is always ignored. Tests follow the amended scenarios; red at cfef939.",
+      "to": "bd6c4d2d1ee2e3cd77035b0209e8821c737a9be2ab5f48110ed934b8fffb5230"
     }
   ]
 }

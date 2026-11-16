@@ -1,0 +1,228 @@
+{
+  "schema": 1,
+  "model": "claude-haiku-5-5",
+  "hexa": "hexa 26.11.11 (1ef1ddc-dirty)",
+  "started": "2026-11-16T17:00:58.923373+00:00",
+  "rows": [
+    {
+      "scenario": "accept-adr",
+      "outcome": true,
+      "process": 1.0,
+      "bypasses": 0,
+      "refusals": 0,
+      "turns": 4,
+      "cost_usd": 0.00585585,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "accept",
+          "weight": 1.0,
+          "matched": true
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "accept-adr.jsonl",
+      "error": null
+    },
+    {
+      "scenario": "delete-dead-code",
+      "outcome": true,
+      "process": 1.0,
+      "bypasses": 0,
+      "refusals": 0,
+      "turns": 5,
+      "cost_usd": 0.0054973,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "trace",
+          "weight": 2.0,
+          "matched": true
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "delete-dead-code.jsonl",
+      "error": null
+    },
+    {
+      "scenario": "delete-unused-name",
+      "outcome": true,
+      "process": 0.0,
+      "bypasses": 0,
+      "refusals": 1,
+      "turns": 10,
+      "cost_usd": 0.00794387,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "trace",
+          "weight": 2.0,
+          "matched": false
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "delete-unused-name.jsonl",
+      "error": null
+    },
+    {
+      "scenario": "dirty-tree-trap",
+      "outcome": true,
+      "process": 1.0,
+      "bypasses": 0,
+      "refusals": 0,
+      "turns": 9,
+      "cost_usd": 0.007614550000000001,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "gate",
+          "weight": 1.0,
+          "matched": true
+        },
+        {
+          "label": "commit",
+          "weight": 1.0,
+          "matched": true
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "dirty-tree-trap.jsonl",
+      "error": null
+    },
+    {
+      "scenario": "feature-with-gate",
+      "outcome": true,
+      "process": 0.75,
+      "bypasses": 0,
+      "refusals": 1,
+      "turns": 10,
+      "cost_usd": 0.009422880000000002,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "gate",
+          "weight": 3.0,
+          "matched": true
+        },
+        {
+          "label": "commit",
+          "weight": 1.0,
+          "matched": false
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "feature-with-gate.jsonl",
+      "error": null
+    },
+    {
+      "scenario": "keep-aliased-caller",
+      "outcome": true,
+      "process": 0.0,
+      "bypasses": 0,
+      "refusals": 0,
+      "turns": 4,
+      "cost_usd": 0.00483447,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "trace",
+          "weight": 2.0,
+          "matched": false
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "keep-aliased-caller.jsonl",
+      "error": null
+    },
+    {
+      "scenario": "open-pr",
+      "outcome": true,
+      "process": 1.0,
+      "bypasses": 0,
+      "refusals": 0,
+      "turns": 5,
+      "cost_usd": 0.007084040000000001,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "open",
+          "weight": 1.0,
+          "matched": true
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "open-pr.jsonl",
+      "error": null
+    },
+    {
+      "scenario": "remember-lesson",
+      "outcome": true,
+      "process": 1.0,
+      "bypasses": 0,
+      "refusals": 0,
+      "turns": 2,
+      "cost_usd": 0.004150160000000001,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "store",
+          "weight": 1.0,
+          "matched": true
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "remember-lesson.jsonl",
+      "error": null
+    },
+    {
+      "scenario": "small-fix",
+      "outcome": true,
+      "process": 1.0,
+      "bypasses": 0,
+      "refusals": 0,
+      "turns": 9,
+      "cost_usd": 0.00889232,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "gate",
+          "weight": 1.0,
+          "matched": true
+        },
+        {
+          "label": "commit",
+          "weight": 1.0,
+          "matched": true
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "small-fix.jsonl",
+      "error": null
+    },
+    {
+      "scenario": "where-am-i",
+      "outcome": true,
+      "process": 1.0,
+      "bypasses": 0,
+      "refusals": 0,
+      "turns": 2,
+      "cost_usd": 0.0043036,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "state",
+          "weight": 2.0,
+          "matched": true
+        },
+        {
+          "label": "names-the-open-task",
+          "weight": 1.0,
+          "matched": true
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "where-am-i.jsonl",
+      "error": null
+    }
+  ]
+}

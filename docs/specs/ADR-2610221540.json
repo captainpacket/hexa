@@ -3,15 +3,15 @@
   "feature": "an ADR is compiled to a spec, the spec to sealed tests",
   "description": "ADR-2610221540 stated as behaviour: drafting from the ADR and ports alone, coverage, acceptance, red-first generation, the seal, verification and --prove, and the ledger fixes.",
   "accepted": {
-    "by": "gary",
-    "sha256": "1d6f9f0907cde2d47f204a6b9d2410480cc497ede936867e6f92f865c6f97a49"
+    "by": "gary (run by Claude on gary's instruction)",
+    "sha256": "aa65e446531e4d281c229550a9525ad949c25573451885c88449b81ccd957a89"
   },
   "sealed": {
-    "hexa-cli/tests/a_decision_is_covered_by_a_sealed_spec.rs": "a7fba881dae080aa13c7b310badbf902da257aba61c5434b54bde9b8410c5402",
-    "hexa-cli/tests/a_test_was_red_before_the_code.rs": "4b9dd29c253acb78dc900d867db1feaf8f840b3e591ea0a4f849731423d2ae5d",
+    "hexa-cli/tests/a_decision_is_covered_by_a_sealed_spec.rs": "7f3a3fc6ca9b71c6b56546b7eba93c237de311fd09fec8c5eceb0d2cc92fdb73",
+    "hexa-cli/tests/a_test_was_red_before_the_code.rs": "42404a767913c7d93df615c683fb9e4116b81addf5d4ace0a73f31f60e0996df",
     "hexa-cli/tests/the_ledger_reads_every_gate_and_no_skip_passes.rs": "c154b64a58eb4430c1026c5adfd531aa8ff1c1d9704c159c091b991c57d550c1",
     "hexa-exec/tests/a_sealed_test_is_never_committed.rs": "27662fab3ef786aacfac9ba0e68edb55a31c976ffad56056d21ef681b5a9232e",
-    "hexa-exec/tests/a_spec_is_drafted_and_its_tests_generated_red.rs": "22d2501712bfb67720fa52bc2806f6a88f53574be033e3182e2836e8b7736548",
+    "hexa-exec/tests/a_spec_is_drafted_and_its_tests_generated_red.rs": "56774d31f5b4ff1414133f6baddb589bae2d78e5ad344fb42df0620bfe67b59e",
     "hexa-exec/tests/adr_2610221540_spec_3.rs": "ddf32a1b7922de1066e06512da69034bcf847625bc45cf6a675b8be3e1bf2b0f"
   },
   "specs": [
@@ -239,9 +239,9 @@
       "description": "A generated test that passes before any implementation is rejected",
       "given": "a generated test that asserts nothing about the port",
       "when": "`hexa spec tests` runs it against the unimplemented port",
-      "then": "the test is rejected as testing nothing",
-      "test": "hexa-exec/tests/a_spec_is_drafted_and_its_tests_generated_red.rs::a_generation_with_a_test_green_before_the_code_is_rejected",
-      "red": "8c3d0cf"
+      "then": "the test is rejected as testing nothing, and the tests that fail are kept",
+      "test": "hexa-exec/tests/a_spec_is_drafted_and_its_tests_generated_red.rs::a_test_green_before_the_code_is_rejected_and_the_red_ones_kept",
+      "red": "a290dc0"
     },
     {
       "id": "S15b",
@@ -532,13 +532,13 @@
       "to": "5a861c13851defd0dd2e3bdc7d99e5d6f26bf7a2688a85e66ccc2f281f723685"
     },
     {
+      "at": "2026-11-08T18:02:25.490444+00:00",
+      "base_commit": "7c2037939731658d84d41c64805d6dcfebd8641e",
+      "by": "gary (baseline run by Claude on gary's instruction)",
       "file": "hexa-exec/tests/a_spec_is_drafted_and_its_tests_generated_red.rs",
       "from": "76ddf46cb96073e62b32b87d770a9175cde3c30139fcc08bc329c090de29cb8f",
-      "to": "d2182fb14f5fdfe79cd27ead3f597964590c1fd6335f170c65f3ee2ff70e2824",
-      "by": "gary (baseline run by Claude on gary's instruction)",
       "reason": "baseline (ADR-2611081151 §1): this seal moved before every move was recorded; history and the record agree on both ends",
-      "at": "2026-11-08T18:02:25.490444+00:00",
-      "base_commit": "7c2037939731658d84d41c64805d6dcfebd8641e"
+      "to": "d2182fb14f5fdfe79cd27ead3f597964590c1fd6335f170c65f3ee2ff70e2824"
     },
     {
       "at": "2026-11-08T14:35:36.958417365+00:00",
@@ -568,13 +568,13 @@
       "to": "27662fab3ef786aacfac9ba0e68edb55a31c976ffad56056d21ef681b5a9232e"
     },
     {
+      "at": "2026-11-08T18:02:25.490444+00:00",
+      "base_commit": "7c2037939731658d84d41c64805d6dcfebd8641e",
+      "by": "gary (baseline run by Claude on gary's instruction)",
       "file": "hexa-cli/tests/the_ledger_reads_every_gate_and_no_skip_passes.rs",
       "from": "d2a78d3e0d614cf43e5611b97bd87c7355a23b47ce91d3fff5842211524bebbd",
-      "to": "415540a622855638be957774d035087bcee6ae85a7b1f7c5e3c1aebec6f6213c",
-      "by": "gary (baseline run by Claude on gary's instruction)",
       "reason": "baseline (ADR-2611081151 §1): this seal moved before every move was recorded; history and the record agree on both ends",
-      "at": "2026-11-08T18:02:25.490444+00:00",
-      "base_commit": "7c2037939731658d84d41c64805d6dcfebd8641e"
+      "to": "415540a622855638be957774d035087bcee6ae85a7b1f7c5e3c1aebec6f6213c"
     },
     {
       "at": "2026-11-08T17:57:11.743735050+00:00",
@@ -586,13 +586,13 @@
       "to": "c154b64a58eb4430c1026c5adfd531aa8ff1c1d9704c159c091b991c57d550c1"
     },
     {
+      "at": "2026-11-08T18:02:25.490444+00:00",
+      "base_commit": "7c2037939731658d84d41c64805d6dcfebd8641e",
+      "by": "gary (baseline run by Claude on gary's instruction)",
       "file": "hexa-cli/tests/a_decision_is_covered_by_a_sealed_spec.rs",
       "from": "4549b5c9a5b791355fa39359da2ad2efb143950f75d88e1870db2e909d1a2083",
-      "to": "3adf53bd834631dc8bfc2f56b7b566db26826bdffaed93505cc36145ebefbaae",
-      "by": "gary (baseline run by Claude on gary's instruction)",
       "reason": "baseline (ADR-2611081151 §1): this seal moved before every move was recorded; history and the record agree on both ends",
-      "at": "2026-11-08T18:02:25.490444+00:00",
-      "base_commit": "7c2037939731658d84d41c64805d6dcfebd8641e"
+      "to": "3adf53bd834631dc8bfc2f56b7b566db26826bdffaed93505cc36145ebefbaae"
     },
     {
       "at": "2026-11-08T17:58:17.613979649+00:00",
@@ -602,6 +602,33 @@
       "from": "3adf53bd834631dc8bfc2f56b7b566db26826bdffaed93505cc36145ebefbaae",
       "reason": "ADR-2611081151 §2: a seal is anchored in history, so the fixture is now a git repository with its test file committed (identity given per command); what each test checks is unchanged",
       "to": "a7fba881dae080aa13c7b310badbf902da257aba61c5434b54bde9b8410c5402"
+    },
+    {
+      "at": "2026-11-16T15:32:50.834984+00:00",
+      "base_commit": "318bebe567165cbc97cabd80688f6a736a8b5d3a",
+      "by": "gary (run by Claude on gary's instruction)",
+      "file": "hexa-exec/tests/a_spec_is_drafted_and_its_tests_generated_red.rs",
+      "from": "22d2501712bfb67720fa52bc2806f6a88f53574be033e3182e2836e8b7736548",
+      "reason": "S15 amended (ADR-2611161600 §3): a test green before the code is rejected and the tests that fail are kept",
+      "to": "56774d31f5b4ff1414133f6baddb589bae2d78e5ad344fb42df0620bfe67b59e"
+    },
+    {
+      "at": "2026-11-16T15:32:51.328415+00:00",
+      "base_commit": "63d18c1eb90d222027814b2cf0e7a55333873f56",
+      "by": "gary (run by Claude on gary's instruction)",
+      "file": "hexa-cli/tests/a_decision_is_covered_by_a_sealed_spec.rs",
+      "from": "a7fba881dae080aa13c7b310badbf902da257aba61c5434b54bde9b8410c5402",
+      "reason": "fixture: the spec is committed before it is accepted (ADR-2611161600 §1, §4)",
+      "to": "7f3a3fc6ca9b71c6b56546b7eba93c237de311fd09fec8c5eceb0d2cc92fdb73"
+    },
+    {
+      "at": "2026-11-16T15:32:51.717209+00:00",
+      "base_commit": "613b99799b8e1f3673648514f5854ea123b5b24c",
+      "by": "gary (run by Claude on gary's instruction)",
+      "file": "hexa-cli/tests/a_test_was_red_before_the_code.rs",
+      "from": "4b9dd29c253acb78dc900d867db1feaf8f840b3e591ea0a4f849731423d2ae5d",
+      "reason": "fixture: the spec is committed before it is accepted (ADR-2611161600 §1, §4)",
+      "to": "42404a767913c7d93df615c683fb9e4116b81addf5d4ace0a73f31f60e0996df"
     }
   ]
 }

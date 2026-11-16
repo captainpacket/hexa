@@ -51,7 +51,7 @@ The decision below keeps ADR-2609121400's rule, "a spec that cannot be run does 
 5. **Scenarios compile to tests that must fail first.** `hexa spec tests <ADR>` generates one test per scenario, with the scenario id in the test's doc comment.
    - The generator sees the accepted spec and the port signatures, and not the implementation.
    - Property scenarios become property tests, which are the independent oracle CLAUDE.md asks for.
-   - The tests are run before any implementation. Each must compile and fail. A test that passes against an unimplemented port tests nothing, and it is rejected.
+   - The tests are run before any implementation. Each must compile and fail. A test that passes against an unimplemented port tests nothing, and it is rejected. The tests that do fail are kept, and the rejected test's scenario stays pending as a guard of behaviour already in place (amended 2026-11-16 by gary, ADR-2611161600 §3: refusing the whole generation threw away the tests that fail first). A generation where every test passes is still refused.
    - The commit that holds them is recorded in the spec as `red`.
 
 6. **The tests are sealed.** The spec records a SHA-256 for each generated test file. In `hexa build --spec <ADR>` and `hexa do run --spec <ADR>`, a sealed file is outside the write set of the guarded tool library, and an edit to it fails the run. The gate of a spec-driven build is the sealed tests plus the architecture grade. The code agent can only make the tests pass. It cannot change what passing means.

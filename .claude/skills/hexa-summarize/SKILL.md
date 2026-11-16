@@ -7,12 +7,12 @@ description: Give an agent a file's context without reading the whole tree — w
 
 hexa has no summarize verb, and hexa is not an npm package, so never put npx
 in front of it. The context this skill used to promise comes from the code graph,
-which hexa builds from the source and saves in `graph-out/graph.json`.
+which hexa builds from the source and saves in `.hexa/graph/graph.json`.
 
 ## 1. Build the graph
 
 ```bash
-hexa graph build              # (re)build graph-out/graph.json for this project
+hexa graph build              # (re)build .hexa/graph/graph.json for this project
 ```
 
 Every graph verb reads the saved file, so run this first, and again after the

@@ -306,6 +306,9 @@ fn spec_env(tag: &str) -> Env {
     env.reply_default(&envelope(scenarios, 10, 10, 0, "0.001"));
     let out = env.hexa(&["spec", "draft", ADR_ID, "--model", "claude-text"], &[("HEXA_NO_CACHE", "1")]);
     ok(&out, "hexa spec draft");
+    // An acceptance binds committed text (ADR-2611161600 §1): the draft is
+    // committed before it is accepted.
+    env.commit();
     let out = env.hexa(&["spec", "accept", ADR_ID], &[]);
     ok(&out, "hexa spec accept");
     env.commit();

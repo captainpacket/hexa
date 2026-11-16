@@ -338,6 +338,37 @@ fn is_python(p: &str) -> bool {
     p.starts_with("python") || p.starts_with("pypy")
 }
 
+/// Each simple command in a command line, as the directory it runs in
+/// (following `cd`/`pushd` within the line, as [`write_targets`] does) and
+/// its words with leading assignments and wrappers like `env` removed.
+/// Heredoc bodies and redirections are left out. For classifiers of other
+/// command shapes, such as `git commit` (ADR-2611160910 finding 1).
+pub fn command_words(command: &str, cwd: &Path) -> Vec<(PathBuf, Vec<String>)> {
+    let mut cwd = cwd.to_path_buf();
+    let mut out = Vec::new();
+    for simple in simple_commands(command) {
+        let words = strip_wrappers(&simple.words).to_vec();
+        let prog = words.first().map(|w| program(w).to_string()).unwrap_or_default();
+        if prog == "cd" || prog == "pushd" {
+            if let Some(d) = words[1..].iter().find(|a| !a.starts_with('-')) {
+                if let Some(p) = resolve(&cwd, d) {
+                    cwd = p;
+                }
+            }
+        }
+        if !words.is_empty() {
+            out.push((cwd.clone(), words));
+        }
+    }
+    out
+}
+
+/// A path word resolved against `cwd`, lexically; `None` for a word with
+/// `$`, a backquote or a glob, which only a shell can expand.
+pub fn resolve_word(cwd: &Path, word: &str) -> Option<PathBuf> {
+    resolve(cwd, word)
+}
+
 /// The paths a whole command line would write, as candidates.
 /// `read_script` reads a script file named on the command line (at most
 /// [`SCRIPT_READ_CAP`] bytes); tests pass a fake.

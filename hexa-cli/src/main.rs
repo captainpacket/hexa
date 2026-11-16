@@ -67,18 +67,25 @@ enum DevGroupAction {
         /// Project root path
         #[arg(default_value = ".")]
         path: String,
+        /// Exit 1 on any rule finding from .hexa/ADR-rules.toml, warnings included
         #[arg(long)]
         strict: bool,
+        /// Check only the rules in .hexa/ADR-rules.toml; skip the boundary analysis and the grade
         #[arg(long)]
         adr_compliance: bool,
+        /// Print the report as JSON. An ungraded tree has "graded": false and "grade": null
         #[arg(long)]
         json: bool,
+        /// Check the imports of one file instead of the whole tree; exits 1 on a violation
         #[arg(long, value_name = "PATH")]
         file: Option<String>,
+        /// Leave out the layer inventory and the health detectors (with --file, print nothing when clean)
         #[arg(long)]
         quiet: bool,
+        /// Print only the violation lines, no report
         #[arg(long)]
         violations_only: bool,
+        /// Exit 1 on any boundary violation or rule error, or when the tree could not be graded
         #[arg(long)]
         exit_code: bool,
         /// Exit 1 when the architecture grade is below this letter (A+, A, B, C, D, F)
@@ -188,7 +195,7 @@ enum Commands {
     Bootstrap(BootstrapArgs),
     /// Refresh hexa-managed sections of CLAUDE.md in place (no interview, no reset)
     Refresh(RefreshArgs),
-    /// Do the next right thing — check project health and suggest/execute actions
+    /// The next step for this repo, read from the loop (the `Next:` line of `hexa status`). Read-only
     Go,
     /// Knowledge graph — build/query/path/explain a project's code+docs graph
     Graph {
@@ -261,6 +268,11 @@ enum Commands {
     },
     /// What inference has cost: tokens and dollars, by source and model
     Spend(commands::spend_cmd::SpendArgs),
+    /// How well a model uses hexa: run scenarios through `claude -p` and score the transcripts (real runs cost money)
+    Eval {
+        #[command(subcommand)]
+        action: commands::eval::EvalAction,
+    },
     /// Architecture Decision Records: list, search, accept, and check every citation and gate
     Adr {
         #[command(subcommand)]
@@ -316,7 +328,7 @@ ADRs are history and are not checked.")]
         #[command(subcommand)]
         action: commands::assets_cmd::AssetsAction,
     },
-    /// Where the work stands: git, the loop, runs and subagents in progress, last outcomes. JSON when piped
+    /// Where am I: the loop, what is in flight in this repo (--all: every project), and the next step. JSON when piped
     Status(commands::status::StatusArgs),
     /// The task ledger: register a task and the paths it may edit, report it done, list and release (JSON when piped)
     Agent {
@@ -367,18 +379,25 @@ ADRs are history and are not checked.")]
     Analyze {
         #[arg(default_value = ".")]
         path: String,
+        /// Exit 1 on any rule finding from .hexa/ADR-rules.toml, warnings included
         #[arg(long)]
         strict: bool,
+        /// Check only the rules in .hexa/ADR-rules.toml; skip the boundary analysis and the grade
         #[arg(long)]
         adr_compliance: bool,
+        /// Print the report as JSON. An ungraded tree has "graded": false and "grade": null
         #[arg(long)]
         json: bool,
+        /// Check the imports of one file instead of the whole tree; exits 1 on a violation
         #[arg(long, value_name = "PATH")]
         file: Option<String>,
+        /// Leave out the layer inventory and the health detectors (with --file, print nothing when clean)
         #[arg(long)]
         quiet: bool,
+        /// Print only the violation lines, no report
         #[arg(long)]
         violations_only: bool,
+        /// Exit 1 on any boundary violation or rule error, or when the tree could not be graded
         #[arg(long)]
         exit_code: bool,
         /// Exit 1 when the architecture grade is below this letter (A+, A, B, C, D, F)
@@ -525,6 +544,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Pr { action } => commands::pr::run(action).await,
         Commands::Loop { action } => commands::loop_cmd::run(action).await,
         Commands::Spend(args) => commands::spend_cmd::run(args).await,
+        Commands::Eval { action } => commands::eval::run(action).await,
         Commands::Adr { action } => commands::adr::run(action).await,
         Commands::Gate { action } => match action {
             GateAction::Coverage { target, gate, composition_root, uncounted } => {
@@ -587,7 +607,7 @@ fn print_getting_started() {
     println!();
     println!("{}", "  Getting started".bold());
     println!();
-    println!("    {}              Do the next right thing (autonomous)", "hexa go".cyan());
+    println!("    {}          Where the work stands, and the next step", "hexa status".cyan());
     println!("    {}           Structured brief of recent activity", "hexa brief".cyan());
     println!("    {}      Workplan lifecycle (create, execute, status)", "hexa plan list".cyan());
     println!("    {}          Configure trust, taste, inference", "hexa config".cyan());

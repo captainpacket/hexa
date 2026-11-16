@@ -7,13 +7,13 @@
     "§3"
   ],
   "accepted": {
-    "by": "gary (run by Claude on gary's instruction)",
-    "sha256": "296b4e63dcd9d42acfad5f89ed2b638be7852cb094c5f38c37a5ba0fdbd9a55b"
+    "by": "gary",
+    "sha256": "c4494d4da713af4c7584cd95f00324d883d99323f900b659190407d43493cc4d"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2610281552_spec.rs": "ef9ee7a1fcb09c5cb6e1e716e667eea53b7eedb997745266630e89b6569fb562"
+    "hexa-cli/tests/adr_2610281552_spec.rs": "edf4eed0b5ebd10ec147fb485cb8b0ad49dc6d2c7aa05cb79738b9d66b365d47"
   },
-  "red": "94f83fb",
+  "red": "cfef939",
   "specs": [
     {
       "id": "S01",
@@ -180,7 +180,7 @@
       "description": "Rust ignores target/ and the session state.",
       "given": "lang = `rust`",
       "when": "`gitignore_lines(\"rust\")` is called",
-      "then": "the result holds exactly `target/`, `.hexa/loop.json` and `.hexa/loop.lock`",
+      "then": "the result holds exactly `target/`, `.hexa/loop.json`, `.hexa/loop.lock`, `.env*` and `!.env.example`",
       "test": "hexa-cli/tests/adr_2610281552_spec.rs::s14_rust_gitignore_lines"
     },
     {
@@ -192,7 +192,7 @@
       "description": "TS ignores node_modules/, dist/ and the session state.",
       "given": "lang = `ts`",
       "when": "`gitignore_lines(\"ts\")` is called",
-      "then": "the result holds exactly `node_modules/`, `dist/`, `.hexa/loop.json` and `.hexa/loop.lock`",
+      "then": "the result holds exactly `node_modules/`, `dist/`, `.hexa/loop.json`, `.hexa/loop.lock`, `.env*` and `!.env.example`",
       "test": "hexa-cli/tests/adr_2610281552_spec.rs::s15_ts_gitignore_lines"
     },
     {
@@ -204,7 +204,7 @@
       "description": "Go adds no build-output lines, only the session state.",
       "given": "lang = `go`",
       "when": "`gitignore_lines(\"go\")` is called",
-      "then": "the result holds exactly `.hexa/loop.json` and `.hexa/loop.lock`, and holds neither `target/` nor `node_modules/` nor `dist/`",
+      "then": "the result holds exactly `.hexa/loop.json`, `.hexa/loop.lock`, `.env*` and `!.env.example`, and holds neither `target/` nor `node_modules/` nor `dist/`",
       "test": "hexa-cli/tests/adr_2610281552_spec.rs::s16_go_gitignore_lines"
     },
     {
@@ -238,7 +238,7 @@
       ],
       "kind": "negative",
       "description": "Nothing is written when nothing is missing.",
-      "given": "existing = Some(\"target/\\n.hexa/loop.json\\n.hexa/loop.lock\\n\") and lang = `rust`",
+      "given": "existing = Some(\"target/\\n.hexa/loop.json\\n.hexa/loop.lock\\n.env*\\n!.env.example\\n\") and lang = `rust`",
       "when": "`merged_gitignore(existing, \"rust\")` is called",
       "then": "it returns None",
       "test": "hexa-cli/tests/adr_2610281552_spec.rs::s19_nothing_written_when_nothing_missing"
@@ -326,6 +326,17 @@
       "when": "`merged_gitignore(E, lang)` is called",
       "then": "it returns None exactly when E is Some and every line of `gitignore_lines(lang)` is already a whole line of E",
       "test": "hexa-cli/tests/adr_2610281552_spec.rs::s26_none_means_nothing_missing"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-16T14:49:18.447386+00:00",
+      "base_commit": "a2698873f758bd4a9af5a9b1260f7431cb0600a8",
+      "by": "gary",
+      "file": "hexa-cli/tests/adr_2610281552_spec.rs",
+      "from": "ef9ee7a1fcb09c5cb6e1e716e667eea53b7eedb997745266630e89b6569fb562",
+      "reason": "S20 (2610271308) and S14-S16, S19 (2610281552) amended and re-accepted by gary on 2026-11-16: --yes skips confirmation; .env* is always ignored. Tests follow the amended scenarios; red at cfef939.",
+      "to": "edf4eed0b5ebd10ec147fb485cb8b0ad49dc6d2c7aa05cb79738b9d66b365d47"
     }
   ]
 }

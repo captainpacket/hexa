@@ -329,6 +329,9 @@ fn merge_order_lists_done_tasks_by_finish_time_names_overlap_and_merge_refuses_a
                 lease,
                 "--worktree",
                 w.to_str().unwrap(),
+                // `passed` is earned: the gate runs when the task reports.
+                "--gate",
+                "echo 'test result: ok. 1 passed; 0 failed; 0 ignored'",
                 "--json",
             ],
             None,
@@ -336,6 +339,13 @@ fn merge_order_lists_done_tasks_by_finish_time_names_overlap_and_merge_refuses_a
         );
         json(&o)["id"].as_str().unwrap().to_string()
     };
+    // A commit that exists: `report --outcome passed` resolves it.
+    let head = String::from_utf8(
+        Command::new("git").args(["rev-parse", "--short", "HEAD"]).current_dir(&repo).output().unwrap().stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
     let one = id("one", "src/a/", &w1);
     let two = id("two", "src/b/", &w2);
     // Task two is still claimed: merging its worktree is refused, naming it.
@@ -361,7 +371,7 @@ fn merge_order_lists_done_tasks_by_finish_time_names_overlap_and_merge_refuses_a
             "--outcome",
             "passed",
             "--commit",
-            "abcd123",
+            &head,
         ],
         None,
         &[],
@@ -378,7 +388,7 @@ fn merge_order_lists_done_tasks_by_finish_time_names_overlap_and_merge_refuses_a
             "--outcome",
             "passed",
             "--commit",
-            "abcd124",
+            &head,
         ],
         None,
         &[],
@@ -433,7 +443,7 @@ fn merge_order_lists_done_tasks_by_finish_time_names_overlap_and_merge_refuses_a
             "--outcome",
             "passed",
             "--commit",
-            "abcd125",
+            &head,
         ],
         None,
         &[],

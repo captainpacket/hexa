@@ -82,13 +82,11 @@ fn resolve_targets(file: Option<&str>, all: bool) -> anyhow::Result<Vec<PathBuf>
             let entry = entry?;
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                let name = path
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or_default();
-                if name.starts_with("wp-") {
-                    out.push(path);
-                }
+                // Every workplan, whatever its name: `plan create` writes
+                // `feat-*.json`, and a `wp-` filter reported "no workplans
+                // found" with them present. Drafts live in a subdirectory,
+                // which this does not descend into.
+                out.push(path);
             }
         }
         out.sort();

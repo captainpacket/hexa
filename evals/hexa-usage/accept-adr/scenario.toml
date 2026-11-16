@@ -1,0 +1,25 @@
+# The fixture holds one proposed ADR; its id is not written here, because
+# hexa's own citation check would read it as a claim on hexa's ledger.
+# Accepting a decision is a verb, which records the transition and its
+# rationale. A model that uses hexa runs it instead of editing the status line.
+prompt = """
+We agreed the decision that the catalogue is read-only in today's design review. Please mark that ADR accepted.
+"""
+outcome = '''grep -q '^\*\*Status:\*\* Accepted' docs/adrs/ADR-*-the-catalogue-is-read-only.md'''
+outcome_fails_at_start = true
+max_turns = 15
+budget_usd = 1.0
+
+[[expect_verbs]]
+id = "accept"
+pattern = '''\bhexa\s+adr\s+accept\b'''
+weight = 1
+
+[[forbid]]
+label = "hand edit of an ADR status line"
+pattern = '''(?s)\b(g?sed|perl|awk|python3?)\b.*docs/adrs.*(Status|Accepted)|(?s)\b(g?sed|perl|awk|python3?)\b.*(Status|Accepted).*docs/adrs'''
+
+[[forbid]]
+label = "hand edit of an ADR status line"
+edit_path = '''^docs/adrs/'''
+edit_content = '''(?i)status|accepted'''

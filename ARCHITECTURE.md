@@ -45,7 +45,7 @@ assembled for one loop, not the number of loops.
   `cargo_check`, `typescript_check`, `dep_audit`, `secret_scan`) plus the terminal
   `propose_edit`, which the loop handles itself. No arbitrary shell. Tools reject path
   traversal, block critical paths, and cap output.
-- **Code-graph context.** `gather_context` reads `graph-out/graph.json` and calls
+- **Code-graph context.** `gather_context` reads `.hexa/graph/graph.json` and calls
   `hexa_graph::context::context_for(file)` and `rank_lessons`.
 - **The gate is the sole authority on what commits.** A pass that exercised nothing
   is rejected as vacuous. A failed edit reverts atomically, so the next attempt
@@ -132,7 +132,7 @@ Seven crates, one binary. The dependency direction is the architecture:
 | **hexa-infer** | Every inference adapter (`adapters/secondary/`), behind its ports: `Backends`, `Discovery`, `EndpointRegistry`, and `LocalProvider`, the local runtime's identity. `complete.rs` is the use case; `wiring.rs` picks the adapter that serves a model. **No file outside this crate names a provider or a model.** |
 | **hexa-exec** | The agent loop, per-run worktree isolation, the adversarial harness, transcript compression, the guarded tool library, the file-backed local store — the loop and harness as use cases, everything they touch behind `Tool`, `Worktrees`, `GitHistory`, `Frontier`, `RunLog`, `MemoryStore` and `Provenance`; the tools reach the store and the operator through `ToolLedger` and `OperatorNotifier`, and the frontier records spend through `SpendLog`. `do_task.rs` picks the loop for a task. |
 | **hexa-analysis** | Tree-sitter boundary checking (the parser behind `AstPort`), the one layer classifier and the project's layer map, cross-package import resolution, dead-export and cycle detection, the coverage ceiling, the layer inventory, rule conformance, the architecture fingerprint, six health detectors. Powers `hexa analyze`. |
-| **hexa-graph** | The code knowledge graph: `context_for`, `rank_lessons`, community detection. Builds and reads `graph-out/graph.json`. Its ports hold the extraction contract. |
+| **hexa-graph** | The code knowledge graph: `context_for`, `rank_lessons`, community detection. Builds and reads `.hexa/graph/graph.json`. Its ports hold the extraction contract. |
 | **hexa-git** | Git plumbing over libgit2. |
 | **hexa-cli** | The binary. Every verb is a primary adapter; it composes the crates. |
 
@@ -183,7 +183,7 @@ All of it is files on disk.
 | Agent and subagent run feed | `~/.hexa/agent-runs.jsonl` (`hexa do runs`) |
 | Token and dollar spend, per call | `~/.hexa/inference-log.jsonl` (`hexa spend`; budget in `.hexa/project.json`) |
 | Registered inference backends | `~/.hexa/inference-servers.json` (`hexa config inference`) |
-| Code knowledge graph | `graph-out/graph.json` (`hexa graph build`) |
+| Code knowledge graph | `.hexa/graph/graph.json` (`hexa graph build`) |
 | ADRs, workplans | `docs/` |
 | A decision's accepted scenarios, test refs, `red` commit and seal | `docs/specs/<ADR>.json` (`hexa spec`) |
 | The newest release, asked at most once a day | `~/.hexa/release-check.json` |

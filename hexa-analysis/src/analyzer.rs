@@ -168,6 +168,22 @@ pub async fn file_violations(
     rel_path: &str,
     ast: &dyn AstPort,
 ) -> Result<Vec<DependencyViolation>, AnalysisError> {
+    if Language::from_path(rel_path) == Language::Unknown {
+        return Ok(Vec::new());
+    }
+    let source = tokio::fs::read_to_string(root.join(rel_path)).await?;
+    source_violations(root, rel_path, &source, ast).await
+}
+
+/// The boundary violations `source` would have as the file at `rel_path`,
+/// by the same rules as [`file_violations`]. For the pre-edit hook, which
+/// judges an edit's result before it is written.
+pub async fn source_violations(
+    root: &Path,
+    rel_path: &str,
+    source: &str,
+    ast: &dyn AstPort,
+) -> Result<Vec<DependencyViolation>, AnalysisError> {
     let lang = Language::from_path(rel_path);
     if lang == Language::Unknown {
         return Ok(Vec::new());
@@ -175,9 +191,8 @@ pub async fn file_violations(
     let layers = LayerMap::from_project(root).map_err(AnalysisError::Other)?;
     let packages = discover_packages(root);
     let go_mod = detect_go_module_prefix(root).await;
-    let source = tokio::fs::read_to_string(root.join(rel_path)).await?;
-    let imports = ast.extract_imports(Path::new(rel_path), &source, lang)?;
-    let paths = ast.module_paths(Path::new(rel_path), &source, lang)?;
+    let imports = ast.extract_imports(Path::new(rel_path), source, lang)?;
+    let paths = ast.module_paths(Path::new(rel_path), source, lang)?;
     let mut edges = edges_of(rel_path, &imports, &packages, &layers, go_mod.as_deref());
     edges.extend(edges_of(rel_path, &paths, &packages, &layers, go_mod.as_deref()));
     let (adapters, _) = adapters_from_project(root, &layers);

@@ -9,12 +9,14 @@ pub struct HeyArgs {
     /// Natural-language description of what you want hexa to do
     #[arg(required = true, num_args = 1..)]
     pub text: Vec<String>,
-    /// Ignored. There is no queue: `hexa hey` acts now. Hidden from `--help`
-    /// and kept only so an old script that passes it still parses
+    /// Refused. There is no queue: `hexa hey` acts now. Kept, hidden, only so
+    /// a script that passes it is told why instead of "unexpected argument"
     /// (ADR-2611160730 §7).
     #[arg(long, hide = true)]
     pub queue: bool,
-    /// Skip confirmation prompts
+    /// Say yes in advance: a route that changes the tree, git or the install
+    /// runs without asking (ADR-2610271308 §6, amended 2026-11-16). A request
+    /// that matches no rule still runs nothing.
     #[arg(long, short)]
     pub yes: bool,
 }
@@ -242,8 +244,7 @@ fn classify_intent(text: &str) -> TaskIntent {
         let provider = text
             .split_whitespace()
             .find(|w| {
-                w.starts_with("bazzite-")
-                    || configured.iter().any(|m| m.starts_with(*w) || w.starts_with(m.as_str()))
+                configured.iter().any(|m| m.starts_with(*w) || w.starts_with(m.as_str()))
             })
             .unwrap_or("");
         if !provider.is_empty() {
@@ -268,7 +269,18 @@ fn classify_intent(text: &str) -> TaskIntent {
     TaskIntent::Unknown(text.to_string())
 }
 
+/// What `hexa hey` says when it routes nothing, and the exit code: a script
+/// must be able to tell "did not understand" from "done".
+const NO_ROUTE: &str = "`hexa status` says where the work stands and the next step; `hexa --help` lists every verb.";
+
+fn refuse() -> ! {
+    std::process::exit(1)
+}
+
 pub async fn run(args: HeyArgs) -> anyhow::Result<()> {
+    if args.queue {
+        anyhow::bail!("there is no queue: `hexa hey` acts now, in this process. Drop --queue.");
+    }
     let text = args.text.join(" ");
     println!("⬡ {}: {}", "hey hexa".bold().cyan(), text.dimmed());
 
@@ -293,7 +305,7 @@ pub async fn run(args: HeyArgs) -> anyhow::Result<()> {
         TaskIntent::Rejected { command, reason } => {
             println!("  {} rejected: {}", "✗".red(), command.bold());
             println!("    {}", reason);
-            return Ok(());
+            refuse();
         }
         TaskIntent::Unknown(t) => {
             // Remote SSH intent: marker __SSH__<host>__<action>
@@ -307,17 +319,17 @@ pub async fn run(args: HeyArgs) -> anyhow::Result<()> {
                         }
                         Err(e) => {
                             println!("  {} LLM translation failed: {}", "✗".red(), e);
-                            return Ok(());
+                            refuse();
                         }
                     }
                 } else {
-                    return Ok(());
+                    refuse();
                 }
             } else {
                 // No rule matched. Say so; never run a nearest guess (ADR-2610271308 §5).
                 println!("  {} no hexa verb matches that request.", "✗".red());
-                println!("    `hexa --help` lists every verb; `hexa go` suggests the next one.");
-                return Ok(());
+                println!("    {NO_ROUTE}");
+                refuse();
             }
         }
     };
@@ -325,9 +337,11 @@ pub async fn run(args: HeyArgs) -> anyhow::Result<()> {
     println!("  {} {}", "→".green(), description);
     println!("    {}: {}", kind.dimmed(), payload.dimmed());
 
-    // A route that changes the tree, git or the install is confirmed even with
-    // `--yes` (ADR-2610271308 §6).
-    if destructive {
+    // A route that changes the tree, git or the install asks first, unless the
+    // person said yes in advance with `--yes` (ADR-2610271308 §6, amended).
+    if destructive && args.yes {
+        println!("  {}", "--yes: running without asking".dimmed());
+    } else if destructive {
         use std::io::Write;
         print!("  {} Proceed? [y/N]: ", "!".yellow().bold());
         std::io::stdout().flush()?;
@@ -348,6 +362,7 @@ pub async fn run(args: HeyArgs) -> anyhow::Result<()> {
         }
     } else {
         println!("  {} failed: {}", "✗".red(), result);
+        refuse();
     }
 
     Ok(())
@@ -454,8 +469,8 @@ mod remote_tests {
 
     #[test]
     fn remote_detect_on_host_basic() {
-        let got = detect_on_host_suffix("nvidia-smi on bazzite");
-        assert_eq!(got, Some(("nvidia-smi".into(), "bazzite".into())));
+        let got = detect_on_host_suffix("nvidia-smi on gpu-box");
+        assert_eq!(got, Some(("nvidia-smi".into(), "gpu-box".into())));
     }
 
     #[test]
@@ -467,7 +482,7 @@ mod remote_tests {
     #[test]
     fn remote_detect_on_host_rejects_no_suffix() {
         assert_eq!(detect_on_host_suffix("run tests"), None);
-        assert_eq!(detect_on_host_suffix("on bazzite"), None); // no command
+        assert_eq!(detect_on_host_suffix("on gpu-box"), None); // no command
         assert_eq!(detect_on_host_suffix(""), None);
     }
 
@@ -556,7 +571,7 @@ mod remote_tests {
 
     #[test]
     fn classify_rejects_non_whitelisted_remote_command() {
-        let intent = classify_intent("rm -rf / on bazzite");
+        let intent = classify_intent("rm -rf / on gpu-box");
         match intent {
             TaskIntent::Rejected { command, reason } => {
                 assert_eq!(command, "rm -rf /");
@@ -586,12 +601,12 @@ mod remote_tests {
         // and the trusted_hosts list includes the target. Done by constructing
         // the variant directly rather than touching the FS.
         let intent = TaskIntent::RemoteShell {
-            host: "bazzite".into(),
+            host: "gpu-box".into(),
             command: "nvidia-smi".into(),
-            description: "Run `nvidia-smi` on bazzite".into(),
+            description: "Run `nvidia-smi` on gpu-box".into(),
         };
         if let TaskIntent::RemoteShell { host, command, .. } = intent {
-            assert_eq!(host, "bazzite");
+            assert_eq!(host, "gpu-box");
             assert_eq!(command, "nvidia-smi");
         } else {
             panic!("expected RemoteShell variant");

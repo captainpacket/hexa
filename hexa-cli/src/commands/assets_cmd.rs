@@ -233,11 +233,23 @@ async fn sync(path: &str, dry_run: bool, force: bool, prune: bool) -> Result<()>
     }
 
     // ── 1b. Remove what hexa no longer ships ──────────────────────
-    let removed = if prune {
+    let mut removed = if prune {
         prune_unshipped(&target, &shipped, dry_run)?
     } else {
         Vec::new()
     };
+    // The five skills that shipped as flat files Claude Code never loaded
+    // are replaced by `<name>/SKILL.md`; their old copies go even without
+    // --prune (exactly those five names).
+    if !dry_run {
+        let skills_dir = target.join(".claude/skills");
+        for f in crate::commands::skill::remove_legacy_flat_skills(&skills_dir)? {
+            let rel = format!(".claude/skills/{f}");
+            if !removed.contains(&rel) {
+                removed.push(rel);
+            }
+        }
+    }
 
     // ── 2. Merge settings.json ────────────────────────────────────
     let settings_changes = sync_settings(&target, dry_run)?;

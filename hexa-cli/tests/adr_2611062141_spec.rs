@@ -184,6 +184,10 @@ mod part_1 {
         repo.git(&["config", "user.name", "Ada"]);
         repo.git(&["config", "user.email", "ada@example.com"]);
         repo.git(&["config", "commit.gpgsign", "false"]);
+        // `spec accept` refuses a project with no Cargo.toml (ADR-2611161600 §2).
+        repo.write("Cargo.toml", "[package]\nname = \"fixture\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[workspace]\n");
+        repo.write("src/lib.rs", "");
+        repo.write(".gitignore", "target/\n");
 
         let adr_md = format!(
         "# {}: Fixture decision\n\n**Status:** Accepted\n**Date:** 2026-01-01\n\n## Context\n\nFixture.\n\n## Decision\n\n1. **Fixture.** Something holds.\n\n## Consequences\n\n- None.\n",
@@ -905,6 +909,10 @@ mod part_2 {
         git(fx.root(), &["init", "-q"]);
         git(fx.root(), &["config", "user.name", "Fixture Tester"]);
         git(fx.root(), &["config", "user.email", "tester@example.com"]);
+        // `spec accept` refuses a project with no Cargo.toml (ADR-2611161600 §2).
+        fx.write("Cargo.toml", "[package]\nname = \"fixture\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[workspace]\n");
+        fx.write("src/lib.rs", "");
+        fx.write(".gitignore", "target/\n");
 
         fx.write(
         ADR_DOC_REL,
@@ -1411,6 +1419,11 @@ mod part_3 {
             fs::create_dir_all(root.join("docs/adr")).unwrap();
             fs::create_dir_all(root.join(".hexa/specs")).unwrap();
             fs::create_dir_all(root.join("tests")).unwrap();
+            // `spec accept` refuses a project with no Cargo.toml (ADR-2611161600 §2).
+            fs::create_dir_all(root.join("src")).unwrap();
+            fs::write(root.join("Cargo.toml"), "[package]\nname = \"fixture\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[workspace]\n").unwrap();
+            fs::write(root.join("src/lib.rs"), "").unwrap();
+            fs::write(root.join(".gitignore"), "target/\n").unwrap();
 
             for a in adrs {
                 let adr_md = format!(

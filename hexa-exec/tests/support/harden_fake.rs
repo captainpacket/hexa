@@ -22,13 +22,38 @@ pub struct Fake {
     bugs: usize,
     handed_out: AtomicBool,
     fix: FixAction,
+    /// When set, the hunt answers come from here, one per lens call, in
+    /// order (each a `findings` array body); lenses past the end find none.
+    hunts: Option<std::sync::Mutex<std::collections::VecDeque<String>>>,
+    /// Every verify prompt the pass sent.
+    pub verified: std::sync::Mutex<Vec<String>>,
     /// Every call the pass made, of any kind.
     pub calls: AtomicUsize,
 }
 
 impl Fake {
     pub fn new(bugs: usize, fix: FixAction) -> Arc<Fake> {
-        Arc::new(Fake { bugs, handed_out: AtomicBool::new(false), fix, calls: AtomicUsize::new(0) })
+        Arc::new(Fake {
+            bugs,
+            handed_out: AtomicBool::new(false),
+            fix,
+            hunts: None,
+            verified: Default::default(),
+            calls: AtomicUsize::new(0),
+        })
+    }
+
+    /// A fake whose lenses answer with `hunts`, one per lens call. Bug `n` is
+    /// fixed when the fix prompt names `title: bug-{n}`.
+    pub fn with_hunts(bugs: usize, hunts: Vec<String>, fix: FixAction) -> Arc<Fake> {
+        Arc::new(Fake {
+            bugs,
+            handed_out: AtomicBool::new(false),
+            fix,
+            hunts: Some(std::sync::Mutex::new(hunts.into())),
+            verified: Default::default(),
+            calls: AtomicUsize::new(0),
+        })
     }
 
     pub fn calls(&self) -> usize {
@@ -41,6 +66,10 @@ impl Frontier for Fake {
     async fn run(&self, prompt: &str, cwd: &Path, _t: Duration, _s: &str) -> Result<String, FrontierError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         if prompt.contains("adversarial code reviewer") {
+            if let Some(hunts) = &self.hunts {
+                let next = hunts.lock().unwrap().pop_front().unwrap_or_default();
+                return Ok(format!(r#"{{"findings":[{next}]}}"#));
+            }
             if self.handed_out.swap(true, Ordering::SeqCst) {
                 return Ok(r#"{"findings":[]}"#.to_string());
             }
@@ -50,11 +79,12 @@ impl Frontier for Fake {
             return Ok(format!(r#"{{"findings":[{}]}}"#, findings.join(",")));
         }
         if prompt.contains("SKEPTICALLY verify") {
+            self.verified.lock().unwrap().push(prompt.to_string());
             return Ok(r#"{"is_real":true,"reasoning":"it is"}"#.to_string());
         }
         if prompt.contains("Fix this CONFIRMED bug") {
             let n = (1..=self.bugs)
-                .find(|n| prompt.contains(&format!("title: bug-{n}\n")))
+                .find(|n| prompt.to_ascii_lowercase().contains(&format!("title: bug-{n}\n")))
                 .expect("the fix prompt names its bug");
             (self.fix)(cwd, n);
             return Ok(format!("fixed bug-{n}"));
@@ -127,4 +157,12 @@ pub fn is_ancestor(dir: &Path, sha: &str) -> bool {
         .status()
         .unwrap()
         .success()
+}
+
+/// A fix that only writes a test file: the bug stays.
+pub fn test_only_fix() -> FixAction {
+    Arc::new(|cwd: &Path, n: usize| {
+        std::fs::create_dir_all(cwd.join("tests")).unwrap();
+        std::fs::write(cwd.join(format!("tests/bug_{n}.txt")), format!("regression test for bug {n}\n")).unwrap();
+    })
 }

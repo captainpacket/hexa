@@ -3,24 +3,45 @@
 hexa is one binary. There is no daemon, no database, and no dashboard. Nothing
 needs to be started. Every verb below runs in this process and exits.
 
-`hexa --help` lists the verbs. `hexa go` suggests the next action.
-`hexa hey <intent>` routes natural language to a verb.
+`hexa --help` lists the verbs. `hexa status` says where the work stands: the
+loop (ADR, gate, stage, checklist), what is in flight in this repo, and the
+next step (`hexa go` prints that step alone). `hexa hey <intent>` routes
+natural language to a verb.
 
 ### Route work through hexa where hexa has a verb for it
 
 | Don't do this by hand | Use this | Before you run it |
 |---|---|---|
-| edit, then hope it works | `hexa do run "<task>" --file <f> --evidence "<cmd>"` | Clean tree: it refuses while other tracked files in the package are modified. Name extra files with `--also`. Commits on this branch. Add `--uncounted` when `<cmd>` runs no tests |
+| edit, then hope it works | `hexa do run "<task>" --file <f> --evidence "<cmd>"` — a model makes the edit | Clean tree: it refuses while other tracked files in the package are modified. Name extra files with `--also`. Commits on this branch. Add `--uncounted` when `<cmd>` runs no tests |
+| wrote the patch yourself, then commit it by hand | `hexa do gate --files src/parser.rs -e 'cargo test --test parser' -m 'parser: accept empty input'` — you already made the edit | Each named file must have a change; only those files are committed, and only if the evidence reports passing tests. A red or vacuous gate commits nothing and leaves the patch. Add `--uncounted` when the evidence runs no tests |
 | build a whole component by hand | `hexa build '<challenge>' --target <dir> --gate '<cmd>'` | Clean tree, and no one else committing here: it commits every file that changes while it runs |
 | eyeball a diff for bugs | `hexa harden <path> --gate '<cmd>'` | Clean tree, and no other session in this checkout: it resets and reverts as it fixes. Use a worktree |
 | assert "the architecture is fine" | `hexa analyze .` | None; it writes nothing |
-| delete code you *think* is dead | `hexa graph consumers <path>` | `hexa graph build` first: it reads the saved `graph-out/graph.json` |
+| delete code you *think* is dead | `hexa graph consumers <path>` | `hexa graph build` first: it reads the saved `.hexa/graph/graph.json` |
 | read a file before editing it blind | `hexa graph context <path>` | `hexa graph build` first, as above |
 | a lesson you will forget | `hexa memory store lesson:<topic> "<text>"` | None |
 | claim something about the repo | `hexa verify "<claim>"` | None; it reads only |
 | guess which decisions are done, or what another agent is on | `hexa adr board` (progress from evidence) and `hexa agent list` (who holds which paths) | None |
 | edit paths another agent may be editing | `hexa agent register --task <name> --lease <path>`, and `hexa agent report` when done | Before the first edit |
 | wonder why a native (C/C++) dependency rebuilds per command | `hexa dev build-keys` | None |
+
+`do run` or `do gate`: use `do run` when a model should make the edit, and
+`do gate` when you already made it. Both commit only the files they name, and
+only on a gate that passed.
+
+**Committing source is `hexa do gate`. `git commit` is for docs.** Commit your
+own edit to project source with
+`hexa do gate --files src/domain/paging.rs -e 'cargo test' -m 'paging: an even split adds no empty page'`,
+not `git add` and `git commit`. The hooks refuse a `git commit` that would
+commit project source, and print the `do gate` command that does it, filled in
+with the files and the gate. A `git commit` of docs, ADRs, specs or markdown
+only, or one that finishes a merge, is never refused.
+
+**A new session picks up where the last one stopped.** When this session has
+recorded nothing, `hexa status`, `hexa loop` and the session-start banner show
+the previous session's ADR, gate, stage and checklist, labelled as the
+previous session's. `hexa loop resume` carries that work into this session, so
+the hooks accept edits under its gate.
 
 What each committing verb commits, on which branch, what it resets, and how to
 get your work back is in the `/hexa-git-effects` skill. Read it before running
@@ -77,7 +98,7 @@ so the gap is counted and `hexa gap pr <id>` can turn it into a pull request.
    `hexa analyze .` names every item and its fix. Clear them, re-run, and
    report the new grade. The grade is a property of the tree, not of your
    diff: an item that predates your change is still yours to clear.
-7. **Prefer `hexa hey <intent>`** when the task maps cleanly to natural language.
+8. **Prefer `hexa hey <intent>`** when the task maps cleanly to natural language.
 
 ## Development pipeline (gate-first)
 
@@ -87,8 +108,10 @@ step.
 - **A small change** — a fix or one behaviour, no new port, adapter or
   dependency:
   1. Record the gate before the code: `hexa loop gate '<command>'`.
-  2. Make the edit (yourself, or `hexa do run`).
-  3. See the gate green. Then commit.
+  2. Make the edit yourself, or have a model make it with `hexa do run`.
+  3. Commit through the gate: `hexa do gate` for your own edit (`do run`
+     commits its own), never `git commit`. Nothing is committed on a red
+     gate.
 - **An ADR-backed feature** — it adds a port, an adapter or a dependency, or
   an ADR decides it:
   1. An ADR in `docs/adrs/` (`hexa loop adr ADR-<id>`).
@@ -104,6 +127,13 @@ step.
 List the steps with `hexa loop task add "<step>"` and check each off with
 `hexa loop task done N`; `hexa loop` shows where the work stands. The hooks
 stop a feature-sized edit that has no gate recorded.
+
+A project declares its full gate, the command that proves the whole project,
+as `gate.full` in `.hexa/project.json`: `"gate": {"full": "cargo test"}`. With
+it declared, a narrower command such as
+`hexa loop gate 'cargo test --test paging'` is recorded as the fast gate, for
+quick checks while you work, with a warning. The full gate still decides
+`hexa loop stage done` and is the evidence `hexa do gate` is given.
 
 A gate passes on what a test runner reports, not on exit 0 alone. A gate that
 runs no tests (a build, a lint, `hexa analyze . --exit-code`) is declared

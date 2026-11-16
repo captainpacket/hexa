@@ -41,11 +41,16 @@ pub enum WorktreeAction {
         #[arg(long)]
         json: bool,
     },
-    /// Remove worktrees whose branches are already merged into main
+    /// Remove worktrees whose branches are already merged into main. A worktree with
+    /// uncommitted changes is never removed
     Cleanup {
         /// Actually remove (default is dry-run)
         #[arg(long)]
         force: bool,
+        /// Also remove unmerged feature worktrees (feat/, hexa/, worktree-, claude/) with no
+        /// commit in 24h. Their branches are kept
+        #[arg(long)]
+        stale: bool,
     },
 }
 
@@ -54,7 +59,7 @@ pub async fn run(action: WorktreeAction) -> anyhow::Result<()> {
         WorktreeAction::List { stale, json } => list(stale, json).await,
         WorktreeAction::Merge { pattern, all, force } => merge(pattern, all, force).await,
         WorktreeAction::MergeOrder { json } => merge_order(json).await,
-        WorktreeAction::Cleanup { force } => cleanup(force).await,
+        WorktreeAction::Cleanup { force, stale } => cleanup(force, stale).await,
     }
 }
 
@@ -764,7 +769,15 @@ async fn merge(
     Ok(())
 }
 
-async fn cleanup(force: bool) -> anyhow::Result<()> {
+/// Remove merged worktrees, and with `stale` unmerged feature worktrees idle
+/// for a day.
+///
+/// `git worktree remove` runs without `--force`, so git refuses a worktree with
+/// modified or untracked files and nothing uncommitted is lost. It used to pass
+/// `--force` and include stale worktrees by default, which deleted a day-old
+/// claude/ worktree's uncommitted files. A branch is deleted with `branch -d`,
+/// which refuses an unmerged one, and the report says which happened.
+async fn cleanup(force: bool, include_stale: bool) -> anyhow::Result<()> {
     let worktrees = parse_worktrees()?;
     let main = main_branch();
     let stale_threshold = std::time::Duration::from_secs(24 * 60 * 60);
@@ -781,11 +794,11 @@ async fn cleanup(force: bool) -> anyhow::Result<()> {
         .cloned()
         .collect();
 
-    // Find stale worktrees (24h+ no commits)
+    // Find stale worktrees (24h+ no commits), only when asked for
     let stale_wts: Vec<(String, String)> = worktrees
         .iter()
         .filter(|(_path, branch)| {
-            if branch == &main || branch == "(detached)" {
+            if !include_stale || branch == &main || branch == "(detached)" || is_merged(branch, &main) {
                 return false;
             }
             // Check if branch is a feature-type branch
@@ -822,7 +835,11 @@ async fn cleanup(force: bool) -> anyhow::Result<()> {
         .collect();
 
     if all_to_clean.is_empty() {
-        println!("  {} No merged or stale worktrees to clean up.", "\u{2713}".green());
+        let what = if include_stale { "merged or stale" } else { "merged" };
+        println!("  {} No {what} worktrees to clean up.", "\u{2713}".green());
+        if !include_stale {
+            println!("  {} Unmerged worktrees idle for 24h+ are left alone; {} lists them for removal.", "\u{2022}".dimmed(), "--stale".bold());
+        }
         return Ok(());
     }
 
@@ -844,21 +861,31 @@ async fn cleanup(force: bool) -> anyhow::Result<()> {
 
     let mut removed = 0usize;
     for (path, branch) in &all_to_clean {
-        // Remove worktree (use --force for stale worktrees with untracked files)
+        // No --force: git refuses a worktree with modified or untracked files.
         let wt_result = Command::new("git")
-            .args(["worktree", "remove", "--force", path])
+            .args(["worktree", "remove", path])
             .output()?;
 
         if wt_result.status.success() {
-            // Delete branch
-            let _ = Command::new("git")
-                .args(["branch", "-d", branch])
-                .output();
-            println!("  {} Removed {} (branch {})", "\u{2713}".green(), path, branch);
+            // -d refuses an unmerged branch; say which happened.
+            let br = Command::new("git").args(["branch", "-d", branch]).output();
+            match br {
+                Ok(o) if o.status.success() => {
+                    println!("  {} Removed {} (branch {} deleted)", "\u{2713}".green(), path, branch);
+                }
+                Ok(o) => {
+                    let why = String::from_utf8_lossy(&o.stderr);
+                    let why = why.lines().next().unwrap_or("").trim();
+                    println!("  {} Removed {}; branch {} kept: {}", "\u{2713}".green(), path, branch, why);
+                }
+                Err(e) => {
+                    println!("  {} Removed {}; branch {} kept: {}", "\u{2713}".green(), path, branch, e);
+                }
+            }
             removed += 1;
         } else {
             let err = String::from_utf8_lossy(&wt_result.stderr);
-            println!("  {} Failed to remove {}: {}", "\u{2717}".red(), path, err.trim());
+            println!("  {} Kept {}: {}", "\u{2717}".red(), path, err.trim());
         }
     }
 

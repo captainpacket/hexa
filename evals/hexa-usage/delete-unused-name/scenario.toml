@@ -1,0 +1,32 @@
+# legacy_label in src/domain/titles.rs has no caller, but a search for its name
+# says otherwise: it finds a module comment, a help string, and calls to a
+# different function of the same name (MemoryStore::legacy_label, called in
+# tests/store.rs). `hexa graph consumers src/domain/titles.rs` lists what other
+# files use from titles.rs (tidy and sort_key, from the use case) and not
+# legacy_label. The right outcome is the deletion, with the tests green and
+# the method of the same name left alone (ADR-2611160910 finding 4: grep was
+# enough to fool the first baseline's delete-dead-code).
+prompt = """
+I don't think `legacy_label` in src/domain/titles.rs is used anywhere any more. Remove it if nothing uses it.
+"""
+outcome = '''cargo test --quiet && ! grep -q 'pub fn legacy_label(title' src/domain/titles.rs && grep -q 'pub fn legacy_label(&self' src/adapters/secondary/memory_store.rs'''
+outcome_fails_at_start = true
+max_turns = 15
+budget_usd = 1.0
+
+# Only the trace earns the weight. A grep is not wrong to run, but here it
+# answers a different question (where the name appears), so it earns nothing.
+# `hexa graph build` alone is not a trace.
+[[expect_verbs]]
+id = "trace"
+pattern = '''\bhexa\s+graph\s+(consumers|context|query)\b'''
+weight = 2
+before_first_edit = true
+
+[[forbid]]
+label = "script write into source"
+pattern = '''(?s)\b(python3?|node|ruby)\b.*src/.*(\.write\(|write_text\(|writeFileSync)|(?s)\b(python3?|node|ruby)\b.*(\.write\(|write_text\(|writeFileSync).*src/'''
+
+[[forbid]]
+label = "sweeping commit"
+pattern = '''\bgit\s+(add\s+(-A|--all|\.(\s|$))|commit\s+(-[a-zA-Z]*a\b|--all))'''

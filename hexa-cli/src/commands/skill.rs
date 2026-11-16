@@ -154,10 +154,41 @@ fn list_skills() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Skills hexa once shipped as flat `<name>.md` files. Claude Code loads only
+/// `<name>/SKILL.md`, so these never loaded; they now ship as directories.
+pub(crate) const LEGACY_FLAT_SKILLS: &[&str] =
+    &["hexa-adr-create", "hexa-adr-review", "hexa-adr-search", "hexa-adr-status", "hexa-status-summary"];
+
+/// Delete the flat copies of [`LEGACY_FLAT_SKILLS`] from a skills directory,
+/// each only once its `<name>/SKILL.md` replacement is there. Exactly these
+/// five names: sync otherwise never deletes, and any other file is the
+/// project's. Returns the files removed, relative to `skills_dir`.
+pub(crate) fn remove_legacy_flat_skills(skills_dir: &Path) -> std::io::Result<Vec<String>> {
+    let mut removed = Vec::new();
+    for name in LEGACY_FLAT_SKILLS {
+        let flat = skills_dir.join(format!("{name}.md"));
+        if flat.is_file() && skills_dir.join(name).join("SKILL.md").is_file() {
+            std::fs::remove_file(&flat)?;
+            removed.push(format!("{name}.md"));
+        }
+    }
+    Ok(removed)
+}
+
 fn sync_skills(update: bool) -> anyhow::Result<()> {
     let target = project_root().join(".claude").join("skills");
     let (written, stale) = sync_into(&target, update)?;
-    if written.is_empty() && stale.is_empty() {
+    let legacy = remove_legacy_flat_skills(&target)?;
+    if !legacy.is_empty() {
+        println!(
+            "{} Removed {} flat skill file{} Claude Code never loaded (now <name>/SKILL.md): {}",
+            "\u{2713}".green(),
+            legacy.len(),
+            if legacy.len() == 1 { "" } else { "s" },
+            legacy.join(", ")
+        );
+    }
+    if written.is_empty() && stale.is_empty() && legacy.is_empty() {
         println!("{} Skills already present and current in {}", "\u{2713}".green(), target.display());
     }
     if !written.is_empty() {
@@ -260,6 +291,24 @@ mod tests {
     #[test]
     fn unterminated_frontmatter_is_not_a_skill() {
         assert!(parse_skill("---\nname: x\nno closing fence", "x.md", true).is_none());
+    }
+
+    #[test]
+    fn only_the_five_legacy_flat_files_are_removed_and_only_once_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = dir.path();
+        for name in LEGACY_FLAT_SKILLS {
+            std::fs::write(skills.join(format!("{name}.md")), "old").unwrap();
+        }
+        std::fs::write(skills.join("hexa-other.md"), "mine").unwrap();
+        assert!(remove_legacy_flat_skills(skills).unwrap().is_empty(), "no replacement yet, nothing removed");
+        sync_into(skills, false).unwrap();
+        let removed = remove_legacy_flat_skills(skills).unwrap();
+        assert_eq!(removed.len(), LEGACY_FLAT_SKILLS.len());
+        assert!(skills.join("hexa-other.md").is_file(), "any other file is the project's");
+        for name in LEGACY_FLAT_SKILLS {
+            assert!(Assets::get(&format!("skills/{name}/SKILL.md")).is_some(), "{name} ships as a directory");
+        }
     }
 
     #[test]

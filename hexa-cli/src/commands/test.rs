@@ -426,8 +426,8 @@ async fn run_inference_tests(r: &mut TestResults) {
             }
         }
     } else {
-        // Try auto-discover bazzite
-        let discover_hosts = ["http://bazzite:11434", "http://127.0.0.1:11434"];
+        // Only localhost: another machine is named with HEXA_OLLAMA_HOST.
+        let discover_hosts = ["http://127.0.0.1:11434"];
         let mut found = false;
         for host in &discover_hosts {
             let tags_url = format!("{}/api/tags", host);

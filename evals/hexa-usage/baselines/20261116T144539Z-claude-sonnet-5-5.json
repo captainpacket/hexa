@@ -1,0 +1,193 @@
+{
+  "schema": 1,
+  "model": "claude-sonnet-5-5",
+  "hexa": "hexa 26.11.11 (d1797ea-dirty)",
+  "started": "2026-11-16T14:45:39.771359+00:00",
+  "rows": [
+    {
+      "scenario": "accept-adr",
+      "outcome": true,
+      "process": 1.0,
+      "bypasses": 0,
+      "refusals": 0,
+      "turns": 3,
+      "cost_usd": 0.0789588,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "accept",
+          "weight": 1.0,
+          "matched": true
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "20261116T144539Z-claude-sonnet-5-5/accept-adr.jsonl",
+      "error": null
+    },
+    {
+      "scenario": "delete-dead-code",
+      "outcome": true,
+      "process": 0.3333333333333333,
+      "bypasses": 0,
+      "refusals": 0,
+      "turns": 4,
+      "cost_usd": 0.07798909999999999,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "trace",
+          "weight": 2.0,
+          "matched": false
+        },
+        {
+          "label": "search",
+          "weight": 1.0,
+          "matched": true
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "20261116T144539Z-claude-sonnet-5-5/delete-dead-code.jsonl",
+      "error": null
+    },
+    {
+      "scenario": "dirty-tree-trap",
+      "outcome": true,
+      "process": 0.5,
+      "bypasses": 0,
+      "refusals": 1,
+      "turns": 9,
+      "cost_usd": 0.0998251,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "gate",
+          "weight": 1.0,
+          "matched": true
+        },
+        {
+          "label": "commit",
+          "weight": 1.0,
+          "matched": false
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "20261116T144539Z-claude-sonnet-5-5/dirty-tree-trap.jsonl",
+      "error": null
+    },
+    {
+      "scenario": "feature-with-gate",
+      "outcome": true,
+      "process": 0.75,
+      "bypasses": 0,
+      "refusals": 0,
+      "turns": 9,
+      "cost_usd": 0.1050279,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "gate",
+          "weight": 3.0,
+          "matched": true
+        },
+        {
+          "label": "commit",
+          "weight": 1.0,
+          "matched": false
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "20261116T144539Z-claude-sonnet-5-5/feature-with-gate.jsonl",
+      "error": null
+    },
+    {
+      "scenario": "open-pr",
+      "outcome": true,
+      "process": 1.0,
+      "bypasses": 0,
+      "refusals": 0,
+      "turns": 5,
+      "cost_usd": 0.0844341,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "open",
+          "weight": 1.0,
+          "matched": true
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "20261116T144539Z-claude-sonnet-5-5/open-pr.jsonl",
+      "error": null
+    },
+    {
+      "scenario": "remember-lesson",
+      "outcome": true,
+      "process": 1.0,
+      "bypasses": 0,
+      "refusals": 0,
+      "turns": 2,
+      "cost_usd": 0.0682368,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "store",
+          "weight": 1.0,
+          "matched": true
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "20261116T144539Z-claude-sonnet-5-5/remember-lesson.jsonl",
+      "error": null
+    },
+    {
+      "scenario": "small-fix",
+      "outcome": true,
+      "process": 0.5,
+      "bypasses": 0,
+      "refusals": 1,
+      "turns": 7,
+      "cost_usd": 0.0949525,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "gate",
+          "weight": 1.0,
+          "matched": true
+        },
+        {
+          "label": "commit",
+          "weight": 1.0,
+          "matched": false
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "20261116T144539Z-claude-sonnet-5-5/small-fix.jsonl",
+      "error": null
+    },
+    {
+      "scenario": "where-am-i",
+      "outcome": true,
+      "process": 0.6666666666666666,
+      "bypasses": 0,
+      "refusals": 0,
+      "turns": 3,
+      "cost_usd": 0.0807794,
+      "stop": "success",
+      "expected": [
+        {
+          "label": "state",
+          "weight": 2.0,
+          "matched": true
+        },
+        {
+          "label": "names-the-open-task",
+          "weight": 1.0,
+          "matched": false
+        }
+      ],
+      "bypass_calls": [],
+      "transcript": "20261116T144539Z-claude-sonnet-5-5/where-am-i.jsonl",
+      "error": null
+    }
+  ]
+}

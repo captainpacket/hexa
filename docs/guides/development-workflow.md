@@ -17,7 +17,7 @@ is allowed to be prose, because it never claims to describe the present.
 hexa adr schema            # the template and the next number
 hexa adr list              # every ADR and its status
 hexa adr search <term>
-hexa adr accept <id>       # Proposed → Accepted
+hexa adr accept <id> -r "<why>"  # Proposed → Accepted
 ```
 
 ADRs are append-only. A changed decision gets a new ADR that supersedes the old
