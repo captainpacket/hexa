@@ -70,6 +70,9 @@ pub enum DoAction {
         /// The evidence runs no test runner: its exit status alone decides, and the commit says so.
         #[arg(long)]
         uncounted: bool,
+        /// Keep the commit on its branch: do not land it on the base (ADR-2611161800 §4)
+        #[arg(long)]
+        no_land: bool,
     },
     /// List recent direct runs (task, evidence verdict, commit) in this repository.
     Runs {
@@ -285,7 +288,7 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
                 }
             }
         }
-        DoAction::Gate { files, evidence, message, uncounted } => {
+        DoAction::Gate { files, evidence, message, uncounted, no_land } => {
             let top = std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).output()?;
             if !top.status.success() {
                 anyhow::bail!("hexa do gate runs inside a git repository");
@@ -296,6 +299,11 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
             let mut rel: Vec<String> = Vec::new();
             for f in &files {
                 match repo_relative(&root, &cwd, f) {
+                    // a path that is neither in the tree nor tracked (a deletion) is a mistake, not "no change": `--files a,b` used to report nothing to commit
+                    Some(p) if !root.join(&p).exists() && std::process::Command::new("git").args(["ls-files", "--error-unmatch", &p]).current_dir(&root).output().map(|o| !o.status.success()).unwrap_or(true) => {
+                        let hint = if f.contains(',') { "; give several files separated by spaces, not commas" } else { "" };
+                        anyhow::bail!("{f}: no such file in the tree or in git{hint}")
+                    }
                     Some(p) => rel.push(p),
                     None => anyhow::bail!("{f} is outside the repository ({}): only files in it can be gated and committed", root.display()),
                 }
@@ -304,6 +312,8 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
             if uncounted {
                 crate::commands::loop_cmd::note_gate_uncounted(&evidence);
             }
+            crate::commands::events::start(&root);
+            crate::commands::events::step_start("gate");
             println!("{} {}", "⬡ gate:".cyan().bold(), evidence);
             println!("  {} {}", "files".dimmed(), rel.join(", "));
             let started_at = chrono::Utc::now().to_rfc3339();
@@ -319,10 +329,32 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
                 started_at,
                 u64::try_from(clock.elapsed().as_millis()).unwrap_or(u64::MAX),
             );
+            crate::commands::events::step_end("gate");
             match outcome {
-                Ok(sha) => println!("{} commit {} · {} file(s)", "✓ gated".green().bold(), sha.yellow(), rel.len()),
+                Ok(sha) => {
+                    println!("{} commit {} · {} file(s)", "✓ gated".green().bold(), sha.yellow(), rel.len());
+                    let mut result = json!({ "commit": sha, "files": rel });
+                    if !no_land {
+                        crate::commands::events::step_start("land");
+                        match crate::commands::land::land(&root, &evidence, uncounted).await {
+                            crate::commands::land::Landing::OnBase => {}
+                            crate::commands::land::Landing::Landed { base, sha } => {
+                                println!("{} on {} at {}", "✓ landed".green().bold(), base, sha.yellow());
+                                result["landed"] = json!({ "base": base, "sha": sha });
+                            }
+                            crate::commands::land::Landing::NotLanded { base, why } => {
+                                println!("{} on {}: {}", "⚠ not landed".yellow().bold(), base, why);
+                                result["not_landed"] = json!({ "base": base, "why": why });
+                            }
+                        }
+                        crate::commands::events::step_end("land");
+                    }
+                    crate::commands::events::finish(Some(result));
+                }
                 Err(e) => {
                     println!("{}\n  {}", "✗ not committed".red().bold(), e.replace('\n', "\n  "));
+                    let code = if e.contains("nothing to commit") { "nothing_to_commit" } else { "gate_failed" };
+                    crate::commands::events::fail(code, &format!("not committed: {}", e.lines().next().unwrap_or("the gate did not pass")));
                     anyhow::bail!("the gate did not pass");
                 }
             }

@@ -290,6 +290,21 @@ fn read_entry(dir: &Path, session: &str) -> Option<serde_json::Value> {
 }
 
 /// This session's recorded state, if any.
+/// One session's own loop entry, by its id: what a Stop hook holds that session to (ADR-2611161800 §5).
+pub fn session_entry(dir: &Path, session: &str) -> Option<serde_json::Value> {
+    read_entry(dir, session)
+}
+
+/// The checklist of a loop entry, as `(n, title, status)`.
+pub fn entry_tasks(entry: &serde_json::Value) -> Vec<(usize, String, String)> {
+    task_list(entry).into_iter().map(|t| (t.n, t.title, t.status)).collect()
+}
+
+/// The files a loop entry records as touched, relative to the project where they are inside it.
+pub fn entry_files(entry: &serde_json::Value) -> Vec<String> {
+    entry.get("files").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default()
+}
+
 pub fn read_loop(dir: &Path) -> Option<serde_json::Value> {
     read_entry(dir, &session_id())
 }
@@ -727,7 +742,7 @@ pub fn awareness_lines(dir: &Path) -> Vec<String> {
 /// A shortened id that is only a prefix of a real one matches nothing, and
 /// so does an id that names more than one file: `read_dir` order is
 /// unspecified, and evidence must not land in whichever came first.
-fn adr_path(dir: &Path, id: &str) -> Option<PathBuf> {
+pub(crate) fn adr_path(dir: &Path, id: &str) -> Option<PathBuf> {
     if id.is_empty() {
         return None;
     }
@@ -880,7 +895,7 @@ pub fn status_line(dir: &Path) -> String {
             if let Some(r) = running_line(&st) {
                 line.push_str(&format!(" · {r}"));
             }
-            let tasks = task_list(&st);
+            let tasks = work_list(&st);
             if !tasks.is_empty() {
                 let done = tasks.iter().filter(|t| t.status == "done").count();
                 line.push_str(&format!(" · tasks {done}/{}", tasks.len()));
@@ -896,7 +911,7 @@ pub fn status_line(dir: &Path) -> String {
         None if prev.is_some() => {
             let (id, e) = prev.expect("checked");
             let s = |k: &str, d: &str| e.get(k).and_then(|v| v.as_str()).unwrap_or(d).to_string();
-            let tasks = task_list(&e);
+            let tasks = work_list(&e);
             let done = tasks.iter().filter(|t| t.status == "done").count();
             let tasks = if tasks.is_empty() { String::new() } else { format!(" · tasks {done}/{}", tasks.len()) };
             format!(
@@ -942,7 +957,7 @@ fn glance_line_at(state: Option<&serde_json::Value>, now: chrono::DateTime<chron
     if let Some(adr) = st.get("adr").and_then(|v| v.as_str()).filter(|a| !a.is_empty()) {
         parts.push(adr.to_string());
     }
-    let tasks = task_list(st);
+    let tasks = work_list(st);
     if !tasks.is_empty() {
         parts.push(format!("{}/{}", tasks.iter().filter(|t| t.status == "done").count(), tasks.len()));
     }
@@ -1078,6 +1093,14 @@ pub struct Task {
     pub status: String,
 }
 
+/// The work's own steps, for the counts: the checklist without the close-out
+/// steps hexa adds (ADR-2611161800 §2). "2/5" counts the work; the close-out
+/// is what stands between the work and done, shown in the list itself.
+fn work_list(state: &serde_json::Value) -> Vec<Task> {
+    let closeout: Vec<bool> = state.get("tasks").and_then(|t| t.as_array()).map(|a| a.iter().map(|t| t.get("closeout").is_some()).collect()).unwrap_or_default();
+    task_list(state).into_iter().filter(|t| !closeout.get(t.n - 1).copied().unwrap_or(false)).collect()
+}
+
 /// The checklist in a loop state, numbered from 1.
 fn task_list(state: &serde_json::Value) -> Vec<Task> {
     state
@@ -1128,6 +1151,26 @@ fn tasks_json(dir: &Path) -> Vec<serde_json::Value> {
         .unwrap_or_default()
 }
 
+/// Every plan ends with the same two steps, added by hexa (ADR-2611161800 §2):
+/// `Land on main`, then `Close <ADR>`. They stay last. Re-recording the ADR
+/// keeps them once; recording another renames the close.
+fn ensure_closeout(tasks: &mut Vec<serde_json::Value>, adr: &str) {
+    let kept = |kind: &str, tasks: &[serde_json::Value]| tasks.iter().find(|t| t.get("closeout").and_then(|v| v.as_str()) == Some(kind)).cloned();
+    let land = kept("land", tasks);
+    let close = kept("close", tasks).filter(|t| t.get("adr").and_then(|v| v.as_str()) == Some(adr));
+    tasks.retain(|t| t.get("closeout").is_none());
+    tasks.push(land.unwrap_or_else(|| serde_json::json!({ "title": "Land on main", "status": "todo", "closeout": "land" })));
+    tasks.push(close.unwrap_or_else(|| serde_json::json!({ "title": format!("Close {adr}"), "status": "todo", "closeout": "close", "adr": adr })));
+}
+
+fn closeout_kind(t: &serde_json::Value) -> Option<&str> {
+    t.get("closeout").and_then(|v| v.as_str())
+}
+
+fn bullet(items: &[crate::commands::finish::Item]) -> String {
+    items.iter().map(|i| format!("\n  - {}: {}\n    {}", i.kind, i.what, i.fix)).collect()
+}
+
 fn run_task(dir: &Path, action: TaskAction) -> anyhow::Result<()> {
     let mut tasks = tasks_json(dir);
     let index = |n: usize, len: usize| -> anyhow::Result<usize> {
@@ -1143,8 +1186,10 @@ fn run_task(dir: &Path, action: TaskAction) -> anyhow::Result<()> {
                 anyhow::bail!("a step needs a title");
             }
             // The first step added to an empty list is the one in progress.
-            let status = if tasks.is_empty() { "doing" } else { "todo" };
-            tasks.push(serde_json::json!({ "title": title, "status": status }));
+            let status = if tasks.iter().all(|t| closeout_kind(t).is_some()) { "doing" } else { "todo" };
+            // before the close-out steps, which stay last
+            let at = tasks.iter().position(|t| closeout_kind(t).is_some()).unwrap_or(tasks.len());
+            tasks.insert(at, serde_json::json!({ "title": title, "status": status }));
         }
         TaskAction::Start { n } => {
             let i = index(n, tasks.len())?;
@@ -1157,6 +1202,21 @@ fn run_task(dir: &Path, action: TaskAction) -> anyhow::Result<()> {
         }
         TaskAction::Done { n } => {
             let i = index(n, tasks.len())?;
+            match closeout_kind(&tasks[i]) {
+                Some("land") => {
+                    let open = crate::commands::finish::not_on_main(dir);
+                    if !open.is_empty() {
+                        anyhow::bail!("Land on main is not done: the work is not all on main yet{}", bullet(&open));
+                    }
+                }
+                Some("close") => {
+                    let adr = tasks[i].get("adr").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    if crate::commands::finish::adr_status(dir, &adr).as_deref() != Some("completed") {
+                        anyhow::bail!("{adr} is closed by `hexa loop stage done`, which checks that everything is on main, runs the gate, and sets it Completed");
+                    }
+                }
+                _ => {}
+            }
             tasks[i]["status"] = serde_json::json!("done");
             tasks[i]["done_at"] = serde_json::json!(chrono::Utc::now().to_rfc3339());
             // The next unstarted step becomes the one in progress, unless one is.
@@ -1176,6 +1236,9 @@ fn run_task(dir: &Path, action: TaskAction) -> anyhow::Result<()> {
         }
         TaskAction::Rm { n } => {
             let i = index(n, tasks.len())?;
+            if closeout_kind(&tasks[i]).is_some() {
+                anyhow::bail!("step {n} is part of the close-out every plan ends with (ADR-2611161800 §2); it is checked off, not removed");
+            }
             tasks.remove(i);
         }
     }
@@ -1228,6 +1291,10 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
                 .and_then(|s| s.get("stage").and_then(|v| v.as_str()).map(String::from))
                 .unwrap_or_else(|| "decide".to_string());
             update_loop(&cwd, serde_json::json!({ "adr": id, "stage": stage })).map_err(|e| anyhow::anyhow!(e))?;
+            // the plan's end, written in from its start (ADR-2611161800 §2)
+            let mut tasks = tasks_json(&cwd);
+            ensure_closeout(&mut tasks, &id);
+            write_tasks(&cwd, tasks)?;
             println!("{} {}", "\u{2b21}".green(), status_line(&cwd));
         }
         LoopAction::Gate { command, uncounted } => {
@@ -1308,6 +1375,21 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
             // first: there is no point measuring work that does not pass
             // (ADR-2609132059).
             if stage == "done" {
+                // done means on main and closed (ADR-2611161800 §3): nothing open but the close-out itself
+                let mut open: Vec<crate::commands::finish::Item> = tasks_json(&cwd)
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, t)| closeout_kind(t).is_none() && t.get("status").and_then(|v| v.as_str()) != Some("done"))
+                    .map(|(i, t)| crate::commands::finish::Item {
+                        kind: "task",
+                        what: format!("{} {}", i + 1, t.get("title").and_then(|v| v.as_str()).unwrap_or("")),
+                        fix: format!("finish it, then: hexa loop task done {}", i + 1),
+                    })
+                    .collect();
+                open.extend(crate::commands::finish::not_on_main(&cwd));
+                if !open.is_empty() {
+                    anyhow::bail!("not done: a plan ends with its tasks done and everything on main; the stage stays where it was{}", bullet(&open));
+                }
                 let st = read_loop(&cwd);
                 // Done needs a gate that passed: none recorded is not done
                 // (ADR-2611081151 §5).
@@ -1349,6 +1431,28 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
                         _ => {}
                     }
                 }
+            }
+            if stage == "done" {
+                // close the ADR, then check off the close-out (ADR-2611161800 §3)
+                let st = read_loop(&cwd).unwrap_or_default();
+                if let Some(adr) = st.get("adr").and_then(|v| v.as_str()).filter(|a| !a.is_empty() && *a != "none") {
+                    let base = crate::commands::finish::base_branch(&cwd);
+                    let sha = std::process::Command::new("git").args(["rev-parse", "--short", "HEAD"]).current_dir(&cwd).output().ok()
+                        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+                    let gate = st.get("gate").and_then(|v| v.as_str()).unwrap_or("");
+                    if crate::commands::finish::adr_status(&cwd, adr).is_some() {
+                        crate::commands::adr::set_adr_status(adr, "Completed", None, &format!("landed on {base} at {sha}; gate `{gate}` passed (hexa loop stage done)")).await?;
+                    } else {
+                        // the work is done either way; an ADR with no status line is told, not failed over
+                        println!("  {} {adr} has no `**Status:**` line, so it was not marked Completed: add one and run `hexa adr complete {adr}`", "warning:".yellow().bold());
+                    }
+                }
+                let mut tasks = tasks_json(&cwd);
+                for t in tasks.iter_mut().filter(|t| closeout_kind(t).is_some()) {
+                    t["status"] = serde_json::json!("done");
+                    t["done_at"] = serde_json::json!(chrono::Utc::now().to_rfc3339());
+                }
+                write_tasks(&cwd, tasks)?;
             }
             update_loop(&cwd, serde_json::json!({ "stage": stage })).map_err(|e| anyhow::anyhow!(e))?;
             println!("{} {}", "\u{2b21}".green(), status_line(&cwd));

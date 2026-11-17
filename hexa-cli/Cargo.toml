@@ -57,6 +57,8 @@ regex = "1"
 
 [dev-dependencies]
 tempfile = "3"
+# the AG-UI schema is the oracle for the event stream (ADR-2611161830 §9); tests only
+jsonschema = { version = "0.26", default-features = false }
 
 [lints.clippy]
 # The sealed spec test tests/adr_2610301129_spec.rs writes `x % 2 == 0`, which

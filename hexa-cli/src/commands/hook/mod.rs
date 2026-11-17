@@ -256,6 +256,8 @@ pub enum HookEvent {
     ObservePost,
     /// On Stop — record insights the transcript carries
     ObserveStop,
+    /// On Stop — send the session back while its own work is open: files it touched and did not commit, its checklist, its branch, its ADR (ADR-2611161800 §5)
+    Stop,
 }
 
 pub async fn run(event: HookEvent) -> Result<()> {
@@ -288,6 +290,7 @@ pub async fn run(event: HookEvent) -> Result<()> {
         HookEvent::ObservePre => observe("PreToolUse").await,
         HookEvent::ObservePost => observe("PostToolUse").await,
         HookEvent::ObserveStop => observe("Stop").await,
+        HookEvent::Stop => stop_until_finished(&project_dir),
     }
 }
 
@@ -731,6 +734,52 @@ fn worktrees_with_unmerged_commits() -> Vec<(String, String, usize)> {
         }
     }
     out
+}
+
+/// The most times in a row a session is sent back to finish before its stop
+/// is let through (ADR-2611161800 §5): a session that cannot finish can still
+/// end, and say why.
+const STOP_BLOCKS: u64 = 3;
+
+/// Stop — a session does not stop with its own work open. While something it
+/// can finish itself is open, answer `block` with the list as the reason, so
+/// the agent carries on. Three times in a row at most; then let the stop
+/// through and print the list. Commits not pushed are said, never forced.
+fn stop_until_finished(project_dir: &Path) -> Result<()> {
+    let v = hook_payload();
+    let session = v["session_id"].as_str().filter(|s| !s.is_empty()).map(String::from).unwrap_or_else(crate::commands::loop_cmd::session_id);
+    let open = crate::commands::finish::session_open(project_dir, &session);
+    let counts = project_dir.join(".hexa").join("stop-blocks.json");
+    let mut m: serde_json::Map<String, serde_json::Value> =
+        std::fs::read_to_string(&counts).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let n = m.get(&session).and_then(|x| x.as_u64()).unwrap_or(0);
+    let list = |items: &[crate::commands::finish::Item]| items.iter().map(|i| format!("- {}: {}\n  {}", i.kind, i.what, i.fix)).collect::<Vec<_>>().join("\n");
+    let save = |m: &serde_json::Map<String, serde_json::Value>| {
+        let _ = std::fs::create_dir_all(project_dir.join(".hexa"));
+        let _ = std::fs::write(&counts, serde_json::to_string(m).unwrap_or_default());
+    };
+    if !open.blocking.is_empty() && n < STOP_BLOCKS {
+        m.insert(session, serde_json::json!(n + 1));
+        save(&m);
+        let mut reason = format!(
+            "Your work is not finished: a plan ends with its tasks done, its ADR closed and everything on main (ADR-2611161800). Finish these, or say plainly why one cannot be finished now:\n{}",
+            list(&open.blocking)
+        );
+        if !open.reported.is_empty() {
+            reason.push_str(&format!("\nAlso, not forced (a push can need someone's approval):\n{}", list(&open.reported)));
+        }
+        println!("{}", serde_json::json!({ "decision": "block", "reason": reason }));
+        return Ok(());
+    }
+    m.remove(&session);
+    save(&m);
+    if !open.blocking.is_empty() {
+        println!("[HEX] stopping with work still open, after {STOP_BLOCKS} times sent back to finish it:\n{}", list(&open.blocking));
+    }
+    if !open.reported.is_empty() {
+        println!("[HEX] {}", list(&open.reported));
+    }
+    Ok(())
 }
 
 async fn session_end(_project_dir: &PathBuf) -> Result<()> {

@@ -294,7 +294,7 @@ fn insert_status_note(content: &str, note: &str) -> String {
 /// Rewrite the ADR's status lines, optionally inserting a `Superseded-By:`
 /// backlink, and record the rationale as a dated line under the status.
 /// Mirrors the adr_status_set tool — the file is the single source of truth.
-async fn set_adr_status(
+pub(crate) async fn set_adr_status(
     adr_id: &str,
     new_status: &str,
     superseded_by: Option<&str>,

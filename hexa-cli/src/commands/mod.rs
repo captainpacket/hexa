@@ -1,4 +1,10 @@
 pub mod adr;
+// AG-UI event stream for a verb's work (ADR-2611161830).
+pub mod events;
+// The open work and the command that closes each item (ADR-2611161800).
+pub mod finish;
+// A gated commit lands on the base branch (ADR-2611161800 §4).
+pub mod land;
 pub mod claude_paths;
 pub mod api;
 pub mod assets_cmd;
