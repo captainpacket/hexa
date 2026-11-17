@@ -1,4 +1,6 @@
 // `inference.rs` declares the inference trait surface.
+// Where AG-UI events go (ADR-2611161830).
+pub mod agui;
 pub mod inference;
 // What an editing adapter may not touch (the domain's critical-path rule).
 pub mod edit;

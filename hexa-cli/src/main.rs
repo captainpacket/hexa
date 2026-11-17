@@ -39,6 +39,10 @@ struct Cli {
     #[arg(short, long, global = true)]
     verbose: bool,
 
+    /// Report the work as an AG-UI event stream (ADR-2611161830): JSON lines on stdout, every other line to stderr; `--events=<path>` writes them to a file instead. Also `HEXA_EVENTS=1` or `HEXA_EVENTS=<path>`
+    #[arg(long, global = true, num_args = 0..=1, require_equals = true, default_missing_value = "-", value_name = "PATH")]
+    events: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -330,6 +334,8 @@ ADRs are history and are not checked.")]
     },
     /// Where am I: the loop, what is in flight in this repo (--all: every project), and the next step. JSON when piped
     Status(commands::status::StatusArgs),
+    /// The open work and the command that closes each item: uncommitted files, commits not pushed, tasks not done, branches not on main, worktrees to remove, plans never planned, the ADR not closed (ADR-2611161800)
+    Finish(commands::finish::FinishArgs),
     /// The task ledger: register a task and the paths it may edit, report it done, list and release (JSON when piped)
     Agent {
         #[command(subcommand)]
@@ -461,14 +467,22 @@ async fn main() {
     //
     // `{:#}` prints the whole cause chain on one line and no backtrace. A
     // genuine panic is unaffected — that is a different path, and still says so.
-    if let Err(e) = run().await {
-        eprintln!("Error: {e:#}");
+    let result = run().await;
+    // a run a verb left open is ended here, so an AG-UI stream always has its terminal event (ADR-2611161830 §8)
+    let why = result.as_ref().err().map(|e| format!("{e:#}"));
+    commands::events::close(why.as_deref().map_or(Ok(()), Err));
+    if let Some(why) = why {
+        eprintln!("Error: {why}");
         std::process::exit(1);
     }
 }
 
 async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    let events = cli.events.clone().or_else(|| std::env::var("HEXA_EVENTS").ok().filter(|v| !v.is_empty() && v != "0").map(|v| if v == "1" { "-".to_string() } else { v }));
+    if let Some(dest) = events {
+        commands::events::init(&dest)?;
+    }
 
     let filter = if cli.verbose {
         EnvFilter::new("debug")
@@ -564,6 +578,7 @@ async fn run() -> anyhow::Result<()> {
         Commands::Skill { action } => commands::skill::run(action).await,
         Commands::Assets { action } => commands::assets_cmd::run(action).await,
         Commands::Status(args) => status::run(args).await,
+        Commands::Finish(args) => commands::finish::run(args).await,
         Commands::Agent { action } => commands::agent::run(action).await,
         Commands::Docs { action } => commands::docs::run(action).await,
         Commands::Doctor { verbose, fix, check } => {

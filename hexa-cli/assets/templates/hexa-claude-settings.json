@@ -99,6 +99,15 @@
             "timeout": 1
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "hexa hook stop",
+            "timeout": 15
+          }
+        ]
       }
     ],
     "SubagentStart": [
