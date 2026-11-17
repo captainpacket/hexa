@@ -314,10 +314,8 @@ impl Stream {
             Event::ActivitySnapshot { message_id, .. } => {
                 self.activities.insert(message_id.clone());
             }
-            Event::ActivityDelta { message_id, .. } => {
-                if !self.activities.contains(message_id) {
-                    return Err(Violation::NoActivity(message_id.clone()));
-                }
+            Event::ActivityDelta { message_id, .. } if !self.activities.contains(message_id) => {
+                return Err(Violation::NoActivity(message_id.clone()));
             }
             _ => {}
         }
