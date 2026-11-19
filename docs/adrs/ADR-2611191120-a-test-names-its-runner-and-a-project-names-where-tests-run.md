@@ -89,6 +89,8 @@ The contract for a remote template:
 - `hexa spec tests` still generates Rust tests only. A TypeScript or bash scenario's test is written by a person or a builder, before the code, and bound with `hexa spec red --test` after hexa has watched it fail at its commit.
 - `hexa spec tests` itself (its red check) still builds locally. It is not routed through `test.remote` here; that is recorded as a follow-up gap.
 
+**Gate:** `cargo test -p hexa-cli --test adr_2611191120_spec && cargo test -p hexa-core --lib domain::evidence`
+
 ## Addendum, 2026-11-19: what the build settled
 
 - **npx never fetches.** The vitest command exports `npm_config_yes=false`, so a package without vitest installed fails loudly. Without it, the worked example's `spec red` ran in a fresh checkout with no `node_modules`, and npx installed vitest@5.1.1 in place of the project's 2.1.9: a different runner, silently. That breaks the rule that a gate does not degrade silently.
