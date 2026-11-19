@@ -11,7 +11,9 @@ use colored::Colorize;
 use serde_json::Value;
 use hexa_core::ports::spec::{coverage, numbered_decisions, test_ref, Acceptance, Finding, Spec};
 
-use hexa_exec::spec_author::{acceptance_holds, content_hash, run_test_alone, sha256_hex, TestRun};
+use hexa_core::ports::test_runner::{is_test_file, parse_test_ref};
+use hexa_exec::spec_author::{acceptance_holds, content_hash, sha256_hex, TestRun};
+use hexa_exec::test_exec::{env_prefix, full_commit, plan_test, remote_preflight, run_plans, test_config, Planned, TestConfig, Where};
 
 use super::adr::gate_path;
 
@@ -30,6 +32,7 @@ fn normalise(id: &str) -> String {
 }
 
 /// One ADR in the ledger.
+#[derive(Clone)]
 struct Adr {
     id: String,
     path: PathBuf,
@@ -273,15 +276,20 @@ pub fn check(adr: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Tests are generated for Rust only. Said before a paid `spec draft`, not
-/// after it and a person's acceptance, at `spec tests`.
+/// A spec is drafted and accepted only where a test could be bound to it:
+/// a Cargo.toml (generated Rust tests), a package.json (vitest), or a
+/// configured runner (ADR-2611191120 §9). Said before a paid `spec draft`.
 fn require_a_rust_project(root: &Path, id: &str, verb: &str) -> anyhow::Result<()> {
-    if root.join("Cargo.toml").is_file() {
+    if root.join("Cargo.toml").is_file() || root.join("package.json").is_file() {
+        return Ok(());
+    }
+    if test_config(root).is_ok_and(|c| !c.runners.is_empty()) {
         return Ok(());
     }
     anyhow::bail!(
-        "{id}: {verb} refused: no Cargo.toml at {}. `hexa spec tests` generates Rust tests only; \
-         TypeScript and Go are not generated yet, so a spec here could be drafted and accepted but never sealed",
+        "{id}: {verb} refused: no Cargo.toml, package.json or test.runners at {}. `hexa spec tests` generates Rust tests only; \
+         a test in another language is written by hand and bound with `hexa spec red <ADR> <commit> --test <S>=<file>::<name>`, \
+         which needs a runner for its file: vitest under a package.json, bash for .sh, or one in test.runners in .hexa/project.json",
         root.display()
     )
 }
@@ -826,7 +834,7 @@ fn test_files(root: &Path, spec: &Spec, text: &str) -> std::collections::BTreeSe
     }
     let raw: Value = serde_json::from_str(text).unwrap_or(Value::Null);
     for (s, r) in spec.specs.iter().zip(raw["scenarios"].as_array().into_iter().flatten()) {
-        let Some(t) = s.test.as_deref().filter(|t| test_ref(t).is_none()) else { continue };
+        let Some(t) = s.test.as_deref().filter(|t| parse_test_ref(t).is_none()) else { continue };
         match r["file"].as_str() {
             Some(f) => {
                 out.insert(f.to_string());
@@ -880,11 +888,10 @@ fn seal_files_of(
     }
     // A seal freezes a file. Over a source file it would freeze the code the
     // test is meant to drive, so a sealed test lives in a `tests/` directory.
-    let outside: Vec<String> =
-        files.iter().filter(|&f| !Path::new(f).iter().any(|c| c == "tests")).cloned().collect();
+    let outside: Vec<String> = files.iter().filter(|&f| !is_test_file(f)).cloned().collect();
     if !outside.is_empty() {
         anyhow::bail!(
-            "{}: {} not under a tests/ directory; sealing them would freeze the implementation",
+            "{}: {} not a test file; sealing it would freeze the implementation: a sealed test lives under a tests/, test/ or __tests__/ directory, is named *.test.* or *.spec.*, or is a .sh gate script (ADR-2611191120 §8)",
             id,
             outside.join(", ")
         );
@@ -1010,7 +1017,7 @@ fn report_seals(root: &Path, id: &str, raw: &Value, also: &[String], ci: bool) -
     fatal
 }
 
-pub async fn verify(adr: Option<&str>, ci: bool, prove: bool, verbose: bool) -> anyhow::Result<()> {
+pub async fn verify(adr: Option<&str>, ci: bool, prove: bool, verbose: bool, local: bool) -> anyhow::Result<()> {
     let root = std::env::current_dir()?;
     println!("{} each scenario's sealed test, run alone", "\u{2b21} spec verify".cyan().bold());
     let adrs = match adr {
@@ -1022,8 +1029,26 @@ pub async fn verify(adr: Option<&str>, ci: bool, prove: bool, verbose: bool) -> 
         &std::env::var("PATH").unwrap_or_default(),
         &|p| p.is_dir(),
     );
+    // Where the tests run: here, or every one through the project's remote
+    // template for HEAD, in one run (ADR-2611191120 §3–§5). Refused before
+    // anything runs when the remote could not describe this tree.
+    let cfg = test_config(&root).map_err(|e| anyhow::anyhow!(e))?;
+    let remote = cfg.remote.clone().filter(|_| !local);
+    let head = match &remote {
+        Some(_) => {
+            let head = full_commit(&root, "HEAD").ok_or_else(|| anyhow::anyhow!("HEAD is not a commit: nothing to send to the remote runner"))?;
+            remote_preflight(&root, &head, true).map_err(|e| anyhow::anyhow!(e))?;
+            println!("  {} every test goes to the remote runner (test.remote) for {}; --local runs them here", "\u{2192}".cyan(), &head[..12]);
+            Some(head)
+        }
+        None => None,
+    };
+    let prefix = if remote.is_some() { env_prefix(None, None) } else { env_prefix(Some(&path_env), None) };
     let (mut passed, mut failed, mut pending, mut unproven) = (0, 0, 0, 0);
     let mut fatal = 0;
+    // Each tested scenario: (ADR, scenario, ref, its plan or why it cannot run).
+    let mut jobs: Vec<(String, String, String, Result<Planned, TestRun>)> = Vec::new();
+    let mut to_prove: Vec<(Adr, Spec)> = Vec::new();
     for a in &adrs {
         // The seals are judged from the raw record, so a spec this cannot
         // otherwise parse still guards its tests (ADR-2611081151 §1).
@@ -1083,47 +1108,67 @@ pub async fn verify(adr: Option<&str>, ci: bool, prove: bool, verbose: bool) -> 
                 println!("  {} {} {} pending: no test yet", mark, a.id, s.id);
                 continue;
             };
-            if alt && test_ref(r).is_none() {
+            if alt && parse_test_ref(r).is_none() {
                 println!("  {} {} {} not run here: `{}` is a bare test name, not `<path>.rs::<fn>`", "\u{25cb}".dimmed(), a.id, s.id, r);
                 continue;
             }
-            match run_test_alone(&root, &path_env, r, None).await {
-                TestRun::Passed => {
-                    passed += 1;
-                    println!("  {} {} {} — {}", "\u{2713}".green(), a.id, s.id, r.dimmed());
-                }
-                TestRun::Failed(tail) | TestRun::Broken { tail, .. } => {
-                    failed += 1;
-                    println!("  {} {} {} failed — {}", "\u{2717}".red(), a.id, s.id, r);
-                    for line in tail.lines() {
-                        println!("      {}", line.dimmed());
-                    }
-                }
-                TestRun::NotFound(why) => {
-                    failed += 1;
-                    println!("  {} {} {} {}", "\u{2717}".red(), a.id, s.id, why);
-                }
-                TestRun::Vacuous => {
-                    failed += 1;
-                    println!("  {} {} {} ran 0 tests (vacuous): {}", "\u{2717}".red(), a.id, s.id, r);
-                }
-                TestRun::Ambiguous(n) => {
-                    failed += 1;
-                    println!("  {} {} {} matched {n} tests; a scenario names one: {}", "\u{2717}".red(), a.id, s.id, r);
-                }
-                TestRun::NotProvenHere(why) => {
-                    unproven += 1;
-                    let mark = if ci { "\u{2717}".red() } else { "?".yellow() };
-                    println!("  {} {} {} not proven here: {}", mark, a.id, s.id, why);
-                }
-            }
+            jobs.push((a.id.clone(), s.id.clone(), r.to_string(), plan_test(&root, r, &cfg, &prefix)));
         }
         if completed && ci && spec.specs.iter().any(|s| s.test.is_none()) {
             fatal += 1;
         }
         if prove {
-            fatal += prove_red(&root, &path_env, a, &spec).await?;
+            to_prove.push((a.clone(), spec.clone()));
         }
+    }
+    let plans: Vec<Planned> = jobs.iter().filter_map(|j| j.3.as_ref().ok().cloned()).collect();
+    let at = match (&remote, &head) {
+        (Some(template), Some(commit)) => Where::Remote { template, commit },
+        _ => Where::Here,
+    };
+    let mut runs = run_plans(&root, at, &plans).await.into_iter();
+    for (adr_id, sid, r, plan) in jobs {
+        let outcome = match plan {
+            Ok(_) => runs.next().unwrap_or_else(|| TestRun::RunnerFailed("no result came back for this test".into())),
+            Err(why) => why,
+        };
+        match outcome {
+            TestRun::Passed => {
+                passed += 1;
+                println!("  {} {} {} — {}", "\u{2713}".green(), adr_id, sid, r.dimmed());
+            }
+            TestRun::Failed(tail) | TestRun::Broken { tail, .. } => {
+                failed += 1;
+                println!("  {} {} {} failed — {}", "\u{2717}".red(), adr_id, sid, r);
+                for line in tail.lines() {
+                    println!("      {}", line.dimmed());
+                }
+            }
+            TestRun::NotFound(why) => {
+                failed += 1;
+                println!("  {} {} {} {}", "\u{2717}".red(), adr_id, sid, why);
+            }
+            TestRun::Vacuous => {
+                failed += 1;
+                println!("  {} {} {} ran 0 tests (vacuous): {}", "\u{2717}".red(), adr_id, sid, r);
+            }
+            TestRun::Ambiguous(n) => {
+                failed += 1;
+                println!("  {} {} {} matched {n} tests; a scenario names one: {}", "\u{2717}".red(), adr_id, sid, r);
+            }
+            TestRun::NotProvenHere(why) => {
+                unproven += 1;
+                let mark = if ci { "\u{2717}".red() } else { "?".yellow() };
+                println!("  {} {} {} not proven here: {}", mark, adr_id, sid, why);
+            }
+            TestRun::RunnerFailed(why) => {
+                failed += 1;
+                println!("  {} {} {} not run: {}", "\u{2717}".red(), adr_id, sid, why.lines().next().unwrap_or(""));
+            }
+        }
+    }
+    for (a, spec) in &to_prove {
+        fatal += prove_red(&root, &path_env, a, spec, &cfg, local).await?;
     }
     println!("\n  {passed} passed · {failed} failed · {unproven} not proven here · {pending} pending");
     let unproven_fails = if ci { unproven } else { 0 };
@@ -1208,8 +1253,8 @@ pub fn amend(
         .and_then(|d| d.1)
         .ok_or_else(|| anyhow::anyhow!("{id}: {chosen} is gone; a deleted sealed test cannot be amended"))?;
     let now_hash = sha256_hex(&now_bytes);
-    if !Path::new(&chosen).iter().any(|c| c == "tests") {
-        anyhow::bail!("{id}: {chosen} is not under a tests/ directory; only a sealed test file is amended");
+    if !is_test_file(&chosen) {
+        anyhow::bail!("{id}: {chosen} is not a test file; only a sealed test file is amended: a sealed test lives under a tests/, test/ or __tests__/ directory, is named *.test.* or *.spec.*, or is a .sh gate script (ADR-2611191120 §8)");
     }
     let sealed_hash = spec.sealed[&chosen].clone();
     let mut amended = amendments_of(&text);
@@ -1348,7 +1393,8 @@ fn unified_diff(file: &str, old: &[u8], new: &[u8]) -> anyhow::Result<String> {
 /// red commit. Returns how many did not. One worktree per commit;
 /// builds share a target directory under `target/`, so a second commit
 /// rebuilds what changed, not the world.
-async fn prove_red(root: &Path, path_env: &str, a: &Adr, spec: &Spec) -> anyhow::Result<usize> {
+async fn prove_red(root: &Path, path_env: &str, a: &Adr, spec: &Spec, cfg: &TestConfig, local: bool) -> anyhow::Result<usize> {
+    let remote = cfg.remote.as_deref().filter(|_| !local);
     let mut by_commit: BTreeMap<String, Vec<(&str, &str)>> = BTreeMap::new();
     let mut unproven = 0;
     for s in &spec.specs {
@@ -1376,19 +1422,48 @@ async fn prove_red(root: &Path, path_env: &str, a: &Adr, spec: &Spec) -> anyhow:
         };
         // A test proved red at a commit from before it was written
         // (`--red-at`, ADR-2610281628 §3) is checked there as written: the
-        // file is added to that tree, as the red check added it.
-        for (_, r) in &scenarios {
-            if let Some((file, _)) = hexa_core::ports::spec::test_ref(r) {
-                if !wt.join(file).exists() {
-                    if let Ok(body) = std::fs::read(root.join(file)) {
-                        let _ = std::fs::create_dir_all(wt.join(file).parent().unwrap_or(&wt));
-                        let _ = std::fs::write(wt.join(file), body);
+        // file is added to that tree, as the red check added it. A remote
+        // checkout of that commit cannot hold it (ADR-2611191120 §5).
+        let mut copied: Vec<&str> = Vec::new();
+        for (sid, r) in &scenarios {
+            if let Some(t) = parse_test_ref(r) {
+                if !wt.join(&t.file).exists() {
+                    if let Ok(body) = std::fs::read(root.join(&t.file)) {
+                        let _ = std::fs::create_dir_all(wt.join(&t.file).parent().unwrap_or(&wt));
+                        let _ = std::fs::write(wt.join(&t.file), body);
+                        copied.push(sid);
                     }
                 }
             }
         }
-        for (sid, r) in scenarios {
-            let outcome = run_test_alone(&wt, path_env, r, Some(&target)).await;
+        let full = full_commit(root, &sha).unwrap_or_else(|| sha.clone());
+        let refused = match remote {
+            Some(_) => remote_preflight(root, &full, false).err(),
+            None => None,
+        };
+        let prefix = if remote.is_some() { env_prefix(None, None) } else { env_prefix(Some(path_env), Some(&target)) };
+        let mut planned: Vec<(&str, &str, Result<Planned, TestRun>)> = Vec::new();
+        for (sid, r) in &scenarios {
+            let plan = match (&refused, remote.is_some() && copied.contains(sid)) {
+                (Some(why), _) => Err(TestRun::RunnerFailed(why.clone())),
+                (None, true) => Err(TestRun::RunnerFailed(format!(
+                    "the test was written after {sha} and copied into it to prove red, which a remote checkout cannot do: prove it with --local"
+                ))),
+                (None, false) => plan_test(&wt, r, cfg, &prefix),
+            };
+            planned.push((sid, r, plan));
+        }
+        let plans: Vec<Planned> = planned.iter().filter_map(|p| p.2.as_ref().ok().cloned()).collect();
+        let at = match remote {
+            Some(template) => Where::Remote { template, commit: &full },
+            None => Where::Here,
+        };
+        let mut runs = run_plans(&wt, at, &plans).await.into_iter();
+        for (sid, _r, plan) in planned {
+            let outcome = match plan {
+                Ok(_) => runs.next().unwrap_or_else(|| TestRun::RunnerFailed("no result came back".into())),
+                Err(why) => why,
+            };
             let (ok, what) = match outcome {
                 TestRun::Failed(_) => (true, format!("red at {sha}")),
                 // Written before the code it calls existed: red, and labelled.
@@ -1402,6 +1477,9 @@ async fn prove_red(root: &Path, path_env: &str, a: &Adr, spec: &Spec) -> anyhow:
                 TestRun::NotFound(why) => (false, format!("not at {sha}: {why}")),
                 TestRun::Vacuous => (false, format!("not at {sha}: it ran 0 tests there")),
                 TestRun::NotProvenHere(why) => (false, format!("red not proven here at {sha}: {why}")),
+                TestRun::RunnerFailed(why) => {
+                    (false, format!("red not shown at {sha}: {}", why.lines().next().unwrap_or("")))
+                }
             };
             if ok {
                 println!("  {} {} {} {}", "\u{2713}".green(), a.id, sid, what);
@@ -1422,7 +1500,7 @@ async fn prove_red(root: &Path, path_env: &str, a: &Adr, spec: &Spec) -> anyhow:
 /// is checked. A test file whose seal the re-acceptance dropped gets back the
 /// seal its last record held, so the edit since is reviewed through
 /// `hexa spec amend` (gap `spec-amend-scenario-path`).
-pub async fn red(adr: &str, commit: &str, tests: &[String]) -> anyhow::Result<()> {
+pub async fn red(adr: &str, commit: &str, tests: &[String], local: bool) -> anyhow::Result<()> {
     let root = std::env::current_dir()?;
     let a = find(&root, adr)?;
     let id = a.id.as_str();
@@ -1447,7 +1525,7 @@ pub async fn red(adr: &str, commit: &str, tests: &[String]) -> anyhow::Result<()
         let (sid, r) = t
             .split_once('=')
             .map(|(a, b)| (a.trim(), b.trim()))
-            .ok_or_else(|| anyhow::anyhow!("{id}: --test {t}: expected <scenario>=<file>.rs::<fn>"))?;
+            .ok_or_else(|| anyhow::anyhow!("{id}: --test {t}: expected <scenario>=<file>::<name>"))?;
         let s = spec
             .specs
             .iter()
@@ -1459,11 +1537,19 @@ pub async fn red(adr: &str, commit: &str, tests: &[String]) -> anyhow::Result<()
                  re-accepts the changed scenario, which leaves it pending"
             );
         }
-        let Some((file, _)) = test_ref(r).filter(|(_, f)| !f.is_empty() && !f.ends_with("::")) else {
-            anyhow::bail!("{id}: --test {t}: {r} is not <file>.rs::<fn>");
+        let Some(parsed) = parse_test_ref(r).filter(|t| !t.name.as_deref().is_some_and(|n| n.ends_with("::"))) else {
+            anyhow::bail!(
+                "{id}: --test {t}: {r} is not one test: `<file>.rs::<fn>`, `<file>.ts::<test name>`, `<file>.sh[::<arg>]` \
+                 or `<file>.<ext>::<name>` for a runner in test.runners (ADR-2611191120 §1)"
+            );
         };
-        if !Path::new(file).iter().any(|c| c == "tests") {
-            anyhow::bail!("{id}: {file} is not under a tests/ directory; a scenario's test is sealed, so it lives there");
+        let file = parsed.file.as_str();
+        if !is_test_file(file) {
+            anyhow::bail!(
+                "{id}: {file} is not a test file; a scenario's test is sealed, and sealing a source file would freeze the \
+                 implementation: a sealed test lives under a tests/, test/ or __tests__/ directory, is named *.test.* or \
+                 *.spec.*, or is a .sh gate script (ADR-2611191120 §8)"
+            );
         }
         if targets.iter().any(|(s, _, _)| s == sid) {
             anyhow::bail!("{id}: {sid} is named twice");
@@ -1490,12 +1576,32 @@ pub async fn red(adr: &str, commit: &str, tests: &[String]) -> anyhow::Result<()
         &std::env::var("PATH").unwrap_or_default(),
         &|p| p.is_dir(),
     );
+    // Where the tests run: here, or through the remote for this commit
+    // (ADR-2611191120 §4, §5), refused before anything runs when unpushed.
+    let cfg = test_config(&root).map_err(|e| anyhow::anyhow!("{id}: {e}"))?;
+    let remote = cfg.remote.as_deref().filter(|_| !local);
+    if remote.is_some() {
+        remote_preflight(&root, &sha, false).map_err(|e| anyhow::anyhow!("{id}: nothing recorded: {e}"))?;
+        println!("  {} the tests go to the remote runner (test.remote) for {short}; --local runs them here", "\u{2192}".cyan());
+    }
     let target = root.join("target/hexa-prove");
     let wt = checkout_at(&root, &target, &sha).map_err(|e| anyhow::anyhow!("{id}: {short} cannot be checked out: {e}"))?;
+    let prefix = if remote.is_some() { env_prefix(None, None) } else { env_prefix(Some(&path_env), Some(&target)) };
+    let planned: Vec<Result<Planned, TestRun>> = targets.iter().map(|(_, r, _)| plan_test(&wt, r, &cfg, &prefix)).collect();
+    let plans: Vec<Planned> = planned.iter().filter_map(|p| p.as_ref().ok().cloned()).collect();
+    let at = match remote {
+        Some(template) => Where::Remote { template, commit: &sha },
+        None => Where::Here,
+    };
+    let mut runs = run_plans(&wt, at, &plans).await.into_iter();
     let mut not_red: Vec<String> = Vec::new();
-    for (sid, r, _) in &targets {
+    for ((sid, r, _), plan) in targets.iter().zip(planned) {
         // The commit must hold the test as written: nothing is copied in.
-        let why = match run_test_alone(&wt, &path_env, r, Some(&target)).await {
+        let outcome = match plan {
+            Ok(_) => runs.next().unwrap_or_else(|| TestRun::RunnerFailed("no result came back".into())),
+            Err(why) => why,
+        };
+        let why = match outcome {
             TestRun::Failed(_) => None,
             TestRun::Broken { compile: true, .. } => None,
             TestRun::Passed | TestRun::Ambiguous(_) => Some(format!("passes at {short}, so it was not written first")),
@@ -1505,6 +1611,7 @@ pub async fn red(adr: &str, commit: &str, tests: &[String]) -> anyhow::Result<()
             TestRun::NotFound(w) => Some(format!("not at {short}: {w}")),
             TestRun::Vacuous => Some(format!("ran 0 tests at {short}")),
             TestRun::NotProvenHere(w) => Some(format!("not proven here at {short}: {w}")),
+            TestRun::RunnerFailed(w) => Some(format!("not shown red at {short}: {}", w.lines().next().unwrap_or(""))),
         };
         match why {
             None => println!("  {} {id} {sid} red at {short} — {}", "\u{2713}".green(), r.dimmed()),
@@ -1527,8 +1634,8 @@ pub async fn red(adr: &str, commit: &str, tests: &[String]) -> anyhow::Result<()
             }
             s.red = Some(short.clone());
         }
-        if let Some((f, _)) = test_ref(r) {
-            files.insert(f.to_string());
+        if let Some(t) = parse_test_ref(r) {
+            files.insert(t.file);
         }
     }
     let unsealed: Vec<String> = files.into_iter().filter(|f| !spec.sealed.contains_key(f)).collect();

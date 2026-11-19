@@ -71,10 +71,16 @@ pub enum SpecAction {
         adr: String,
         /// The commit, an ancestor of HEAD, that holds the tests failing
         commit: String,
-        /// `<scenario>=<file>.rs::<fn>`, once per pending scenario to bind;
-        /// none checks every tested scenario that has no red commit
+        /// `<scenario>=<file>::<name>` (`.rs::<fn>`, `.ts::<test name>`,
+        /// `.sh[::<arg>]`, or a test.runners extension), once per pending
+        /// scenario to bind; none checks every tested scenario that has no
+        /// red commit (ADR-2611191120 §1)
         #[arg(long = "test")]
         tests: Vec<String>,
+        /// Run the tests on this machine even when .hexa/project.json sets
+        /// test.remote (ADR-2611191120 §5)
+        #[arg(long)]
+        local: bool,
     },
     /// Every numbered decision has an example and a negative scenario; no
     /// model involved (ADR-2610221540 §3). All ADRs when none is named
@@ -123,6 +129,11 @@ pub enum SpecAction {
         /// List each amendment with its reason
         #[arg(long)]
         verbose: bool,
+        /// Run the tests on this machine even when .hexa/project.json sets
+        /// test.remote, which otherwise receives every test for its commit
+        /// (ADR-2611191120 §4, §5)
+        #[arg(long)]
+        local: bool,
     },
 }
 
@@ -132,7 +143,7 @@ pub async fn run(action: SpecAction) -> anyhow::Result<()> {
         SpecAction::Show { feature, check } => show(&feature, check).await,
         SpecAction::Workplan { feature } => workplan(&feature).await,
         SpecAction::Draft { adr, model, force } => super::spec_ledger::draft(&adr, model.as_deref(), force).await,
-        SpecAction::Red { adr, commit, tests } => super::spec_ledger::red(&adr, &commit, &tests).await,
+        SpecAction::Red { adr, commit, tests, local } => super::spec_ledger::red(&adr, &commit, &tests, local).await,
         SpecAction::Tests { adr, krate, model, red_at, replace, because, only } => {
             if only.is_empty() {
                 super::spec_ledger::tests(&adr, &krate, model.as_deref(), red_at, replace, because).await
@@ -146,7 +157,9 @@ pub async fn run(action: SpecAction) -> anyhow::Result<()> {
         SpecAction::Amend { adr, reason, file, confirm, by } => {
             super::spec_ledger::amend(&adr, &reason, file.as_deref(), confirm.as_deref(), by.as_deref())
         }
-        SpecAction::Verify { adr, ci, prove, verbose } => super::spec_ledger::verify(adr.as_deref(), ci, prove, verbose).await,
+        SpecAction::Verify { adr, ci, prove, verbose, local } => {
+            super::spec_ledger::verify(adr.as_deref(), ci, prove, verbose, local).await
+        }
     }
 }
 

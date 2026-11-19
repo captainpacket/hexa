@@ -16,8 +16,7 @@ use std::path::{Path, PathBuf};
 use hexa_core::ports::spec::{coverage, numbered_decisions, test_ref, Acceptance, Finding, Spec};
 use sha2::{Digest, Sha256};
 
-/// What a skip site prints when `HEXA_NO_SKIP` forbids the skip.
-pub const NOT_PROVEN_HERE: &str = "not proven here:";
+pub use crate::test_exec::{TestRun, NOT_PROVEN_HERE};
 
 // ── acceptance (§4) ─────────────────────────────────────────────────────────
 
@@ -50,18 +49,6 @@ pub fn acceptance_holds(spec: &Spec) -> Result<(), String> {
 
 // ── one scenario's test, run alone (§8) ─────────────────────────────────────
 
-pub enum TestRun {
-    Passed,
-    /// The test ran and failed.
-    Failed(String),
-    /// It never ran: the build failed (`compile` is true) or cargo did not.
-    Broken { compile: bool, tail: String },
-    NotFound(String),
-    Vacuous,
-    Ambiguous(u64),
-    NotProvenHere(String),
-}
-
 /// The nearest directory at or above `file`, inside `root`, with a Cargo.toml.
 fn crate_of(root: &Path, file: &Path) -> Option<PathBuf> {
     let mut dir = file.parent()?;
@@ -76,107 +63,14 @@ fn crate_of(root: &Path, file: &Path) -> Option<PathBuf> {
     }
 }
 
-/// The cargo arguments that run `f` in `file` and nothing else: an
-/// integration test by its target, a library or binary test by its module
-/// path in the target that compiles it. A module below `src/` may be compiled
-/// by the library or by `main.rs`, so it is run in each one the crate has.
-fn cargo_args(krate: &Path, file: &Path, f: &str) -> Option<Vec<String>> {
-    let rel = file.strip_prefix(krate).ok()?;
-    let manifest = krate.join("Cargo.toml").display().to_string();
-    let mut parts: Vec<String> = rel.with_extension("").iter().map(|s| s.to_string_lossy().to_string()).collect();
-    let (target, name) = match parts.first().map(String::as_str) {
-        Some("tests") if parts.len() == 2 => (vec!["--test".to_string(), parts[1].clone()], f.to_string()),
-        Some("src") if parts.get(1).map(String::as_str) == Some("bin") && parts.len() > 2 => {
-            // src/bin/x.rs, or src/bin/x/main.rs and the modules beside it.
-            let bin = parts[2].clone();
-            let mut path: Vec<String> = parts.split_off(3);
-            if matches!(path.last().map(String::as_str), Some("main" | "mod")) {
-                path.pop();
-            }
-            path.push(f.to_string());
-            (vec!["--bin".to_string(), bin], path.join("::"))
-        }
-        Some("src") => {
-            parts.remove(0);
-            let root = parts.len() == 1;
-            let target = match parts.last().map(String::as_str) {
-                Some("main") if root => vec!["--bins".to_string()],
-                Some("lib") if root => vec!["--lib".to_string()],
-                _ => {
-                    let src = krate.join("src");
-                    let has_bin = src.join("main.rs").is_file() || src.join("bin").is_dir();
-                    let mut t = Vec::new();
-                    if src.join("lib.rs").is_file() || !has_bin {
-                        t.push("--lib".to_string());
-                    }
-                    if has_bin {
-                        t.push("--bins".to_string());
-                    }
-                    t
-                }
-            };
-            if matches!(parts.last().map(String::as_str), Some("lib" | "mod" | "main")) {
-                parts.pop();
-            }
-            parts.push(f.to_string());
-            (target, parts.join("::"))
-        }
-        _ => return None,
-    };
-    let mut args = vec!["test".to_string(), "--manifest-path".to_string(), manifest];
-    args.extend(target);
-    // A module ref (`…::`) selects every test under it; a fn ref exactly one.
-    let module = name.ends_with("::");
-    args.extend(["--".to_string(), name]);
-    if !module {
-        args.push("--exact".to_string());
-    }
-    Some(args)
-}
-
-/// Run the test `r` (`<path>.rs::<fn>`) alone under `HEXA_NO_SKIP`, from
-/// `root`, building into `target_dir` when given.
+/// Run the test `r` alone, here, under `HEXA_NO_SKIP`, from `root`, building
+/// into `target_dir` when given. Any runner the ref names (ADR-2611191120 §1),
+/// with no configured runner and no remote: the test generator's red check.
 pub async fn run_test_alone(root: &Path, path_env: &str, r: &str, target_dir: Option<&Path>) -> TestRun {
-    let Some((file, f)) = test_ref(r) else { return TestRun::NotFound(format!("{r} is not `<path>.rs::<test_fn>`")) };
-    let abs = root.join(file);
-    let module = f.ends_with("::");
-    let leaf = f.trim_end_matches("::").rsplit("::").next().unwrap_or(f);
-    let text = std::fs::read_to_string(&abs).unwrap_or_default();
-    let declared = if module { format!("mod {leaf} ") } else { format!("fn {leaf}(") };
-    if !text.contains(&declared) {
-        return TestRun::NotFound(format!("{leaf} not found in {file}"));
-    }
-    let Some(args) = crate_of(root, &abs).and_then(|k| cargo_args(&k, &abs, f)) else {
-        return TestRun::NotFound(format!("{file} is in no crate's tests/ or src/"));
-    };
-    let quoted: Vec<String> = args.iter().map(|a| format!("{a:?}")).collect();
-    let target = target_dir.map(|t| format!(" CARGO_TARGET_DIR={:?}", t.display().to_string())).unwrap_or_default();
-    // CARGO_TERM_COLOR=never: this output is parsed, and an inherited
-    // `always` (CI sets it) wraps the lines read here in escape codes.
-    let shell = format!("export PATH={path_env:?} HEXA_NO_SKIP=1 CARGO_TERM_COLOR=never{target}; cargo {}", quoted.join(" "));
-    let (ok, out) = crate::direct_exec::run_evidence(&shell, root).await;
-    if let Some(line) = out.lines().find(|l| l.contains(NOT_PROVEN_HERE)) {
-        let reason = line.split(NOT_PROVEN_HERE).nth(1).unwrap_or("").trim();
-        return TestRun::NotProvenHere(reason.trim_matches(|c| c == '"' || c == '\'').to_string());
-    }
-    if !ok {
-        if out.contains("test result: FAILED") {
-            return TestRun::Failed(tail(&out, 10));
-        }
-        let compile = out.contains("could not compile") || out.contains("error[E");
-        return TestRun::Broken { compile, tail: tail(&out, 10) };
-    }
-    let passed: u64 = out
-        .lines()
-        .filter_map(|l| l.strip_prefix("test result: ok. "))
-        .filter_map(|l| l.split(" passed").next()?.trim().parse::<u64>().ok())
-        .sum();
-    match passed {
-        0 => TestRun::Vacuous,
-        1 => TestRun::Passed,
-        // A module scenario passes when every test in it ran and passed.
-        _ if module => TestRun::Passed,
-        n => TestRun::Ambiguous(n),
+    use crate::test_exec::{env_prefix, plan_test, run_plans, TestConfig, Where};
+    match plan_test(root, r, &TestConfig::default(), &env_prefix(Some(path_env), target_dir)) {
+        Ok(p) => run_plans(root, Where::Here, &[p]).await.pop().unwrap_or(TestRun::Vacuous),
+        Err(run) => run,
     }
 }
 
@@ -637,6 +531,7 @@ async fn red_at(
             TestRun::NotFound(why) => rejected.push(format!("{sid}: {why}")),
             TestRun::Vacuous => rejected.push(format!("{sid} ran 0 tests")),
             TestRun::NotProvenHere(why) => rejected.push(format!("{sid} is not proven here: {why}")),
+            TestRun::RunnerFailed(why) => rejected.push(format!("{sid}: {why}")),
         }
     }
     let _ = git(root, &["worktree", "remove", "--force", &wt_s]).await;
@@ -1505,39 +1400,6 @@ mod tests {
         // Doc lines, blank lines and attributes may stand between id and test.
         let body = "/// S1: a\n/// more\n#[test]\n#[ignore]\n\npub async fn kept() {}\n";
         assert_eq!(tests_by_scenario(body, &["S1"]).get("S1").map(String::as_str), Some("kept"));
-    }
-
-    #[test]
-    fn a_library_test_runs_by_its_module_path() {
-        let k = Path::new("/w/hexa-cli");
-        let a = cargo_args(k, &k.join("src/commands/adr/mod.rs"), "adr_gates::f").unwrap();
-        assert!(a.ends_with(&["--lib".into(), "--".into(), "commands::adr::adr_gates::f".into(), "--exact".into()]), "{a:?}");
-        let a = cargo_args(k, &k.join("tests/x.rs"), "f").unwrap();
-        assert!(a.ends_with(&["--test".into(), "x".into(), "--".into(), "f".into(), "--exact".into()]), "{a:?}");
-        assert!(cargo_args(k, &k.join("benches/b.rs"), "f").is_none());
-    }
-
-    #[test]
-    fn a_binary_test_runs_in_its_binary_target() {
-        let dir = tempfile::tempdir().unwrap();
-        let k = dir.path();
-        std::fs::create_dir_all(k.join("src/bin")).unwrap();
-        std::fs::write(k.join("src/lib.rs"), "").unwrap();
-        std::fs::write(k.join("src/main.rs"), "").unwrap();
-        let tail = |a: Vec<String>, n: usize| a[a.len() - n..].to_vec();
-        let a = cargo_args(k, &k.join("src/main.rs"), "f").unwrap();
-        assert_eq!(tail(a, 4), ["--bins", "--", "f", "--exact"], "src/main.rs is the binary, not the library");
-        let a = cargo_args(k, &k.join("src/bin/x.rs"), "f").unwrap();
-        assert_eq!(tail(a, 5), ["--bin", "x", "--", "f", "--exact"], "not the bogus path bin::x::f");
-        let a = cargo_args(k, &k.join("src/bin/x/util.rs"), "f").unwrap();
-        assert_eq!(tail(a, 5), ["--bin", "x", "--", "util::f", "--exact"]);
-        let a = cargo_args(k, &k.join("src/lib.rs"), "f").unwrap();
-        assert_eq!(tail(a, 4), ["--lib", "--", "f", "--exact"]);
-        let a = cargo_args(k, &k.join("src/cli/mod.rs"), "f").unwrap();
-        assert_eq!(tail(a, 5), ["--lib", "--bins", "--", "cli::f", "--exact"], "a module main.rs may own");
-        std::fs::remove_file(k.join("src/lib.rs")).unwrap();
-        let a = cargo_args(k, &k.join("src/cli/mod.rs"), "f").unwrap();
-        assert_eq!(tail(a, 4), ["--bins", "--", "cli::f", "--exact"], "no library target to ask for");
     }
 
     #[test]

@@ -19,15 +19,30 @@ pub struct TestRef {
 impl TestRef {
     /// The file's extension, without its dot.
     pub fn ext(&self) -> &str {
-        todo!("ADR-2611191120 §1")
+        extension(&self.file).unwrap_or("")
     }
+}
+
+/// The extension of the last component of `file`, when it has a stem.
+fn extension(file: &str) -> Option<&str> {
+    let base = file.rsplit('/').next()?;
+    let (stem, ext) = base.rsplit_once('.')?;
+    (!stem.is_empty() && !ext.is_empty() && ext.chars().all(|c| c.is_ascii_alphanumeric())).then_some(ext)
 }
 
 /// Split `r` at its first `::` (§1). The file must have an extension; the
 /// name must be non-empty, except that a `.sh` file may have none.
 pub fn parse_test_ref(r: &str) -> Option<TestRef> {
-    let _ = r;
-    todo!("ADR-2611191120 §1")
+    let (file, name) = match r.split_once("::") {
+        Some((f, n)) => (f, Some(n)),
+        None => (r, None),
+    };
+    let ext = extension(file)?;
+    match name {
+        Some("") => None,
+        None if ext != "sh" => None,
+        _ => Some(TestRef { file: file.to_string(), name: name.map(str::to_string) }),
+    }
 }
 
 /// The runner a test reference uses (§1, §2).
@@ -40,64 +55,139 @@ pub enum Runner {
     Configured(String),
 }
 
+/// The extensions vitest runs (§1).
+pub const VITEST_EXTENSIONS: [&str; 8] = ["ts", "tsx", "js", "mjs", "cjs", "mts", "cts", "jsx"];
+
 /// The runner for files with extension `ext`: a configured template first,
 /// then the built-in ones; `None` when there is neither (§1, §2).
 pub fn runner_for(ext: &str, configured: &BTreeMap<String, String>) -> Option<Runner> {
-    let _ = (ext, configured);
-    todo!("ADR-2611191120 §1 §2")
+    if let Some(t) = configured.get(ext).filter(|t| !t.trim().is_empty()) {
+        return Some(Runner::Configured(t.clone()));
+    }
+    match ext {
+        "rs" => Some(Runner::Cargo),
+        "sh" => Some(Runner::Bash),
+        e if VITEST_EXTENSIONS.contains(&e) => Some(Runner::Vitest),
+        _ => None,
+    }
 }
 
 /// Whether a file bound to a scenario is a test file that may be sealed (§8).
 pub fn is_test_file(path: &str) -> bool {
-    let _ = path;
-    todo!("ADR-2611191120 §8")
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    let Some((base, dirs)) = parts.split_last() else { return false };
+    dirs.iter().any(|d| matches!(*d, "tests" | "test" | "__tests__"))
+        || base.contains(".test.")
+        || base.contains(".spec.")
+        || extension(path) == Some("sh")
 }
 
 /// `s` as one single-quoted shell word.
 pub fn shell_quote(s: &str) -> String {
-    let _ = s;
-    todo!("ADR-2611191120 §2")
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 /// `template` with each `{key}` of `vars` replaced by its value, single-quoted
-/// for the shell (§2, §3).
+/// for the shell (§2, §3). One pass: a value is never itself substituted.
 pub fn fill(template: &str, vars: &[(&str, &str)]) -> String {
-    let _ = (template, vars);
-    todo!("ADR-2611191120 §2")
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    'scan: while !rest.is_empty() {
+        if rest.starts_with('{') {
+            for (k, v) in vars {
+                let key = format!("{{{k}}}");
+                if let Some(after) = rest.strip_prefix(key.as_str()) {
+                    out.push_str(&shell_quote(v));
+                    rest = after;
+                    continue 'scan;
+                }
+            }
+        }
+        let c = rest.chars().next().unwrap_or_default();
+        out.push(c);
+        rest = &rest[c.len_utf8()..];
+    }
+    out
 }
 
 /// `Err` naming what is missing when a `test.remote` template lacks `{commit}`
 /// or `{cmd}` (§3).
 pub fn check_remote_template(template: &str) -> Result<(), String> {
-    let _ = template;
-    todo!("ADR-2611191120 §3")
+    let missing: Vec<&str> = ["{commit}", "{cmd}"].into_iter().filter(|p| !template.contains(p)).collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "test.remote in .hexa/project.json lacks {}: the template gets the commit as {{commit}} and the command to run in \
+         a checkout of it as {{cmd}}, e.g. `bash ci/remote-gate.sh --commit {{commit}} --no-gate --extra {{cmd}}`",
+        missing.join(" and ")
+    ))
+}
+
+/// Whether `commit` is a full 40-hex commit id.
+fn is_full_commit(commit: &str) -> bool {
+    commit.len() == 40 && commit.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// The command that runs `cmd` at `commit` through `template` (§3). `commit`
 /// must be a full 40-hex commit id.
 pub fn remote_command(template: &str, commit: &str, cmd: &str) -> Result<String, String> {
-    let _ = (template, commit, cmd);
-    todo!("ADR-2611191120 §3")
+    check_remote_template(template)?;
+    if !is_full_commit(commit) {
+        return Err(format!("`{commit}` is not a full commit id (40 hex characters): a remote run names exactly one commit"));
+    }
+    Ok(fill(template, &[("commit", commit), ("cmd", cmd)]))
 }
 
 /// Whether a remote run's output names the full commit it was sent (§5).
 pub fn runner_ran(output: &str, commit: &str) -> bool {
-    let _ = (output, commit);
-    todo!("ADR-2611191120 §5")
+    is_full_commit(commit) && output.contains(commit)
 }
+
+const MARK: &str = "hexa-batch";
 
 /// One script that runs every command in turn, each between a begin and an
 /// end marker holding `nonce`, the end marker carrying its exit status (§4).
+/// The markers are printed by `printf` from their parts, so a runner that
+/// echoes the script does not print them; each command reads no stdin.
 pub fn batch_script(nonce: &str, cmds: &[String]) -> String {
-    let _ = (nonce, cmds);
-    todo!("ADR-2611191120 §4")
+    let mut s = String::from("set +e\n");
+    for (i, c) in cmds.iter().enumerate() {
+        s.push_str(&format!(
+            "printf '\\n%s:%s:begin:%d\\n' {MARK} {n} {i}\nbash -o pipefail -c {c} </dev/null 2>&1\nrc=$?\nprintf '\\n%s:%s:end:%d:%d\\n' {MARK} {n} {i} \"$rc\"\n",
+            n = shell_quote(nonce),
+            c = shell_quote(c)
+        ));
+    }
+    s
 }
 
 /// Each command's (exit 0, output) from a batch run's output, in order. `Err`
 /// when any end marker is missing: the run is a runner failure (§4, §5).
 pub fn split_batch(nonce: &str, n: usize, output: &str) -> Result<Vec<(bool, String)>, String> {
-    let _ = (nonce, n, output);
-    todo!("ADR-2611191120 §4 §5")
+    let lines: Vec<&str> = output.lines().map(|l| l.trim_end_matches('\r')).collect();
+    let mut out = Vec::with_capacity(n);
+    let mut at = 0;
+    for i in 0..n {
+        let begin = format!("{MARK}:{nonce}:begin:{i}");
+        let end = format!("{MARK}:{nonce}:end:{i}:");
+        let Some(b) = lines[at..].iter().position(|l| *l == begin).map(|p| p + at) else {
+            return Err(format!("the runner's output has no begin marker for test {}: it did not run every test", i + 1));
+        };
+        let Some(e) = lines[b + 1..].iter().position(|l| l.starts_with(&end)).map(|p| p + b + 1) else {
+            return Err(format!(
+                "the runner's output has no end marker for test {}: the run was cut short, or the runner lost its output",
+                i + 1
+            ));
+        };
+        let Ok(rc) = lines[e][end.len()..].trim().parse::<i64>() else {
+            return Err(format!("the end marker of test {} carries no exit status", i + 1));
+        };
+        let body = lines[b + 1..e].join("\n");
+        out.push((rc == 0, body.trim_end_matches('\n').to_string() + "\n"));
+        at = e + 1;
+    }
+    Ok(out)
 }
 
 /// What one test's run established.
@@ -113,26 +203,104 @@ pub enum Verdict {
     Unreadable(String),
 }
 
-/// The vitest `-t` pattern that selects a test named `name` (§1).
+/// The vitest `-t` pattern that selects a test named `name` (§1): the name,
+/// regex-escaped, at the end of the test's full name.
 pub fn vitest_pattern(name: &str) -> String {
-    let _ = name;
-    todo!("ADR-2611191120 §1")
+    let mut p = String::with_capacity(name.len() + 2);
+    for c in name.chars() {
+        if "\\^$.|?*+()[]{}/".contains(c) {
+            p.push('\\');
+        }
+        p.push(c);
+    }
+    p.push('$');
+    p
+}
+
+/// The first JSON object in `output`, at the start of a line, that is a
+/// vitest (Jest-shaped) report.
+fn vitest_report(output: &str) -> Option<serde_json::Value> {
+    let mut at = 0;
+    for line in output.split_inclusive('\n') {
+        if line.trim_start().starts_with('{') {
+            let start = at + (line.len() - line.trim_start().len());
+            let mut it = serde_json::Deserializer::from_str(&output[start..]).into_iter::<serde_json::Value>();
+            if let Some(Ok(v)) = it.next() {
+                if v.get("testResults").is_some_and(|t| t.is_array()) {
+                    return Some(v);
+                }
+            }
+        }
+        at += line.len();
+    }
+    None
 }
 
 /// Judge a `vitest run --reporter=json` output for the test named `name` (§1).
 pub fn judge_vitest(output: &str, name: &str) -> Verdict {
-    let _ = (output, name);
-    todo!("ADR-2611191120 §1")
+    let Some(report) = vitest_report(output) else {
+        return Verdict::Unreadable("no vitest JSON report in the output: vitest did not run, or not with --reporter=json".into());
+    };
+    let files = report["testResults"].as_array().cloned().unwrap_or_default();
+    let mut ran: Vec<&serde_json::Value> = Vec::new();
+    for f in &files {
+        let results = f["assertionResults"].as_array();
+        // A file that failed to load runs no test and says why.
+        if results.is_none_or(|r| r.is_empty()) && f["status"] == "failed" {
+            let msg = f["message"].as_str().unwrap_or("the test file failed");
+            return Verdict::Failed(format!("{}: {msg}", f["name"].as_str().unwrap_or("a test file")));
+        }
+        ran.extend(results.into_iter().flatten().filter(|a| matches!(a["status"].as_str(), Some("passed" | "failed"))));
+    }
+    match ran.as_slice() {
+        [] => Verdict::Vacuous,
+        [one] => {
+            let full = one["fullName"].as_str().unwrap_or("");
+            let title = one["title"].as_str().unwrap_or("");
+            if full != name && title != name {
+                return Verdict::Failed(format!("the test that ran is `{full}`, not `{name}`"));
+            }
+            if one["status"] == "passed" {
+                Verdict::Passed
+            } else {
+                let msgs: Vec<&str> = one["failureMessages"].as_array().into_iter().flatten().filter_map(|m| m.as_str()).collect();
+                Verdict::Failed(format!("`{full}` failed: {}", msgs.join("\n")))
+            }
+        }
+        many => Verdict::Ambiguous(many.len() as u64),
+    }
 }
 
-/// Judge a bash test script's run (§1).
+fn tail(out: &str, n: usize) -> String {
+    let lines: Vec<&str> = out.lines().collect();
+    lines[lines.len().saturating_sub(n)..].join("\n")
+}
+
+/// Judge a bash test script's run (§1): exit 0 passes, unless a runner the
+/// evidence reader knows reports a failure or zero tests.
 pub fn judge_script(exit_ok: bool, output: &str) -> Verdict {
-    let _ = (exit_ok, output);
-    todo!("ADR-2611191120 §1")
+    use crate::domain::evidence::{read_evidence, Evidence};
+    if !exit_ok {
+        return Verdict::Failed(format!("the script exited non-zero:\n{}", tail(output, 10)));
+    }
+    match read_evidence(true, output, false) {
+        Evidence::Passed { .. } | Evidence::Unrecognised | Evidence::Uncounted => Verdict::Passed,
+        Evidence::Vacuous => Verdict::Vacuous,
+        Evidence::Failed { reason } => Verdict::Failed(reason),
+    }
 }
 
-/// Judge a configured runner's run, by the evidence reader (§2).
+/// Judge a configured runner's run, by the evidence reader (§2): exactly one
+/// counted test passes.
 pub fn judge_counted(exit_ok: bool, output: &str) -> Verdict {
-    let _ = (exit_ok, output);
-    todo!("ADR-2611191120 §2")
+    use crate::domain::evidence::{read_evidence, Evidence, KNOWN_RUNNERS};
+    match read_evidence(exit_ok, output, false) {
+        Evidence::Passed { tests: 1 } => Verdict::Passed,
+        Evidence::Passed { tests } => Verdict::Ambiguous(tests),
+        Evidence::Vacuous => Verdict::Vacuous,
+        Evidence::Failed { reason } => Verdict::Failed(format!("{reason}:\n{}", tail(output, 10))),
+        Evidence::Unrecognised | Evidence::Uncounted => Verdict::Unreadable(format!(
+            "the runner exited 0 but no test runner hexa reads wrote its output ({KNOWN_RUNNERS})"
+        )),
+    }
 }

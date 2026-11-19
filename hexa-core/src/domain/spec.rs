@@ -46,7 +46,9 @@ pub struct Scenario {
     pub when: String,
     #[serde(default)]
     pub then: String,
-    /// `<path>::<test_fn>`, once the test exists.
+    /// `<path>.rs::<test_fn>`, `<path>.ts::<test name>`, `<path>.sh[::<arg>]`
+    /// or another configured runner's `<path>.<ext>::<name>`, once the test
+    /// exists (ADR-2611191120 §1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub test: Option<String>,
     /// The commit at which this scenario's test existed and failed, when it
@@ -95,8 +97,8 @@ impl Spec {
     pub fn test_files(&self) -> BTreeSet<String> {
         self.specs
             .iter()
-            .filter_map(|s| s.test.as_deref().and_then(test_ref))
-            .map(|(path, _)| path.to_string())
+            .filter_map(|s| s.test.as_deref().and_then(crate::domain::test_runner::parse_test_ref))
+            .map(|t| t.file)
             .collect()
     }
 }

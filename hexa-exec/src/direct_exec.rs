@@ -1649,7 +1649,8 @@ pub async fn gate_patch(
         ));
     }
     let (passed, output) = run_evidence(evidence, repo_root).await;
-    let verdict = evidence_verdict(passed, &output, uncounted);
+    // A gate that is one bash script counts as one test (ADR-2611191120 §7).
+    let verdict = hexa_core::ports::evidence::read_gate_evidence(evidence, passed, &output, uncounted);
     if !verdict.passes() {
         let tail: String = {
             let lines: Vec<&str> = output.lines().collect();
