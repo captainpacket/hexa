@@ -10,7 +10,7 @@
     "sha256": "e80b72124d136b799012b903a918b3f3c9bd576f7295243f21183c91772565eb"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611191120_spec.rs": "b3aba830ed912502a8252519c203b242fe7c81313e026525ec81fbb76f350493"
+    "hexa-cli/tests/adr_2611191120_spec.rs": "ea742bfa39eb909303ec7718aff3239e9de8beb3fb47806cde2fb6f10593a342"
   },
   "red": "2e257e2",
   "specs": [
@@ -349,6 +349,17 @@
       "when": "`hexa spec accept <ADR> --by a reviewer` runs",
       "then": "it exits non-zero naming Cargo.toml, that tests are generated for Rust only, and `hexa spec red` with `--test`, and the spec file is unchanged",
       "test": "hexa-cli/tests/adr_2611191120_spec.rs::s28_a_project_with_no_runner_is_refused"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-19T16:35:58.667304+00:00",
+      "base_commit": "2e257e21501a178efeb2299a2a649b7da9392ab3",
+      "by": "implementing agent (gary's standing instruction)",
+      "file": "hexa-cli/tests/adr_2611191120_spec.rs",
+      "from": "b3aba830ed912502a8252519c203b242fe7c81313e026525ec81fbb76f350493",
+      "reason": "S20 fixture bug: run_env points HOME at the fixture, which has no git identity, so do gate's commit failed after its gate passed; give hexa a git identity through GIT_AUTHOR_*/GIT_COMMITTER_*. No assertion changes.",
+      "to": "ea742bfa39eb909303ec7718aff3239e9de8beb3fb47806cde2fb6f10593a342"
     }
   ]
 }

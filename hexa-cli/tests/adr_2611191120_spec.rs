@@ -41,7 +41,13 @@ fn run_env(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Run {
         .env("CLAUDE_PROJECT_DIR", dir)
         .env_remove("HEXA_TASK")
         .env_remove("HEXA_INTERNAL")
-        .env("NO_COLOR", "1");
+        .env("NO_COLOR", "1")
+        // HOME is the fixture's, which holds no git identity: a verb that
+        // commits (`do gate`) needs one.
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@x")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@x");
     for (k, v) in env {
         cmd.env(k, v);
     }
