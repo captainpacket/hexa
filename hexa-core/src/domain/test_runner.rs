@@ -147,15 +147,15 @@ pub fn runner_ran(output: &str, commit: &str) -> bool {
 const MARK: &str = "hexa-batch";
 
 /// One script that runs every command in turn, each between a begin and an
-/// end marker holding `nonce`, the end marker carrying its exit status (§4).
+/// end marker holding `tag`, a per-run tag (not a secret: it only tells this run's markers from text a command prints), the end marker carrying its exit status (§4).
 /// The markers are printed by `printf` from their parts, so a runner that
 /// echoes the script does not print them; each command reads no stdin.
-pub fn batch_script(nonce: &str, cmds: &[String]) -> String {
+pub fn batch_script(tag: &str, cmds: &[String]) -> String {
     let mut s = String::from("set +e\n");
     for (i, c) in cmds.iter().enumerate() {
         s.push_str(&format!(
             "printf '\\n%s:%s:begin:%d\\n' {MARK} {n} {i}\nbash -o pipefail -c {c} </dev/null 2>&1\nrc=$?\nprintf '\\n%s:%s:end:%d:%d\\n' {MARK} {n} {i} \"$rc\"\n",
-            n = shell_quote(nonce),
+            n = shell_quote(tag),
             c = shell_quote(c)
         ));
     }
@@ -164,13 +164,13 @@ pub fn batch_script(nonce: &str, cmds: &[String]) -> String {
 
 /// Each command's (exit 0, output) from a batch run's output, in order. `Err`
 /// when any end marker is missing: the run is a runner failure (§4, §5).
-pub fn split_batch(nonce: &str, n: usize, output: &str) -> Result<Vec<(bool, String)>, String> {
+pub fn split_batch(tag: &str, n: usize, output: &str) -> Result<Vec<(bool, String)>, String> {
     let lines: Vec<&str> = output.lines().map(|l| l.trim_end_matches('\r')).collect();
     let mut out = Vec::with_capacity(n);
     let mut at = 0;
     for i in 0..n {
-        let begin = format!("{MARK}:{nonce}:begin:{i}");
-        let end = format!("{MARK}:{nonce}:end:{i}:");
+        let begin = format!("{MARK}:{tag}:begin:{i}");
+        let end = format!("{MARK}:{tag}:end:{i}:");
         let Some(b) = lines[at..].iter().position(|l| *l == begin).map(|p| p + at) else {
             return Err(format!("the runner's output has no begin marker for test {}: it did not run every test", i + 1));
         };

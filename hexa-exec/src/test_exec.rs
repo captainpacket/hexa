@@ -294,7 +294,7 @@ fn judge_cargo(module: bool, ok: bool, out: &str) -> TestRun {
     }
 }
 
-fn nonce() -> String {
+fn run_tag() -> String {
     let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default();
     format!("{:x}{:x}", t, std::process::id())
 }
@@ -324,7 +324,7 @@ pub async fn run_plans(dir: &Path, at: Where<'_>, plans: &[Planned]) -> Vec<Test
 /// Send `cmds` for `commit` through `template` in one run, from `dir`; each
 /// command's (exit 0, output), or why the runner proved nothing (§4, §5).
 async fn run_remote(dir: &Path, template: &str, commit: &str, cmds: Vec<String>) -> Result<Vec<(bool, String)>, String> {
-    let n = nonce();
+    let n = run_tag();
     let full = remote_command(template, commit, &batch_script(&n, &cmds))?;
     let (_, out) = crate::direct_exec::run_evidence(&full, dir).await;
     if !runner_ran(&out, commit) {
@@ -450,5 +450,106 @@ mod tests {
         std::fs::remove_file(k.join("src/lib.rs")).unwrap();
         let a = cargo_args(k, k, &k.join("src/cli/mod.rs"), "f").unwrap();
         assert_eq!(tail(a, 4), ["--bins", "--", "cli::f", "--exact"], "no library target to ask for");
+    }
+
+    // ── no substituted value can execute (ADR-2611191120 §2, §3) ─────────────
+
+    /// Names a hostile scenario ref or file could carry: each tries to run
+    /// `touch pwned` by breaking out of its quoting.
+    const HOSTILE: [&str; 8] = [
+        "a'; touch pwned; '",
+        "$(touch pwned)",
+        "`touch pwned`",
+        "\"; touch pwned; \"",
+        "x\ntouch pwned",
+        "x' && touch pwned && echo '",
+        "{file} {name} {cmd} {commit}",
+        "\\'; touch pwned #",
+    ];
+
+    fn sh(dir: &Path, cmd: &str) -> (bool, String) {
+        let o = std::process::Command::new("bash").arg("-c").arg(cmd).current_dir(dir).output().unwrap();
+        (o.status.success(), String::from_utf8_lossy(&o.stdout).to_string())
+    }
+
+    fn assert_inert(dir: &Path, what: &str) {
+        assert!(!dir.join("pwned").exists(), "{what:?} executed `touch pwned`");
+    }
+
+    #[test]
+    fn a_hostile_name_reaches_a_bash_test_as_one_literal_argument() {
+        for name in HOSTILE {
+            let d = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(d.path().join("tests")).unwrap();
+            std::fs::write(d.path().join("tests/echo.sh"), "printf '%s' \"$1\"; [ $# -eq 1 ]\n").unwrap();
+            let p = plan_test(d.path(), &format!("tests/echo.sh::{name}"), &TestConfig::default(), "").unwrap();
+            let (ok, out) = sh(d.path(), &p.cmd);
+            assert!(ok, "one argument for {name:?}: {}", p.cmd);
+            assert_eq!(out, name, "the script got the name unchanged: {}", p.cmd);
+            assert_inert(d.path(), name);
+        }
+    }
+
+    #[test]
+    fn a_hostile_file_and_name_reach_a_configured_runner_unchanged() {
+        let mut cfg = TestConfig::default();
+        cfg.runners.insert("py".into(), "printf '%s\\n' {file} {name}".into());
+        for name in HOSTILE {
+            let d = tempfile::tempdir().unwrap();
+            // A file name can carry the attack too.
+            let file = "tests/a;touch pwned;$(touch pwned).py";
+            std::fs::create_dir_all(d.path().join("tests")).unwrap();
+            std::fs::write(d.path().join(file), "").unwrap();
+            let p = plan_test(d.path(), &format!("{file}::{name}"), &cfg, "").unwrap();
+            let (ok, out) = sh(d.path(), &p.cmd);
+            assert!(ok, "{}", p.cmd);
+            assert_eq!(out, format!("{file}\n{name}\n"), "file and name are two literal arguments: {}", p.cmd);
+            assert_inert(d.path(), name);
+        }
+    }
+
+    #[test]
+    fn a_hostile_name_reaches_vitest_only_as_its_escaped_pattern() {
+        for name in HOSTILE {
+            let d = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(d.path().join("web/src")).unwrap();
+            std::fs::create_dir_all(d.path().join("bin")).unwrap();
+            std::fs::write(d.path().join("web/package.json"), "{}").unwrap();
+            std::fs::write(d.path().join("web/src/a.test.ts"), "").unwrap();
+            // An npx that prints each argument it received on its own line, NUL-separated.
+            let npx = d.path().join("bin/npx");
+            std::fs::write(&npx, "#!/bin/bash\nprintf '%s\\0' \"$@\"\n").unwrap();
+            #[cfg(unix)]
+            std::fs::set_permissions(&npx, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+            let path = format!("{}:{}", d.path().join("bin").display(), std::env::var("PATH").unwrap_or_default());
+            let p = plan_test(d.path(), &format!("web/src/a.test.ts::{name}"), &TestConfig::default(), &env_prefix(Some(&path), None)).unwrap();
+            let (ok, out) = sh(d.path(), &p.cmd);
+            assert!(ok, "{}", p.cmd);
+            let args: Vec<&str> = out.trim_end_matches('\0').split('\0').collect();
+            let pattern = hexa_core::ports::test_runner::vitest_pattern(name);
+            assert_eq!(args, ["vitest", "run", "src/a.test.ts", "-t", pattern.as_str(), "--reporter=json"], "{}", p.cmd);
+            assert_inert(d.path(), name);
+            assert_inert(&d.path().join("web"), name);
+        }
+    }
+
+    #[test]
+    fn a_hostile_command_reaches_the_remote_template_as_one_word() {
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        for cmd in HOSTILE {
+            let d = tempfile::tempdir().unwrap();
+            let full = hexa_core::ports::test_runner::remote_command("printf '%s|%s' {commit} {cmd}", commit, cmd).unwrap();
+            let (ok, out) = sh(d.path(), &full);
+            assert!(ok, "{full}");
+            assert_eq!(out, format!("{commit}|{cmd}"), "{full}");
+            assert_inert(d.path(), cmd);
+            // And the batch script that goes through it runs the command
+            // only inside `bash -c`, with its text intact.
+            let script = hexa_core::ports::test_runner::batch_script("t", &[format!("printf '%s' {}", shell_quote(cmd))]);
+            let (_, out) = sh(d.path(), &script);
+            let got = hexa_core::ports::test_runner::split_batch("t", 1, &out).unwrap();
+            assert_eq!(got[0].1.trim_end_matches('\n'), cmd.trim_end_matches('\n'), "{script}");
+            assert_inert(d.path(), cmd);
+        }
     }
 }

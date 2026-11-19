@@ -36,7 +36,7 @@ As of v26.11.13, `hexa loop task done` does not rerun a gate. It checks off a st
    - `hexa loop stage done` sends the recorded gate for HEAD.
    - `land`'s re-run after a rebase sends the gate for the rebased commit.
    
-   All tests for one commit go in **one** remote run. hexa sends a script that prints a begin and an end marker, holding a per-run nonce, around each test's command, with the command's exit status in the end marker. It then judges each test from its own segment. One clone and one build serve every scenario of the commit.
+   All tests for one commit go in **one** remote run. hexa sends a script that prints a begin and an end marker, holding a per-run tag, around each test's command, with the command's exit status in the end marker. It then judges each test from its own segment. One clone and one build serve every scenario of the commit.
 
 5. **The remote run must prove itself, and it never falls back to a local run.** hexa refuses before running anything, naming the step to take, when:
    - the commit is on no remote-tracking ref ("push it": `git push`);

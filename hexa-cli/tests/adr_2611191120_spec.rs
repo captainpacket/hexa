@@ -489,10 +489,10 @@ fn s13_a_remote_failure_fails_and_nothing_runs_here() {
 /// S14: The batch markers carry each command's exit status and output back to its own test
 #[test]
 fn s14_batch_markers_carry_each_result_back() {
-    let nonce = "n0nce42";
+    let tag = "t4g42";
     let cmds = vec!["echo one; exit 0".to_string(), "echo two; exit 3".to_string()];
-    let (_, out) = bash(&batch_script(nonce, &cmds));
-    let got = split_batch(nonce, 2, &out).unwrap_or_else(|e| panic!("{e}:\n{out}"));
+    let (_, out) = bash(&batch_script(tag, &cmds));
+    let got = split_batch(tag, 2, &out).unwrap_or_else(|e| panic!("{e}:\n{out}"));
     assert_eq!(got.len(), 2);
     assert!(got[0].0 && got[0].1.contains("one") && !got[0].1.contains("two"), "{got:?}");
     assert!(!got[1].0 && got[1].1.contains("two") && !got[1].1.contains("one"), "{got:?}");
@@ -536,10 +536,10 @@ fn s16_a_runner_that_does_not_prove_itself_is_a_runner_failure() {
     assert_ne!(r.code, 0, "a runner failure is not red:\n{}", r.out);
     assert_eq!(read(d.path(), &spec_rel()), before, "nothing recorded");
 
-    let nonce = "n0nce42";
-    let (_, out) = bash(&batch_script(nonce, &["echo one".to_string(), "echo two".to_string()]));
-    let cut = out.rfind("n0nce42").unwrap();
-    let e = split_batch(nonce, 2, &out[..cut.saturating_sub(1)]).unwrap_err();
+    let tag = "t4g42";
+    let (_, out) = bash(&batch_script(tag, &["echo one".to_string(), "echo two".to_string()]));
+    let cut = out.rfind("t4g42").unwrap();
+    let e = split_batch(tag, 2, &out[..cut.saturating_sub(1)]).unwrap_err();
     assert!(e.contains("marker"), "{e}");
 }
 
