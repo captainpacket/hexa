@@ -1680,6 +1680,7 @@ fn checkout_at(root: &Path, target: &Path, sha: &str) -> Result<PathBuf, String>
     if !add.status.success() {
         return Err(String::from_utf8_lossy(&add.stderr).trim().to_string());
     }
+    hexa_exec::test_exec::link_node_modules(root, &wt);
     Ok(wt)
 }
 

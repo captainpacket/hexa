@@ -225,8 +225,11 @@ pub fn plan_test(root: &Path, r: &str, cfg: &TestConfig, prefix: &str) -> Result
             };
             let in_pkg = rel(&pkg, &abs);
             let cd = if pkg == root { String::new() } else { format!("cd {} && ", shell_quote(&rel(root, &pkg))) };
+            // npm_config_yes=false: npx never fetches a vitest the package does
+            // not have; a missing runner fails loudly instead of a stranger
+            // version running in its place.
             let cmd = format!(
-                "{prefix}{cd}npx vitest run {} -t {} --reporter=json",
+                "{prefix}export npm_config_yes=false; {cd}npx vitest run {} -t {} --reporter=json",
                 shell_quote(&in_pkg),
                 shell_quote(&vitest_pattern(&name))
             );
@@ -369,6 +372,32 @@ pub fn remote_preflight(dir: &Path, commit: &str, head_tree: bool) -> Result<(),
         }
     }
     Ok(())
+}
+
+/// Link each `node_modules` the checkout at `root` has into the checkout at
+/// `wt` of an older commit, beside the same `package.json`, so vitest runs
+/// there with the project's installed dependencies (a fresh checkout has none).
+pub fn link_node_modules(root: &Path, wt: &Path) {
+    fn walk(root: &Path, wt: &Path, rel: &Path, depth: usize) {
+        let here = root.join(rel);
+        if here.join("package.json").is_file() && here.join("node_modules").is_dir() && !wt.join(rel).join("node_modules").exists()
+            && wt.join(rel).join("package.json").is_file()
+        {
+            #[cfg(unix)]
+            let _ = std::os::unix::fs::symlink(here.join("node_modules"), wt.join(rel).join("node_modules"));
+        }
+        if depth == 0 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(&here) else { return };
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if e.path().is_dir() && !name.starts_with('.') && !matches!(name.as_str(), "node_modules" | "target") {
+                walk(root, wt, &rel.join(&name), depth - 1);
+            }
+        }
+    }
+    walk(root, wt, Path::new(""), 3);
 }
 
 /// Run a gate command for HEAD of `dir` (§4): here, or through the remote.

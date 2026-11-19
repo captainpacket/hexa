@@ -88,3 +88,10 @@ The contract for a remote template:
 - `--local` is the only way back to a local run, and it is typed each time.
 - `hexa spec tests` still generates Rust tests only. A TypeScript or bash scenario's test is written by a person or a builder, before the code, and bound with `hexa spec red --test` after hexa has watched it fail at its commit.
 - `hexa spec tests` itself (its red check) still builds locally. It is not routed through `test.remote` here; that is recorded as a follow-up gap.
+
+## Addendum, 2026-11-19: what the build settled
+
+- **npx never fetches.** The vitest command exports `npm_config_yes=false`, so a package without vitest installed fails loudly. Without it, the worked example's `spec red` ran in a fresh checkout with no `node_modules`, and npx installed vitest@5.1.1 in place of the project's 2.1.9: a different runner, silently. That breaks the rule that a gate does not degrade silently.
+- **A red or prove checkout gets the project's dependencies.** `spec red` and `spec verify --prove` check out an older commit into a worktree. Each `node_modules` beside a `package.json` in the main checkout is linked into it, at the same path, so vitest runs there. A remote runner installs its own dependencies: hexa sends only the test command.
+- **`land` is reached only from `hexa do gate`.** Under `test.remote`, `do gate` refuses without `--local` (§6), so `land`'s re-run in practice runs here, after an explicit `--local`. The remote path in §4 is still there for a caller that does not opt out.
+- **`hexa spec tests` is not routed.** Generation (`red_at`) still builds in a local worktree. Routing it through `test.remote` is follow-up work.
