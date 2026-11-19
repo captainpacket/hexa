@@ -32,6 +32,8 @@ pub mod resource_governor;
 pub mod simple_agent;
 pub mod spec_author;
 pub mod telegram_notifier;
+// Running a scenario's test or a gate, here or remotely (ADR-2611191120).
+pub mod test_exec;
 pub mod tool_registry;
 // Score a transcript of a model using hexa against a scenario (ADR-2611160910).
 pub mod usage_eval;

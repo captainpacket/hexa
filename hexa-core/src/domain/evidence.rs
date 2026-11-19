@@ -27,7 +27,7 @@ impl Evidence {
 }
 
 /// The runners this reader knows, for a refusal that has to name them (§5).
-pub const KNOWN_RUNNERS: &str = "cargo test, go test, node --test (TAP or the spec reporter), bun test, hexa spec verify";
+pub const KNOWN_RUNNERS: &str = "cargo test, go test, node --test (TAP or the spec reporter), bun test, vitest (its summary or --reporter=json), npx vitest, hexa spec verify, bash (one script alone, ADR-2611191120 §7)";
 
 /// Read a gate run. `uncounted` is the declaration of §6; without it the
 /// exit status alone never passes.
@@ -49,6 +49,31 @@ pub fn read_evidence(exit_ok: bool, output: &str, uncounted: bool) -> Evidence {
         return Evidence::Vacuous;
     }
     Evidence::Passed { tests: t.passed }
+}
+
+/// Read a gate run by its command too (ADR-2611191120 §7): a gate that is
+/// exactly one bash script and exits 0 counts as one passed test when its
+/// output holds no runner line this reader knows.
+pub fn read_gate_evidence(cmd: &str, exit_ok: bool, output: &str, uncounted: bool) -> Evidence {
+    match read_evidence(exit_ok, output, uncounted) {
+        Evidence::Unrecognised if is_single_script(cmd) => Evidence::Passed { tests: 1 },
+        e => e,
+    }
+}
+
+/// Whether `cmd` is exactly one bash script: `bash <p>.sh [args]`, `sh <p>.sh`
+/// or `./<p>.sh`, with no `;`, `&&`, `||` or `|` (ADR-2611191120 §7).
+pub fn is_single_script(cmd: &str) -> bool {
+    let cmd = cmd.trim();
+    if ["&", "|", ";", "\n", "`", "$("].iter().any(|op| cmd.contains(op)) {
+        return false;
+    }
+    let words: Vec<&str> = cmd.split_whitespace().collect();
+    match words.as_slice() {
+        [shell, script, ..] if matches!(*shell, "bash" | "sh") => script.ends_with(".sh") && !script.starts_with('-'),
+        [script, ..] => script.ends_with(".sh") && script.contains('/'),
+        [] => false,
+    }
 }
 
 #[derive(Default)]
@@ -77,11 +102,34 @@ fn count_after(line: &str, prefix: &str) -> Option<u64> {
     line.strip_prefix(prefix)?.split_whitespace().next()?.parse().ok()
 }
 
+/// The number after `"key":` in a JSON report, as in `"numPassedTests": 4`.
+fn json_count(output: &str, key: &str) -> Option<u64> {
+    let at = output.find(&format!("\"{key}\""))? + key.len() + 2;
+    let rest = output[at..].trim_start().strip_prefix(':')?.trim_start();
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
 fn tally(output: &str) -> Tally {
     let mut t = Tally::default();
+    // vitest's (and Jest's) JSON report (ADR-2611191120 §7).
+    if let Some(passed) = json_count(output, "numPassedTests") {
+        t.saw(passed, json_count(output, "numFailedTests").unwrap_or(0));
+    }
     for raw in output.lines() {
         let line = raw.trim();
         if line.is_empty() {
+            continue;
+        }
+
+        // vitest's summary: "Test Files  1 passed (1)" names the runner;
+        // "Tests  1 failed | 4 passed (5)" counts (ADR-2611191120 §7).
+        if line.starts_with("Test Files ") && line.ends_with(')') {
+            t.recognised = true;
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("Tests ").filter(|_| line.ends_with(')')) {
+            t.saw(count_before(rest, "passed").unwrap_or(0), count_before(rest, "failed").unwrap_or(0));
             continue;
         }
 

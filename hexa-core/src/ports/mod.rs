@@ -6,6 +6,8 @@ pub mod inference;
 pub mod edit;
 // The spec an ADR compiles to, and its coverage rule (ADR-2610221540).
 pub mod spec;
+// Which runner a scenario's test names, and where tests run (ADR-2611191120).
+pub mod test_runner;
 // Which build a binary is, and whether it is behind (ADR-2610270853).
 pub mod project_floor;
 pub mod provenance;

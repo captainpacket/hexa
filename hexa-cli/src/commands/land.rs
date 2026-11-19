@@ -47,8 +47,9 @@ fn checkout_of(dir: &Path, branch: &str) -> Option<PathBuf> {
 }
 
 /// Land the current branch of the worktree at `root` on the base. `gate`
-/// re-runs on the rebased tree when the rebase moved the branch.
-pub async fn land(root: &Path, gate: &str, uncounted: bool) -> Landing {
+/// re-runs on the rebased tree when the rebase moved the branch: here, or
+/// through test.remote unless `local` (ADR-2611191120 §4).
+pub async fn land(root: &Path, gate: &str, uncounted: bool, local: bool) -> Landing {
     let base = crate::commands::finish::base_branch(root);
     let branch = match git(root, &["symbolic-ref", "--quiet", "--short", "HEAD"]) {
         Ok(b) => b,
@@ -69,8 +70,15 @@ pub async fn land(root: &Path, gate: &str, uncounted: bool) -> Landing {
         }
         let after = git(root, &["rev-parse", "HEAD"]).unwrap_or_default();
         if after != before {
-            let (passed, output) = hexa_exec::direct_exec::run_evidence(gate, root).await;
-            let verdict = hexa_core::ports::evidence::read_evidence(passed, &output, uncounted);
+            let ran = match hexa_exec::test_exec::test_config(root) {
+                Ok(cfg) => hexa_exec::test_exec::run_gate(root, gate, &cfg, local).await,
+                Err(e) => Err(e),
+            };
+            let (passed, output) = match ran {
+                Ok(r) => r,
+                Err(e) => return not(format!("the gate could not be re-run on {branch} rebased onto {base}: {e}")),
+            };
+            let verdict = hexa_core::ports::evidence::read_gate_evidence(gate, passed, &output, uncounted);
             if !verdict.passes() {
                 return not(format!("the gate does not pass on {branch} rebased onto {base}; the rebased branch is kept for you to fix"));
             }

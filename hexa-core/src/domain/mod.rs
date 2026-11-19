@@ -19,6 +19,7 @@ pub mod messages;
 pub mod project_floor;
 pub mod provenance;
 pub mod spec;
+pub mod test_runner;
 pub mod tools;
 pub mod workflow;
 pub mod validation;

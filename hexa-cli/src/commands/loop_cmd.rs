@@ -44,6 +44,10 @@ pub enum LoopAction {
     /// Record the stage: design, decide, gate, build, harden or done
     Stage {
         stage: String,
+        /// Run the gate on this machine even when .hexa/project.json sets
+        /// test.remote, which otherwise receives it for HEAD (ADR-2611191120 §4, §5)
+        #[arg(long)]
+        local: bool,
     },
     /// Record the design draft this work is under and set the stage to design
     /// (ADR-2610281011); the draft must be a file inside the project
@@ -1365,7 +1369,7 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
             println!("{} {}", "\u{2b21}".green(), status_line(&cwd));
             println!("  evidence {command}");
         }
-        LoopAction::Stage { stage } => {
+        LoopAction::Stage { stage, local } => {
             let stage = stage.to_lowercase();
             let stages = hexa_exec::egm::loop_stage_words();
             if !stages.contains(&stage.as_str()) {
@@ -1403,8 +1407,13 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
                 };
                 let uncounted = st.as_ref().and_then(|s| s.get("gate_uncounted")).and_then(|v| v.as_bool()).unwrap_or(false);
                 println!("  running the gate: {gate}");
-                let (passed, output) = hexa_exec::direct_exec::run_evidence(gate, &cwd).await;
-                let verdict = hexa_core::ports::evidence::read_evidence(passed, &output, uncounted);
+                // Here, or through test.remote for HEAD (ADR-2611191120 §4); a
+                // refusal or a runner failure is never a gate result (§5).
+                let cfg = hexa_exec::test_exec::test_config(&cwd).map_err(|e| anyhow::anyhow!(e))?;
+                let (passed, output) = hexa_exec::test_exec::run_gate(&cwd, gate, &cfg, local)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("the stage stays where it was: {e}"))?;
+                let verdict = hexa_core::ports::evidence::read_gate_evidence(gate, passed, &output, uncounted);
                 println!("  {}", gate_line(&verdict));
                 if !verdict.passes() {
                     if matches!(verdict, hexa_core::ports::evidence::Evidence::Failed { .. }) {

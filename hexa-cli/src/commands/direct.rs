@@ -73,6 +73,11 @@ pub enum DoAction {
         /// Keep the commit on its branch: do not land it on the base (ADR-2611161800 §4)
         #[arg(long)]
         no_land: bool,
+        /// Gate here even when .hexa/project.json sets test.remote; without it a
+        /// remote project refuses, since no remote runner sees an uncommitted
+        /// change (ADR-2611191120 §6)
+        #[arg(long)]
+        local: bool,
     },
     /// List recent direct runs (task, evidence verdict, commit) in this repository.
     Runs {
@@ -288,7 +293,7 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
                 }
             }
         }
-        DoAction::Gate { files, evidence, message, uncounted, no_land } => {
+        DoAction::Gate { files, evidence, message, uncounted, no_land, local } => {
             let top = std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).output()?;
             if !top.status.success() {
                 anyhow::bail!("hexa do gate runs inside a git repository");
@@ -307,6 +312,16 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
                     Some(p) => rel.push(p),
                     None => anyhow::bail!("{f} is outside the repository ({}): only files in it can be gated and committed", root.display()),
                 }
+            }
+            // A remote runner sees only pushed commits; this gates an
+            // uncommitted change, so it never silently runs here (ADR-2611191120 §6).
+            let cfg = hexa_exec::test_exec::test_config(&root).map_err(|e| anyhow::anyhow!(e))?;
+            if cfg.remote.is_some() && !local {
+                anyhow::bail!(
+                    "refused: .hexa/project.json sets test.remote, so gates run on the remote runner, which sees only pushed \
+                     commits, and `hexa do gate` gates an uncommitted change. Gate it here with --local, or commit and push it \
+                     and close with `hexa loop stage done` or `hexa spec verify`, which send the gate to the remote. Nothing committed"
+                );
             }
             crate::commands::loop_cmd::note_run_gate(&evidence, "build", None);
             if uncounted {
@@ -336,7 +351,7 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
                     let mut result = json!({ "commit": sha, "files": rel });
                     if !no_land {
                         crate::commands::events::step_start("land");
-                        match crate::commands::land::land(&root, &evidence, uncounted).await {
+                        match crate::commands::land::land(&root, &evidence, uncounted, local).await {
                             crate::commands::land::Landing::OnBase => {}
                             crate::commands::land::Landing::Landed { base, sha } => {
                                 println!("{} on {} at {}", "✓ landed".green().bold(), base, sha.yellow());
