@@ -66,7 +66,7 @@ fn crate_of(root: &Path, file: &Path) -> Option<PathBuf> {
 /// Run the test `r` alone, here, under `HEXA_NO_SKIP`, from `root`, building
 /// into `target_dir` when given. Any runner the ref names (ADR-2611191120 §1),
 /// with no configured runner and no remote: the test generator's red check.
-pub async fn run_test_alone(root: &Path, path_env: &str, r: &str, target_dir: Option<&Path>) -> TestRun {
+async fn run_test_alone(root: &Path, path_env: &str, r: &str, target_dir: Option<&Path>) -> TestRun {
     use crate::test_exec::{env_prefix, plan_test, run_plans, TestConfig, Where};
     match plan_test(root, r, &TestConfig::default(), &env_prefix(Some(path_env), target_dir)) {
         Ok(p) => run_plans(root, Where::Here, &[p]).await.pop().unwrap_or(TestRun::Vacuous),

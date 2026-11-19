@@ -320,7 +320,7 @@ pub async fn run_plans(dir: &Path, at: Where<'_>, plans: &[Planned]) -> Vec<Test
 
 /// Send `cmds` for `commit` through `template` in one run, from `dir`; each
 /// command's (exit 0, output), or why the runner proved nothing (§4, §5).
-pub async fn run_remote(dir: &Path, template: &str, commit: &str, cmds: Vec<String>) -> Result<Vec<(bool, String)>, String> {
+async fn run_remote(dir: &Path, template: &str, commit: &str, cmds: Vec<String>) -> Result<Vec<(bool, String)>, String> {
     let n = nonce();
     let full = remote_command(template, commit, &batch_script(&n, &cmds))?;
     let (_, out) = crate::direct_exec::run_evidence(&full, dir).await;

@@ -56,7 +56,7 @@ pub enum Runner {
 }
 
 /// The extensions vitest runs (§1).
-pub const VITEST_EXTENSIONS: [&str; 8] = ["ts", "tsx", "js", "mjs", "cjs", "mts", "cts", "jsx"];
+const VITEST_EXTENSIONS: [&str; 8] = ["ts", "tsx", "js", "mjs", "cjs", "mts", "cts", "jsx"];
 
 /// The runner for files with extension `ext`: a configured template first,
 /// then the built-in ones; `None` when there is neither (§1, §2).
