@@ -299,6 +299,9 @@ fn nonce() -> String {
 /// Run every plan in `dir` (§4). Here, one at a time; remote, all in one run
 /// whose output must name the commit and carry every end marker (§5).
 pub async fn run_plans(dir: &Path, at: Where<'_>, plans: &[Planned]) -> Vec<TestRun> {
+    if plans.is_empty() {
+        return Vec::new();
+    }
     match at {
         Where::Here => {
             let mut out = Vec::with_capacity(plans.len());

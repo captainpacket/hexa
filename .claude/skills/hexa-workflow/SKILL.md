@@ -110,6 +110,19 @@ The commit holding them is recorded as `red` and the files are sealed. No
 change to a sealed test is accepted afterwards; a requirement changes through
 the ADR, then the spec, then a new acceptance.
 
+`hexa spec tests` writes Rust. A scenario tested in vitest or by a bash gate
+script is bound to a test you write first, after hexa watches it fail at its
+commit (ADR-2611191120). The ref names its runner by extension:
+`<file>.rs::<fn>` (cargo), `<file>.ts::<test name>` (vitest, from the nearest
+package.json; exactly that one test must run and pass), `<file>.sh[::<arg>]`
+(bash, exit 0). Other languages get a template under `test.runners` in
+`.hexa/project.json`.
+
+```bash
+hexa spec red ADR-<id> <commit> --test "S3=web/src/a.test.ts::adds two" --test S4=ci/check-x.sh
+hexa spec seal ADR-<id>
+```
+
 ## 4. Build to the sealed tests
 
 ```bash
@@ -141,6 +154,17 @@ hexa loop gate "hexa analyze . --exit-code" --uncounted
 
 The commit and every report then say `uncounted`, so a reader knows no test
 was counted.
+
+vitest's summary and JSON report are counted too, and a gate that is exactly
+one bash script (`bash ci/check-x.sh`) counts as one test.
+
+**Where tests run.** A project that builds elsewhere sets `test.remote` in
+`.hexa/project.json` to a template with `{commit}` and `{cmd}`. `spec verify`,
+`spec red` and `loop stage done` then send every test for the commit concerned
+through it, in one run, and refuse an unpushed commit or a tree that differs
+from HEAD. They never fall back to running here; `--local` runs here, on purpose.
+`hexa do gate` gates an uncommitted change, so it refuses under a remote unless
+given `--local`.
 
 ## 5. Harden, then ship
 
