@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use hexa_core::ports::spec::{coverage, numbered_decisions, test_ref, Acceptance, Finding, Spec};
+use hexa_core::ports::spec::{coverage, numbered_decisions, Acceptance, Finding, Spec};
 use sha2::{Digest, Sha256};
 
 pub use crate::test_exec::{TestRun, NOT_PROVEN_HERE};
@@ -74,10 +74,6 @@ pub async fn run_test_alone(root: &Path, path_env: &str, r: &str, target_dir: Op
     }
 }
 
-fn tail(out: &str, n: usize) -> String {
-    let lines: Vec<&str> = out.lines().collect();
-    lines[lines.len().saturating_sub(n)..].join("\n") + "\n"
-}
 
 // ── what the author may see (§2) ────────────────────────────────────────────
 

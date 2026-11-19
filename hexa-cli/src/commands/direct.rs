@@ -179,16 +179,6 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
             // human owns their tree). Unset/autonomous callers isolate by default.
             // The evidence command becomes the loop's gate only if it has none
             // (ADR-2611020815): side work must not replace the work's gate.
-            // A remote runner sees only pushed commits; this gates an
-            // uncommitted change, so it never silently runs here (ADR-2611191120 §6).
-            let cfg = hexa_exec::test_exec::test_config(&root).map_err(|e| anyhow::anyhow!(e))?;
-            if cfg.remote.is_some() && !local {
-                anyhow::bail!(
-                    "refused: .hexa/project.json sets test.remote, so gates run on the remote runner, which sees only pushed \
-                     commits, and `hexa do gate` gates an uncommitted change. Gate it here with --local, or commit and push it \
-                     and close with `hexa loop stage done` or `hexa spec verify`, which send the gate to the remote. Nothing committed"
-                );
-            }
             crate::commands::loop_cmd::note_run_gate(&evidence, "build", None);
             if uncounted {
                 crate::commands::loop_cmd::note_gate_uncounted(&evidence);
@@ -322,6 +312,16 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
                     Some(p) => rel.push(p),
                     None => anyhow::bail!("{f} is outside the repository ({}): only files in it can be gated and committed", root.display()),
                 }
+            }
+            // A remote runner sees only pushed commits; this gates an
+            // uncommitted change, so it never silently runs here (ADR-2611191120 §6).
+            let cfg = hexa_exec::test_exec::test_config(&root).map_err(|e| anyhow::anyhow!(e))?;
+            if cfg.remote.is_some() && !local {
+                anyhow::bail!(
+                    "refused: .hexa/project.json sets test.remote, so gates run on the remote runner, which sees only pushed \
+                     commits, and `hexa do gate` gates an uncommitted change. Gate it here with --local, or commit and push it \
+                     and close with `hexa loop stage done` or `hexa spec verify`, which send the gate to the remote. Nothing committed"
+                );
             }
             crate::commands::loop_cmd::note_run_gate(&evidence, "build", None);
             if uncounted {
