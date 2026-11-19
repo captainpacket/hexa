@@ -21,6 +21,7 @@ use hexa_core::ports::test_runner::{
 pub const NOT_PROVEN_HERE: &str = "not proven here:";
 
 /// One scenario's test, run alone.
+#[derive(Debug)]
 pub enum TestRun {
     Passed,
     /// The test ran and failed.
