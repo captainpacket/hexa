@@ -51,6 +51,21 @@ pub fn read_evidence(exit_ok: bool, output: &str, uncounted: bool) -> Evidence {
     Evidence::Passed { tests: t.passed }
 }
 
+/// Read a gate run by its command too (ADR-2611191120 §7): a gate that is
+/// exactly one bash script and exits 0 counts as one passed test when its
+/// output holds no runner line this reader knows.
+pub fn read_gate_evidence(cmd: &str, exit_ok: bool, output: &str, uncounted: bool) -> Evidence {
+    let _ = (cmd, exit_ok, output, uncounted);
+    todo!("ADR-2611191120 §7")
+}
+
+/// Whether `cmd` is exactly one bash script: `bash <p>.sh [args]`, `sh <p>.sh`
+/// or `./<p>.sh`, with no `;`, `&&`, `||` or `|` (ADR-2611191120 §7).
+pub fn is_single_script(cmd: &str) -> bool {
+    let _ = cmd;
+    todo!("ADR-2611191120 §7")
+}
+
 #[derive(Default)]
 struct Tally {
     recognised: bool,
