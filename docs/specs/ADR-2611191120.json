@@ -9,6 +9,10 @@
     "by": "gary (standing instruction: always accept the ADRs and specs; recorded by the implementing agent, 2026-11-19)",
     "sha256": "e80b72124d136b799012b903a918b3f3c9bd576f7295243f21183c91772565eb"
   },
+  "sealed": {
+    "hexa-cli/tests/adr_2611191120_spec.rs": "b3aba830ed912502a8252519c203b242fe7c81313e026525ec81fbb76f350493"
+  },
+  "red": "2e257e2",
   "specs": [
     {
       "id": "S01",
