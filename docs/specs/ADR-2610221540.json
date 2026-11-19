@@ -7,9 +7,9 @@
     "sha256": "aa65e446531e4d281c229550a9525ad949c25573451885c88449b81ccd957a89"
   },
   "sealed": {
-    "hexa-cli/tests/a_decision_is_covered_by_a_sealed_spec.rs": "7f3a3fc6ca9b71c6b56546b7eba93c237de311fd09fec8c5eceb0d2cc92fdb73",
-    "hexa-cli/tests/a_test_was_red_before_the_code.rs": "42404a767913c7d93df615c683fb9e4116b81addf5d4ace0a73f31f60e0996df",
-    "hexa-cli/tests/the_ledger_reads_every_gate_and_no_skip_passes.rs": "c154b64a58eb4430c1026c5adfd531aa8ff1c1d9704c159c091b991c57d550c1",
+    "hexa-cli/tests/a_decision_is_covered_by_a_sealed_spec.rs": "4c2b80304f7ea87e8cdb4a6a61379a7ada7cfa00a32e46399fe69aceafed77c8",
+    "hexa-cli/tests/a_test_was_red_before_the_code.rs": "66cffbe2d43f259c18604df665444b8bfb90dfb9453c358b39ac95c92bff9f5e",
+    "hexa-cli/tests/the_ledger_reads_every_gate_and_no_skip_passes.rs": "be97aae783c89a28c4b54c8e0897653be253f0291ce746f1ca61a4364ac52fa3",
     "hexa-exec/tests/a_sealed_test_is_never_committed.rs": "27662fab3ef786aacfac9ba0e68edb55a31c976ffad56056d21ef681b5a9232e",
     "hexa-exec/tests/a_spec_is_drafted_and_its_tests_generated_red.rs": "56774d31f5b4ff1414133f6baddb589bae2d78e5ad344fb42df0620bfe67b59e",
     "hexa-exec/tests/adr_2610221540_spec_3.rs": "ddf32a1b7922de1066e06512da69034bcf847625bc45cf6a675b8be3e1bf2b0f"
@@ -629,6 +629,33 @@
       "from": "4b9dd29c253acb78dc900d867db1feaf8f840b3e591ea0a4f849731423d2ae5d",
       "reason": "fixture: the spec is committed before it is accepted (ADR-2611161600 §1, §4)",
       "to": "42404a767913c7d93df615c683fb9e4116b81addf5d4ace0a73f31f60e0996df"
+    },
+    {
+      "at": "2026-11-19T22:22:31.372452+00:00",
+      "base_commit": "a290dc0efe10f7515cb3516079e23ddd7346246f",
+      "by": "implementing agent (gary's standing instruction)",
+      "file": "hexa-cli/tests/a_decision_is_covered_by_a_sealed_spec.rs",
+      "from": "7f3a3fc6ca9b71c6b56546b7eba93c237de311fd09fec8c5eceb0d2cc92fdb73",
+      "reason": "Rust 1.100 (CI stable from 2026-11-19) moved integration-test executables from target/<profile>/deps to target/<profile>/build/<pkg>/<hash>/out, so hexa() popping two dirs off current_exe found no binary and every test here failed with 'run hexa: NotFound' (PR #67 run 44582056521). hexa() now returns env!(\"CARGO_BIN_EXE_hexa\"), cargo's own path to the bin. Only the locator changes; no assertion changes.",
+      "to": "4c2b80304f7ea87e8cdb4a6a61379a7ada7cfa00a32e46399fe69aceafed77c8"
+    },
+    {
+      "at": "2026-11-19T22:22:31.517627+00:00",
+      "base_commit": "a290dc0efe10f7515cb3516079e23ddd7346246f",
+      "by": "implementing agent (gary's standing instruction)",
+      "file": "hexa-cli/tests/a_test_was_red_before_the_code.rs",
+      "from": "42404a767913c7d93df615c683fb9e4116b81addf5d4ace0a73f31f60e0996df",
+      "reason": "Rust 1.100 (CI stable from 2026-11-19) moved integration-test executables from target/<profile>/deps to target/<profile>/build/<pkg>/<hash>/out, so hexa() popping two dirs off current_exe found no binary and every test here failed with 'run hexa: NotFound' (PR #67 run 44582056521). hexa() now returns env!(\"CARGO_BIN_EXE_hexa\"), cargo's own path to the bin. Only the locator changes; no assertion changes.",
+      "to": "66cffbe2d43f259c18604df665444b8bfb90dfb9453c358b39ac95c92bff9f5e"
+    },
+    {
+      "at": "2026-11-19T22:22:31.661965+00:00",
+      "base_commit": "63d18c1eb90d222027814b2cf0e7a55333873f56",
+      "by": "implementing agent (gary's standing instruction)",
+      "file": "hexa-cli/tests/the_ledger_reads_every_gate_and_no_skip_passes.rs",
+      "from": "c154b64a58eb4430c1026c5adfd531aa8ff1c1d9704c159c091b991c57d550c1",
+      "reason": "Rust 1.100 (CI stable from 2026-11-19) moved integration-test executables from target/<profile>/deps to target/<profile>/build/<pkg>/<hash>/out, so hexa() popping two dirs off current_exe found no binary and every test here failed with 'run hexa: NotFound' (PR #67 run 44582056521). hexa() now returns env!(\"CARGO_BIN_EXE_hexa\"), cargo's own path to the bin. Only the locator changes; no assertion changes.",
+      "to": "be97aae783c89a28c4b54c8e0897653be253f0291ce746f1ca61a4364ac52fa3"
     }
   ]
 }

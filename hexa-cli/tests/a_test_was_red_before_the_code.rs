@@ -12,11 +12,10 @@ use std::path::Path;
 use std::process::Command;
 
 fn hexa() -> std::path::PathBuf {
-    let mut p = std::env::current_exe().expect("test exe");
-    p.pop();
-    p.pop();
-    p.push("hexa");
-    p
+    // The path cargo gives the test: the bin target's own location, in any
+    // profile and any build-dir layout (Rust 1.100 moved test executables out
+    // of target/<profile>/deps, two levels below which this used to look).
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_hexa"))
 }
 
 fn run(root: &Path, args: &[&str]) -> (i32, String) {
