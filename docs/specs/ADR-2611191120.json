@@ -5,6 +5,10 @@
   "universal": [
     "§3"
   ],
+  "accepted": {
+    "by": "gary (standing instruction: always accept the ADRs and specs; recorded by the implementing agent, 2026-11-19)",
+    "sha256": "e80b72124d136b799012b903a918b3f3c9bd576f7295243f21183c91772565eb"
+  },
   "specs": [
     {
       "id": "S01",

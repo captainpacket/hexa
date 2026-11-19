@@ -1,6 +1,7 @@
 # ADR-2611191120: A test names its runner, and a project names where its tests run
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-19 Accepted: Accepted under the owner's standing instruction (gary: always accept the ADRs and specs, and land the work); recorded by the implementing agent on his behalf, 2026-11-19
 **Date:** 2026-11-19
 **Drivers:** Running strata (Rust and TypeScript) through hexa's lifecycle on 2026-11-19. Its console is tested in vitest and its gates are bash scripts, and it builds only on its build servers.
 **Supersedes:** none. Amends ADR-2611161600 §2 (the Cargo.toml refusal at `spec draft` and `spec accept`) and ADR-2611081151 §5 (the runners the evidence reader knows).
