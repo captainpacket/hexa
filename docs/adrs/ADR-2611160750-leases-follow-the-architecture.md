@@ -1,6 +1,7 @@
 # ADR-2611160750: Leases follow the architecture
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-11-16
 **Drivers:** Agents developing in parallel keep overrunning each other. Asked: can hexa use the hexagonal layers to isolate agents, so that work in use cases is kept apart from work in the domain?
 **Supersedes:** none. Builds on the task ledger (`hexa agent register/report/release`, `hexa dev worktree merge-order`) and ADR-2611160730 (compliance by refusal).

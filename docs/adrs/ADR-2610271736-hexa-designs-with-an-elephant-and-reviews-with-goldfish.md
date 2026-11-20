@@ -1,11 +1,12 @@
 ---
 id: ADR-2610271736
-status: proposed
+status: accepted
 date: 2026-10-27
 ---
 # ADR-2610271736: hexa designs with an elephant and reviews with goldfish
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-10-27
 **Drivers:** On 2026-10-27 the Elephant-Goldfish Model (EGM, <https://github.com/google/elephant-goldfish-model>, Google LLC, Apache-2.0) was installed as a Claude Code plugin and its drift report run against hexa. It found 39 divergences between hexa's docs and its code, among them a grader blind spot that had let hexa grade itself A+ over 48 boundary violations (ADR-2610271649). EGM runs only inside a coding agent's session: its reviewers are subagents, so the isolation that makes a reviewer a *goldfish* depends on the host honouring it, and EGM's own docs say a host that cannot create fresh subagents must stop. hexa already has a call that is isolated by construction: `claude-text` (ADR-2610270901), the `claude` CLI with no tools, no settings, no MCP, no session, run in an empty directory. A goldfish is exactly that call.
 
