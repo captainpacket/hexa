@@ -245,7 +245,7 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
             // (ADR-2611020815): side work must not replace the work's gate.
             // A managed run records it under HEXA_STATE_DIR, never in the repository (ADR-2610281500 §6).
             if let Some(m) = &managed {
-                let _ = crate::commands::loop_cmd::update_loop(&m.state_dir, json!({ "gate": evidence, "stage": "build" }));
+                let _ = crate::commands::loop_cmd::record_run_gate(&m.state_dir, &evidence, "build", None);
             } else {
                 crate::commands::loop_cmd::note_run_gate(&evidence, "build", None);
                 if uncounted {
