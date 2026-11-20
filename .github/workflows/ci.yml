@@ -98,6 +98,11 @@ jobs:
       - name: Every ADR's gate
         run: ./target/ci/hexa adr gates --ci
         env:
+          # A gate that runs `cargo test --workspace` runs ADR-2611031914's CLI
+          # tests too. Under cargo's new build-dir layout their binary sits in
+          # target/debug/build/<pkg>/<hash>/out/, not deps/, so they cannot find
+          # hexa beside it: name this tree's binary, as the spec step does.
+          HEXA_BIN: ${{ github.workspace }}/target/ci/hexa
           HEXA_TEST_NPM: 1
           HEXA_TEST_CARGO_NET: 1
       # Every decision's spec: coverage, acceptance, seals, each test alone (ADR-2610221540 §8).

@@ -1409,15 +1409,23 @@ async fn prove_red(root: &Path, path_env: &str, a: &Adr, spec: &Spec, cfg: &Test
     }
     let target = root.join("target/hexa-prove");
     for (sha, scenarios) in by_commit {
-        // Under the ignored target/, beside the shared build. The path is this
-        // run's own, so a concurrent `--prove` never removes it mid-test; a
-        // stale one at this path (a reused pid) is removed first.
-        let wt = match checkout_at(root, &target, &sha) {
-            Ok(wt) => wt,
-            Err(e) => {
-                unproven += scenarios.len();
-                println!("  {} {} red commit {sha} cannot be checked out: {e}", "\u{2717}".red(), a.id);
-                continue;
+        // Here: a checkout of the red commit under the ignored target/, beside
+        // the shared build. The path is this run's own, so a concurrent
+        // `--prove` never removes it mid-test; a stale one at this path (a
+        // reused pid) is removed first. Remote: none. The template runs from
+        // the repository root, and the runner checks the commit out on its
+        // side (ADR-2611191120 §3, gaberger/hexa#68): an old commit's copy of
+        // the runner script may not exist, and nothing is built here.
+        let wt = if remote.is_some() {
+            root.to_path_buf()
+        } else {
+            match checkout_at(root, &target, &sha) {
+                Ok(wt) => wt,
+                Err(e) => {
+                    unproven += scenarios.len();
+                    println!("  {} {} red commit {sha} cannot be checked out: {e}", "\u{2717}".red(), a.id);
+                    continue;
+                }
             }
         };
         // A test proved red at a commit from before it was written
@@ -1427,7 +1435,11 @@ async fn prove_red(root: &Path, path_env: &str, a: &Adr, spec: &Spec, cfg: &Test
         let mut copied: Vec<&str> = Vec::new();
         for (sid, r) in &scenarios {
             if let Some(t) = parse_test_ref(r) {
-                if !wt.join(&t.file).exists() {
+                if remote.is_some() {
+                    if !file_at(root, &sha, &t.file) && root.join(&t.file).exists() {
+                        copied.push(sid);
+                    }
+                } else if !wt.join(&t.file).exists() {
                     if let Ok(body) = std::fs::read(root.join(&t.file)) {
                         let _ = std::fs::create_dir_all(wt.join(&t.file).parent().unwrap_or(&wt));
                         let _ = std::fs::write(wt.join(&t.file), body);
@@ -1488,7 +1500,9 @@ async fn prove_red(root: &Path, path_env: &str, a: &Adr, spec: &Spec, cfg: &Test
                 println!("  {} {} {} {}", "\u{2717}".red(), a.id, sid, what);
             }
         }
-        remove_checkout(root, &wt);
+        if remote.is_none() {
+            remove_checkout(root, &wt);
+        }
     }
     Ok(unproven)
 }
@@ -1584,10 +1598,24 @@ pub async fn red(adr: &str, commit: &str, tests: &[String], local: bool) -> anyh
         remote_preflight(&root, &sha, false).map_err(|e| anyhow::anyhow!("{id}: nothing recorded: {e}"))?;
         println!("  {} the tests go to the remote runner (test.remote) for {short}; --local runs them here", "\u{2192}".cyan());
     }
+    // Remote: no checkout here. The template runs from the repository root
+    // and the runner checks the commit out (ADR-2611191120 §3, gaberger/hexa#68);
+    // the test must be in that commit as written, which git answers without one.
     let target = root.join("target/hexa-prove");
-    let wt = checkout_at(&root, &target, &sha).map_err(|e| anyhow::anyhow!("{id}: {short} cannot be checked out: {e}"))?;
+    let wt = match remote {
+        Some(_) => root.clone(),
+        None => checkout_at(&root, &target, &sha).map_err(|e| anyhow::anyhow!("{id}: {short} cannot be checked out: {e}"))?,
+    };
     let prefix = if remote.is_some() { env_prefix(None, None) } else { env_prefix(Some(&path_env), Some(&target)) };
-    let planned: Vec<Result<Planned, TestRun>> = targets.iter().map(|(_, r, _)| plan_test(&wt, r, &cfg, &prefix)).collect();
+    let planned: Vec<Result<Planned, TestRun>> = targets
+        .iter()
+        .map(|(_, r, _)| match parse_test_ref(r) {
+            Some(t) if remote.is_some() && !file_at(&root, &sha, &t.file) => {
+                Err(TestRun::NotFound(format!("{} is not in {short}", t.file)))
+            }
+            _ => plan_test(&wt, r, &cfg, &prefix),
+        })
+        .collect();
     let plans: Vec<Planned> = planned.iter().filter_map(|p| p.as_ref().ok().cloned()).collect();
     let at = match remote {
         Some(template) => Where::Remote { template, commit: &sha },
@@ -1621,7 +1649,9 @@ pub async fn red(adr: &str, commit: &str, tests: &[String], local: bool) -> anyh
             }
         }
     }
-    remove_checkout(&root, &wt);
+    if remote.is_none() {
+        remove_checkout(&root, &wt);
+    }
     if !not_red.is_empty() {
         anyhow::bail!("{id}: nothing recorded: {}", not_red.join("; "));
     }
@@ -1664,6 +1694,17 @@ pub async fn red(adr: &str, commit: &str, tests: &[String], local: bool) -> anyh
 fn last_seal(root: &Path, id: &str, file: &str) -> Option<String> {
     let rel = spec_rel(root, id);
     spec_revisions(root, &rel, 200).iter().find_map(|rev| spec_at(root, rev, &rel).and_then(|s| s.sealed.get(file).cloned()))
+}
+
+/// Whether `file` is in the tree of commit `sha`: asked of git, so a remote
+/// run needs no checkout here to know it.
+fn file_at(root: &Path, sha: &str, file: &str) -> bool {
+    std::process::Command::new("git")
+        .args(["cat-file", "-e", &format!("{sha}:{file}")])
+        .current_dir(root)
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 /// A detached worktree of `sha` under `target`, at a path no other run uses.
