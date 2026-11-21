@@ -17,7 +17,7 @@
     "sha256": "e93904018ac20e03a96e50dec61d3b531513c4a09bef6405e7c65539913d01fd"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611211324_spec.rs": "28c1825a3b6459b56bccacb302e560f33ebf14a8b8214cc1e7c9cb2650c6558e"
+    "hexa-cli/tests/adr_2611211324_spec.rs": "7eb109add3d5518331884e2bc436680602f5bf38a79aa7e95761520bdeba9391"
   },
   "specs": [
     {
@@ -615,6 +615,17 @@
       "given": "the hexa repository after the change",
       "when": "`hexa analyze .` runs",
       "then": "it stays A+ 100/100; any lower result fails the final phase"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-21T19:47:34.217907402+00:00",
+      "base_commit": "3b2a9ef9c0a066ed957276879161bd63d573a80f",
+      "by": "Claude (agent, in craigjohnson's session; for review)",
+      "file": "hexa-cli/tests/adr_2611211324_spec.rs",
+      "from": "28c1825a3b6459b56bccacb302e560f33ebf14a8b8214cc1e7c9cb2650c6558e",
+      "reason": "S05 asserted two violations for two import lines of one module from one file; the grade counts one edge per target (one_edge_per_target: one crossing costs ten points once), so the fixture now checks each import form alone. The scenario is unchanged: both forms resolve to nautobot_ssot/ports.py and each is an edge.",
+      "to": "7eb109add3d5518331884e2bc436680602f5bf38a79aa7e95761520bdeba9391"
     }
   ]
 }
