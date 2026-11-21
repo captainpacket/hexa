@@ -45,6 +45,9 @@ const LAYER_PATTERNS: &[(&str, HexLayer)] = &[
     ("/infrastructure/", HexLayer::Infrastructure),
 ];
 
+/// The patterns in [`LAYER_PATTERNS`] that are Go conventions only.
+const GO_ONLY_PATTERNS: &[&str] = &["/internal/domain/", "/internal/ports/", "/internal/usecases/", "/internal/", "/cmd/", "/pkg/"];
+
 // ── Filename-Based Patterns ──────────────────────────────
 //
 // Checked after directory patterns fail. Returns a special role or a hexa layer.
@@ -120,8 +123,17 @@ pub fn classify_layer(file_path: &str) -> HexLayer {
     // project. Trying both spellings costs one allocation and closes that.
     let as_dir = format!("{normalized}/");
 
+    // Go's folder conventions (`internal/`, `cmd/`, `pkg/`) are Go's. A
+    // Python package is often called `pkg` or holds an `internal` module,
+    // and reading those as a port or a use case grades a Python file by a
+    // rule its language does not have (ADR-2611211324 §4).
+    let python = normalized.ends_with(".py") || normalized.ends_with(".pyi");
+
     // Check directory-based patterns first, most specific first.
     for &(pattern, layer) in LAYER_PATTERNS {
+        if python && GO_ONLY_PATTERNS.contains(&pattern) {
+            continue;
+        }
         if normalized.contains(pattern) || as_dir.contains(pattern) {
             return layer;
         }

@@ -124,35 +124,47 @@ pub async fn run(
         let has_package_json = root.join("package.json").is_file();
         let has_cargo_toml = root.join("Cargo.toml").is_file();
         let has_go_mod = root.join("go.mod").is_file();
-        let has_pyproject = root.join("pyproject.toml").is_file()
-            || root.join("setup.py").is_file()
-            || root.join("requirements.txt").is_file();
+        let python_manifest = PYTHON_MANIFESTS.iter().copied().find(|m| root.join(m).is_file());
+        let has_pyproject = python_manifest.is_some();
         let has_hex_config = root.join(".hexa").is_dir();
         let has_docs_adrs = root.join("docs").join("adrs").is_dir();
 
         // The language is read from the manifest that is present. A Rust
         // project is not missing package.json and go.mod; it is a Rust
         // project, and the rest of the report is read in that light.
-        let language = if has_cargo_toml {
-            Some(("rust", "Cargo.toml"))
-        } else if has_go_mod {
-            Some(("go", "go.mod"))
-        } else if has_package_json {
-            Some(("typescript", "package.json"))
-        } else {
-            None
+        //
+        // A Python project names every language it holds (ADR-2611211324 §4):
+        // a package.json beside it is often tooling only (a browser test
+        // runner), and names TypeScript only when there is TypeScript to grade.
+        let languages: Vec<(&str, &str)> = match python_manifest {
+            Some(manifest) => {
+                let mut l = Vec::new();
+                if has_cargo_toml {
+                    l.push(("rust", "Cargo.toml"));
+                }
+                if has_go_mod {
+                    l.push(("go", "go.mod"));
+                }
+                if has_package_json && has_typescript_sources(&root) {
+                    l.push(("typescript", "package.json"));
+                }
+                l.push(("python", manifest));
+                l
+            }
+            None if has_cargo_toml => vec![("rust", "Cargo.toml")],
+            None if has_go_mod => vec![("go", "go.mod")],
+            None if has_package_json => vec![("typescript", "package.json")],
+            None => Vec::new(),
         };
         println!("  {}", "Project:".bold());
-        match language {
-            Some((lang, manifest)) => println!("    language:     {} ({})", lang, manifest),
-            None if has_pyproject => println!(
-                "    language:     {} (Python; hexa grades Rust, Go and TypeScript)",
-                "unsupported".yellow()
-            ),
-            None => println!(
-                "    language:     {} (no Cargo.toml, go.mod or package.json)",
+        if languages.is_empty() {
+            println!(
+                "    language:     {} (no Cargo.toml, go.mod, package.json or Python manifest)",
                 "unknown".yellow()
-            ),
+            );
+        } else {
+            let named: Vec<String> = languages.iter().map(|(lang, manifest)| format!("{lang} ({manifest})")).collect();
+            println!("    language:     {}", named.join(", "));
         }
         print_check(".hexa/ config", has_hex_config);
         println!("    docs/adrs/:   {}", if has_docs_adrs { "present" } else { "none" });
@@ -165,8 +177,9 @@ pub async fn run(
         let mut layer_counts: std::collections::HashMap<Layer, usize> = std::collections::HashMap::new();
         // Rust and TypeScript keep layers under src/; Go keeps them at the
         // module root (internal/domain, adapters/secondary).
+        // A Python package usually sits at the root, not under src/.
         let scan_dir = if has_src { root.join("src") } else { root.clone() };
-        if has_src || has_go_mod {
+        if has_src || has_go_mod || has_pyproject {
             println!();
             println!("  {}", "Hex layers:".bold());
 
@@ -295,6 +308,9 @@ pub async fn run(
         }
         total_files += rust_total;
         total_files += go_files_total;
+        if has_pyproject && !has_src {
+            total_files += collect_source_files(&root).iter().filter(|f| f.extension().is_some_and(|e| e == "py")).count();
+        }
 
         println!();
         println!("  {}", "Boundary analysis:".bold());
@@ -397,7 +413,10 @@ pub async fn run(
         // "0 boundary violations" is a claim about files that were read.
         // Saying it over a tree the parser could not open states the one
         // thing the run does not know (ADR-2609140020).
-        let nothing_parsed = total_files > 0 && parsed_files == Some(0);
+        // Zero parsed is not graded whatever the scan counted: a scan that
+        // found nothing it reads (a package.json that is only tooling, beside
+        // sources in no graded folder) printed A+ 100/100 (ADR-2611211324 §6).
+        let nothing_parsed = parsed_files == Some(0);
         if all_violation_count == 0 && !nothing_parsed {
             println!("    {} 0 boundary violations", "\u{2713}".green());
         }
@@ -413,7 +432,7 @@ pub async fn run(
             );
             println!(
                 "    {}",
-                "hexa parses Rust, Go and TypeScript. Nothing here was read, so every boundary result above is computed from an empty graph — including a score of 100. A grade is withheld rather than awarded on no evidence.".yellow()
+                "hexa parses Rust, Go, TypeScript and Python. Nothing here was read, so every boundary result above is computed from an empty graph — including a score of 100. A grade is withheld rather than awarded on no evidence.".yellow()
             );
         }
         let score = deep_score.unwrap_or_else(|| {
@@ -1097,6 +1116,16 @@ fn is_test_file(rel: &str) -> bool {
         || name.contains(".spec.")
 }
 
+/// The manifests that make a directory a Python project, in the order one is
+/// named (ADR-2611211324 §4).
+const PYTHON_MANIFESTS: [&str; 4] = ["pyproject.toml", "setup.py", "manage.py", "requirements.txt"];
+
+/// Whether there is TypeScript to grade under `root`: a `package.json`
+/// with none is tooling.
+fn has_typescript_sources(root: &Path) -> bool {
+    collect_source_files(root).iter().any(|f| f.extension().is_some_and(|e| e == "ts" || e == "tsx"))
+}
+
 /// Recursively collect `.rs`, `.ts`, `.js`, `.go`, and `.py` source files under a directory.
 fn collect_source_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
@@ -1114,7 +1143,7 @@ fn collect_source_files_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
         if path.is_dir() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if matches!(name.as_ref(), "target" | "node_modules" | "vendor" | ".git" | "dist") {
+            if matches!(name.as_ref(), "target" | "node_modules" | "vendor" | ".git" | "dist" | ".venv" | "venv" | "site-packages" | "__pycache__") {
                 continue;
             }
             collect_source_files_recursive(&path, out);
@@ -1545,7 +1574,7 @@ fn resolve_root(path: &str) -> anyhow::Result<PathBuf> {
 fn refuse_an_empty_scan(root: &Path) -> anyhow::Result<()> {
     if collect_source_files(root).is_empty() {
         anyhow::bail!(
-            "no source files under {}\n       There is nothing to grade. A grade printed for an empty scan is a\n       vacuous gate: it reports a perfect result because it read nothing.",
+            "not graded: no source files under {}\n       There is nothing to grade. A grade printed for an empty scan is a\n       vacuous gate: it reports a perfect result because it read nothing.",
             root.display()
         );
     }
@@ -2197,7 +2226,7 @@ async fn run_json(root: &Path, strict: bool, adr_compliance_only: bool, exit_cod
             Err(e) => deep_failed = Some(e.to_string()),
             Ok(deep) if deep.file_count == 0 => {
                 not_graded = Some(format!(
-                    "{} source files scanned, 0 parsed: hexa parses Rust, Go and TypeScript, and nothing here was read",
+                    "{} source files scanned, 0 parsed: hexa parses Rust, Go, TypeScript and Python, and nothing here was read",
                     collect_source_files(root).len()
                 ))
             }

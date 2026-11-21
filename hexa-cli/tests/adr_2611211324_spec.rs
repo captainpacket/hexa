@@ -226,21 +226,25 @@ fn s04_the_extension_decides_python() {
 
 #[test]
 fn s05_absolute_from_and_relative_imports_resolve_to_project_files() {
-    let d = tempfile::tempdir().unwrap();
-    let r = d.path();
-    write(r, "pyproject.toml", "[project]\nname = \"fx\"\n");
-    write(r, "nautobot_ssot/__init__.py", "");
-    write(r, "nautobot_ssot/ports.py", "class Repo:\n    pass\n");
-    write(r, "nautobot_ssot/usecases/__init__.py", "");
-    write(r, "nautobot_ssot/usecases/sync.py", "import nautobot_ssot.ports\nfrom ..ports import Repo\n\n\ndef run(r: Repo):\n    return nautobot_ssot.ports\n");
-    layers(
-        r,
-        r#"{"nautobot_ssot/usecases": "domain", "nautobot_ssot/ports.py": "adapters/secondary", "nautobot_ssot/__init__.py": "adapters/secondary"}"#,
-    );
-    let v = analyze_json(r);
-    let reached = reached_from(&v, "nautobot_ssot/usecases/sync.py");
-    assert!(reached.contains("nautobot_ssot/ports.py"), "no edge to ports.py: {reached:?}\n{v:#}");
-    assert_eq!(lines_from(&v, "usecases/sync.py", "nautobot_ssot/ports.py"), BTreeSet::from([1, 2]), "both import lines are edges:\n{v:#}");
+    // Each form alone: two imports of one module from one file are one
+    // crossing, and the grade counts one edge per target (`one_edge_per_target`).
+    for import in ["import nautobot_ssot.ports", "from ..ports import Repo"] {
+        let d = tempfile::tempdir().unwrap();
+        let r = d.path();
+        write(r, "pyproject.toml", "[project]\nname = \"fx\"\n");
+        write(r, "nautobot_ssot/__init__.py", "");
+        write(r, "nautobot_ssot/ports.py", "class Repo:\n    pass\n");
+        write(r, "nautobot_ssot/usecases/__init__.py", "");
+        write(r, "nautobot_ssot/usecases/sync.py", &format!("{import}\n\n\ndef run():\n    return 1\n"));
+        layers(
+            r,
+            r#"{"nautobot_ssot/usecases": "domain", "nautobot_ssot/ports.py": "adapters/secondary", "nautobot_ssot/__init__.py": "adapters/secondary"}"#,
+        );
+        let v = analyze_json(r);
+        let reached = reached_from(&v, "nautobot_ssot/usecases/sync.py");
+        assert!(reached.contains("nautobot_ssot/ports.py"), "{import}: no edge to ports.py: {reached:?}\n{v:#}");
+        assert_eq!(lines_from(&v, "usecases/sync.py", "nautobot_ssot/ports.py"), BTreeSet::from([1]), "{import}:\n{v:#}");
+    }
 }
 
 #[test]

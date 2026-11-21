@@ -6,8 +6,12 @@
 //! - Go: module paths like "github.com/user/pkg" → kept as-is for external,
 //!   relative paths within project resolved normally
 //! - Rust: crate paths like "crate::core::ports" → converted to file paths
+//! - Python: dotted modules, absolute or relative → the `.py` or package
+//!   `__init__.py` they name, among the project's files (ADR-2611211324)
 //!
 //! Ported from `src/core/usecases/path-normalizer.ts`.
+
+use std::collections::HashSet;
 
 use super::domain::Language;
 
@@ -67,6 +71,55 @@ pub fn resolve_import_path(
     }
 }
 
+/// The project file a Python import names (ADR-2611211324 §2), or `None`
+/// when it names none (the standard library, a third-party package, or a
+/// module that does not exist): such an import is not an edge.
+///
+/// `module` is as written: "a.b", ".ports", "..". `name` is one name a
+/// `from` import takes. `from a import b` is the submodule `a/b.py` when
+/// there is one, else the package `a/__init__.py`; `import a.b` is `a.b`
+/// only. A relative import starts from the importing file's package; an
+/// absolute one from the project root, then `src/`. `files` are the
+/// project's source files, relative to its root.
+pub fn resolve_python_import(from_file: &str, module: &str, name: Option<&str>, files: &HashSet<String>) -> Option<String> {
+    let dots = module.chars().take_while(|c| *c == '.').count();
+    let parts: Vec<&str> = module[dots..].split('.').filter(|s| !s.is_empty()).collect();
+    let bases: Vec<Vec<&str>> = if dots > 0 {
+        let mut dir: Vec<&str> = from_file.split('/').collect();
+        dir.pop();
+        for _ in 1..dots {
+            dir.pop()?;
+        }
+        vec![dir]
+    } else if parts.is_empty() {
+        return None;
+    } else {
+        vec![Vec::new(), vec!["src"]]
+    };
+    let file_of = |segs: &[&str]| -> Option<String> {
+        if segs.is_empty() {
+            return None;
+        }
+        let stem = segs.join("/");
+        [format!("{stem}.py"), format!("{stem}/__init__.py")].into_iter().find(|c| files.contains(c))
+    };
+    for base in bases {
+        let mut module_path = base.clone();
+        module_path.extend(&parts);
+        if let Some(n) = name.filter(|n| *n != "*") {
+            let mut sub = module_path.clone();
+            sub.push(n);
+            if let Some(f) = file_of(&sub) {
+                return Some(f);
+            }
+        }
+        if let Some(f) = file_of(&module_path) {
+            return Some(f);
+        }
+    }
+    None
+}
+
 /// Normalize a file path for comparison: strip leading `./`, fix extensions.
 ///
 /// Infers the language from the path itself. That is right for a real file and
@@ -99,7 +152,7 @@ pub fn normalize_path_in(file_path: &str, lang: Language) -> String {
         // Go and Rust keep the path as written. A package or module path is a
         // directory, and inventing a filename for it is how the bug above
         // happened.
-        Language::Go | Language::Rust => p,
+        Language::Go | Language::Rust | Language::Python => p,
         _ => {
             // TypeScript: Replace .js/.jsx extension with .ts/.tsx
             if p.ends_with(".js") {

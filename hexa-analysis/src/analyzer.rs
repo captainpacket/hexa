@@ -21,11 +21,11 @@ use super::domain::{
 };
 use super::frontend_checker;
 use super::layer_classifier::{adapters_from_project, LayerMap};
-use super::path_normalizer::{normalize_path, normalize_path_in, resolve_import_path, WorkspacePackages};
+use super::path_normalizer::{normalize_path, normalize_path_in, resolve_import_path, resolve_python_import, WorkspacePackages};
 use super::ports::{AnalysisError, AstPort, ArchAnalysisPort};
 
 /// Source file glob patterns for supported languages.
-const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "go", "rs"];
+const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "go", "rs", "py"];
 
 /// What the grade leaves out. A pattern starting with `/` is a directory,
 /// matched as a whole path segment; any other is matched within the path
@@ -51,6 +51,14 @@ const EXCLUDE_PATTERNS: &[&str] = &[
     "/test/",
     "/__tests__/",
     "/target/",
+    // Python: generated migrations, environments and caches are not the
+    // project's code, and `*_test.py` is test code (ADR-2611211324 §4).
+    "/migrations/",
+    "/.venv/",
+    "/venv/",
+    "/site-packages/",
+    "/__pycache__/",
+    "_test.py",
     // Claude Code agent worktrees: full copies of the tree, gitignored, never
     // the project's own sources.
     "/.claude/worktrees/",
@@ -118,24 +126,66 @@ fn edges_of(
     packages: &WorkspacePackages,
     layers: &LayerMap,
     go_module_prefix: Option<&str>,
+    py_files: &HashSet<String>,
 ) -> Vec<ImportEdge> {
     let from_file = normalize_path(rel_path);
+    let edge = |to_file: String, imp: &ImportStatement| ImportEdge {
+        from_file: from_file.clone(),
+        from_layer: layers.classify(&from_file),
+        to_layer: layers.classify(&to_file),
+        to_file,
+        import_path: imp.raw_path.clone(),
+        line: imp.line,
+    };
+    if Language::from_path(rel_path) == Language::Python {
+        // An import that names no project file is not an edge (ADR-2611211324 §2).
+        return imports.iter().flat_map(|imp| python_targets(rel_path, imp, py_files).into_iter().map(move |t| (t, imp))).map(|(t, imp)| edge(t, imp)).collect();
+    }
     imports
         .iter()
         .map(|imp| {
             let resolved = resolve_in(packages, rel_path, &imp.raw_path, go_module_prefix);
             // The importing file decides the language, not the resolved target.
-            let to_file = normalize_path_in(&resolved, Language::from_path(rel_path));
-            ImportEdge {
-                from_file: from_file.clone(),
-                from_layer: layers.classify(&from_file),
-                to_layer: layers.classify(&to_file),
-                to_file,
-                import_path: imp.raw_path.clone(),
-                line: imp.line,
-            }
+            edge(normalize_path_in(&resolved, Language::from_path(rel_path)), imp)
         })
         .collect()
+}
+
+/// The project files one Python import reaches: one per name a `from` import
+/// takes, or the module itself (ADR-2611211324 §2).
+fn python_targets(rel_path: &str, imp: &ImportStatement, py_files: &HashSet<String>) -> Vec<String> {
+    let names: Vec<Option<&str>> = if imp.names.is_empty() { vec![None] } else { imp.names.iter().map(|n| Some(n.as_str())).collect() };
+    let mut out: Vec<String> = Vec::new();
+    for n in names {
+        if let Some(t) = resolve_python_import(rel_path, &imp.raw_path, n, py_files) {
+            if !out.contains(&t) {
+                out.push(t);
+            }
+        }
+    }
+    out
+}
+
+/// Where an import lands, for the dead-export finder: for Python the file it
+/// names (its first, when a `from` import takes several), else the path as
+/// the language resolves it.
+fn resolved_target(
+    packages: &WorkspacePackages,
+    rel_path: &str,
+    imp: &ImportStatement,
+    go_module_prefix: Option<&str>,
+    py_files: &HashSet<String>,
+) -> String {
+    if Language::from_path(rel_path) == Language::Python {
+        return python_targets(rel_path, imp, py_files).into_iter().next().unwrap_or_else(|| imp.raw_path.clone());
+    }
+    normalize_path_in(&resolve_in(packages, rel_path, &imp.raw_path, go_module_prefix), Language::from_path(rel_path))
+}
+
+/// The Python files an import may name: every `.py` file under the root that
+/// is not excluded, by the same walk the grade makes.
+async fn python_files(root: &Path) -> Result<HashSet<String>, AnalysisError> {
+    Ok(collect_source_files(root).await?.into_iter().filter(|f| f.ends_with(".py")).collect())
 }
 
 /// Re-score `result` with the project's error-severity rule findings
@@ -193,8 +243,9 @@ pub async fn source_violations(
     let go_mod = detect_go_module_prefix(root).await;
     let imports = ast.extract_imports(Path::new(rel_path), source, lang)?;
     let paths = ast.module_paths(Path::new(rel_path), source, lang)?;
-    let mut edges = edges_of(rel_path, &imports, &packages, &layers, go_mod.as_deref());
-    edges.extend(edges_of(rel_path, &paths, &packages, &layers, go_mod.as_deref()));
+    let py_files = if lang == Language::Python { python_files(root).await? } else { HashSet::new() };
+    let mut edges = edges_of(rel_path, &imports, &packages, &layers, go_mod.as_deref(), &py_files);
+    edges.extend(edges_of(rel_path, &paths, &packages, &layers, go_mod.as_deref(), &py_files));
     let (adapters, _) = adapters_from_project(root, &layers);
     Ok(boundary_checker::find_violations_in(&one_edge_per_target(edges), &adapters))
 }
@@ -433,6 +484,7 @@ pub(crate) async fn collect_source_files(root: &Path) -> Result<Vec<String>, Ana
                     stack.push(path);
                 }
             } else if is_source_file(&rel)
+                && !is_python_test(&rel)
                 && !matches_exclude(&rel, EXCLUDE_PATTERNS)
                 && !matches_exclude(&rel, &project_ex)
             {
@@ -448,9 +500,17 @@ pub(crate) async fn collect_source_files(root: &Path) -> Result<Vec<String>, Ana
 /// Test file patterns — files matching these are collected as additional consumers.
 const TEST_PATTERNS: &[&str] = &[".test.ts", ".spec.ts", "_test.go", ".test.rs"];
 
+/// A Python test module by its name: `test_*.py` or `*_test.py` (pytest's
+/// discovery rule; ADR-2611211324 §4).
+fn is_python_test(path: &str) -> bool {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    base.ends_with(".py") && (base.starts_with("test_") || base.ends_with("_test.py"))
+}
+
 fn is_test_file(path: &str) -> bool {
     let segmented = format!("/{}/", path.trim_matches('/'));
-    TEST_PATTERNS.iter().any(|p| path.ends_with(p))
+    is_python_test(path)
+        || TEST_PATTERNS.iter().any(|p| path.ends_with(p))
         || ["/tests/", "/test/", "/__tests__/"].iter().any(|d| segmented.contains(d))
 }
 
@@ -458,7 +518,7 @@ fn is_test_file(path: &str) -> bool {
 async fn collect_test_files(root: &Path) -> Result<Vec<String>, AnalysisError> {
     let mut files = Vec::new();
     let mut stack = vec![root.to_path_buf()];
-    let skip_dirs = ["node_modules", "dist", "examples", "target"];
+    let skip_dirs = ["node_modules", "dist", "examples", "target", ".venv", "venv", "site-packages", "__pycache__"];
 
     while let Some(dir) = stack.pop() {
         let mut entries = tokio::fs::read_dir(&dir).await?;
@@ -503,6 +563,7 @@ impl ArchAnalyzer {
         go_module_prefix: Option<&str>,
     ) -> Result<(Vec<ImportEdge>, Vec<FileData>), AnalysisError> {
         let source_files = collect_source_files(root).await?;
+        let py_files: HashSet<String> = source_files.iter().filter(|f| f.ends_with(".py")).cloned().collect();
         let layers = LayerMap::from_project(root).map_err(AnalysisError::Other)?;
         let packages = discover_packages(root);
         let mut all_edges = Vec::new();
@@ -526,8 +587,8 @@ impl ArchAnalyzer {
             let from_file = normalize_path(rel_path);
 
             let paths = self.ast.module_paths(Path::new(rel_path), &source, lang)?;
-            let mut edges = edges_of(rel_path, &imports, &packages, &layers, go_module_prefix);
-            edges.extend(edges_of(rel_path, &paths, &packages, &layers, go_module_prefix));
+            let mut edges = edges_of(rel_path, &imports, &packages, &layers, go_module_prefix, &py_files);
+            edges.extend(edges_of(rel_path, &paths, &packages, &layers, go_module_prefix, &py_files));
             all_edges.extend(one_edge_per_target(edges));
 
             let members = self
@@ -539,11 +600,7 @@ impl ArchAnalyzer {
                 imports: imports
                     .into_iter()
                     .map(|mut imp| {
-                        imp.resolved_path =
-                            normalize_path_in(
-                                &resolve_in(&packages, rel_path, &imp.raw_path, go_module_prefix),
-                                Language::from_path(rel_path),
-                            );
+                        imp.resolved_path = resolved_target(&packages, rel_path, &imp, go_module_prefix, &py_files);
                         imp
                     })
                     .collect(),
@@ -564,6 +621,7 @@ impl ArchAnalyzer {
     ) -> Result<Vec<FileData>, AnalysisError> {
         let test_files = collect_test_files(root).await?;
         let packages = discover_packages(root);
+        let py_files = python_files(root).await?;
         let mut test_data = Vec::new();
 
         for rel_path in &test_files {
@@ -588,10 +646,7 @@ impl ArchAnalyzer {
                 imports: imports
                     .into_iter()
                     .map(|mut imp| {
-                        imp.resolved_path = normalize_path_in(
-                            &resolve_in(&packages, rel_path, &imp.raw_path, go_module_prefix),
-                            Language::from_path(rel_path),
-                        );
+                        imp.resolved_path = resolved_target(&packages, rel_path, &imp, go_module_prefix, &py_files);
                         imp
                     })
                     .collect(),

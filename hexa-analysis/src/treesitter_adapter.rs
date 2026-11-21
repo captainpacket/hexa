@@ -20,9 +20,185 @@ fn get_language(lang: Language) -> Result<TsLanguage, AnalysisError> {
         Language::TypeScript => Ok(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
         Language::Go => Ok(tree_sitter_go::LANGUAGE.into()),
         Language::Rust => Ok(tree_sitter_rust::LANGUAGE.into()),
-        Language::Python | Language::Unknown => Err(AnalysisError::Other(
+        Language::Python => Ok(tree_sitter_python::LANGUAGE.into()),
+        Language::Unknown => Err(AnalysisError::Other(
             "cannot parse files with unknown language".to_string(),
         )),
+    }
+}
+
+// ── Python (ADR-2611211324) ─────────────────────────────
+
+/// Every import in a Python file, at any depth: an import under
+/// `if TYPE_CHECKING:` or inside a function is still knowledge of the module
+/// (§2). `import a.b` is `raw_path` "a.b" with no names; `from M import x, y`
+/// is `raw_path` M as written (".ports", "..", "a.b") with the names it takes.
+/// Which file a module is depends on the files there are, so resolution is
+/// the analyzer's (`path_normalizer::resolve_python_import`).
+fn extract_python_imports(root: &tree_sitter::Node, source: &str, from_file: &str) -> Result<Vec<ImportStatement>, AnalysisError> {
+    let mut out = Vec::new();
+    let mut stack = vec![*root];
+    while let Some(n) = stack.pop() {
+        match n.kind() {
+            "import_statement" => {
+                let mut cur = n.walk();
+                for name in n.children_by_field_name("name", &mut cur) {
+                    let module = match name.kind() {
+                        "aliased_import" => name.child_by_field_name("name").map(|m| node_text(m, source)),
+                        _ => Some(node_text(name, source)),
+                    };
+                    if let Some(module) = module {
+                        out.push(ImportStatement {
+                            from_file: from_file.to_string(),
+                            raw_path: module.clone(),
+                            resolved_path: module,
+                            names: Vec::new(),
+                            line: n.start_position().row + 1,
+                        });
+                    }
+                }
+            }
+            "import_from_statement" => {
+                let Some(module) = n.child_by_field_name("module_name").map(|m| node_text(m, source)) else { continue };
+                let mut names = Vec::new();
+                let mut cur = n.walk();
+                for name in n.children_by_field_name("name", &mut cur) {
+                    let taken = match name.kind() {
+                        "aliased_import" => name.child_by_field_name("name").map(|m| node_text(m, source)),
+                        _ => Some(node_text(name, source)),
+                    };
+                    names.extend(taken);
+                }
+                let mut cur = n.walk();
+                if n.named_children(&mut cur).any(|c| c.kind() == "wildcard_import") {
+                    names.push("*".to_string());
+                }
+                out.push(ImportStatement {
+                    from_file: from_file.to_string(),
+                    raw_path: module.clone(),
+                    resolved_path: module,
+                    names,
+                    line: n.start_position().row + 1,
+                });
+            }
+            _ => {
+                let mut cur = n.walk();
+                stack.extend(n.named_children(&mut cur));
+            }
+        }
+    }
+    out.sort_by_key(|i| i.line);
+    Ok(out)
+}
+
+/// The top-level definition a statement makes: a decorated definition is its
+/// definition.
+fn python_definition(n: TsNode<'_>) -> TsNode<'_> {
+    if n.kind() == "decorated_definition" {
+        n.child_by_field_name("definition").unwrap_or(n)
+    } else {
+        n
+    }
+}
+
+/// The names a top-level `x = …` or `x: T = …` assigns, with the assignment.
+fn python_assignments<'a>(n: TsNode<'a>, source: &str) -> Vec<(String, TsNode<'a>)> {
+    if n.kind() != "expression_statement" {
+        return Vec::new();
+    }
+    named_children_of(n)
+        .into_iter()
+        .filter(|a| a.kind() == "assignment")
+        .filter_map(|a| {
+            let left = a.child_by_field_name("left")?;
+            (left.kind() == "identifier").then(|| (node_text(left, source), a))
+        })
+        .collect()
+}
+
+/// A module's exports (§3): its `__all__` when it assigns one, else every
+/// top-level `def`, `class` and assignment whose name does not start with `_`.
+fn extract_python_exports(root: &tree_sitter::Node, source: &str, file: &str) -> Result<Vec<ExportDeclaration>, AnalysisError> {
+    let mut defined: Vec<(String, usize, ExportKind)> = Vec::new();
+    let mut all: Option<Vec<(String, usize)>> = None;
+    for ch in named_children_of(*root) {
+        let line = ch.start_position().row + 1;
+        let d = python_definition(ch);
+        match d.kind() {
+            "function_definition" => {
+                if let Some(n) = d.child_by_field_name("name") {
+                    defined.push((node_text(n, source), line, ExportKind::Function));
+                }
+            }
+            "class_definition" => {
+                if let Some(n) = d.child_by_field_name("name") {
+                    defined.push((node_text(n, source), line, ExportKind::Type));
+                }
+            }
+            _ => {
+                for (name, a) in python_assignments(d, source) {
+                    if name == "__all__" {
+                        let listed = a
+                            .child_by_field_name("right")
+                            .filter(|r| matches!(r.kind(), "list" | "tuple"))
+                            .map(|r| {
+                                named_children_of(r)
+                                    .into_iter()
+                                    .filter(|s| s.kind() == "string")
+                                    .map(|s| (node_text(s, source).trim_matches(|c| c == '"' || c == '\'').to_string(), line))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        all = Some(listed);
+                    } else {
+                        defined.push((name, line, ExportKind::Value));
+                    }
+                }
+            }
+        }
+    }
+    let export = |name: String, line: usize, kind: ExportKind| ExportDeclaration { file: file.to_string(), name, line, hexa_public: false, kind };
+    Ok(match all {
+        Some(listed) => listed
+            .into_iter()
+            .map(|(name, line)| {
+                let found = defined.iter().find(|(n, _, _)| *n == name);
+                let (line, kind) = found.map(|(_, l, k)| (*l, *k)).unwrap_or((line, ExportKind::Value));
+                export(name, line, kind)
+            })
+            .collect(),
+        None => defined.into_iter().filter(|(n, _, _)| !n.starts_with('_')).map(|(n, l, k)| export(n, l, k)).collect(),
+    })
+}
+
+/// Counts for the layer inventory: a class whose bases name `Protocol` or
+/// `ABC` is an interface, any other class a type, and one with other bases
+/// an implementation; top-level functions are functions.
+fn python(root: TsNode<'_>, src: &str, c: &mut ItemCounts) {
+    for ch in named_children_of(root) {
+        let d = python_definition(ch);
+        match d.kind() {
+            "function_definition" => c.functions += 1,
+            "class_definition" => {
+                let bases: Vec<String> = d
+                    .child_by_field_name("superclasses")
+                    .map(|s| named_children_of(s).into_iter().map(|b| node_text(b, src)).collect())
+                    .unwrap_or_default();
+                let abstract_base = |b: &String| {
+                    let last = b.rsplit('.').next().unwrap_or(b);
+                    matches!(last, "Protocol" | "ABC") || last.starts_with("Protocol[")
+                };
+                if bases.iter().any(abstract_base) {
+                    c.interfaces += 1;
+                } else {
+                    c.types += 1;
+                    if bases.iter().any(|b| !b.starts_with("metaclass") && b != "object") {
+                        *c.implementations.get_or_insert(0) += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -64,7 +240,8 @@ fn count_items_in(source: &str, lang: Language) -> Result<ItemCounts, AnalysisEr
         Language::Rust => rust(tree.root_node(), src, &mut c),
         Language::Go => go(tree.root_node(), &mut c),
         Language::TypeScript => typescript(tree.root_node(), &mut c),
-        Language::Python | Language::Unknown => {}
+        Language::Python => python(tree.root_node(), source, &mut c),
+        Language::Unknown => {}
     }
     Ok(c)
 }
@@ -226,7 +403,8 @@ impl AstPort for TreeSitterAdapter {
             Language::TypeScript => extract_ts_imports(&root, source, &from_file),
             Language::Go => extract_go_imports(&root, source, &from_file),
             Language::Rust => extract_rust_imports(&root, source, &from_file),
-            Language::Python | Language::Unknown => Ok(vec![]),
+            Language::Python => extract_python_imports(&root, source, &from_file),
+            Language::Unknown => Ok(vec![]),
         }
     }
 
@@ -244,7 +422,8 @@ impl AstPort for TreeSitterAdapter {
             Language::TypeScript => extract_ts_exports(&root, source, &file),
             Language::Go => extract_go_exports(&root, source, &file),
             Language::Rust => extract_rust_exports(&root, source, &file),
-            Language::Python | Language::Unknown => Ok(vec![]),
+            Language::Python => extract_python_exports(&root, source, &file),
+            Language::Unknown => Ok(vec![]),
         }
     }
 

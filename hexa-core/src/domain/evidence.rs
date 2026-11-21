@@ -27,7 +27,7 @@ impl Evidence {
 }
 
 /// The runners this reader knows, for a refusal that has to name them (§5).
-pub const KNOWN_RUNNERS: &str = "cargo test, go test, node --test (TAP or the spec reporter), bun test, vitest (its summary or --reporter=json), npx vitest, hexa spec verify, bash (one script alone, ADR-2611191120 §7)";
+pub const KNOWN_RUNNERS: &str = "cargo test, go test, node --test (TAP or the spec reporter), bun test, vitest (its summary or --reporter=json), npx vitest, hexa spec verify, bash (one script alone, ADR-2611191120 §7), pytest (its summary line), unittest and Django's test runner (`Ran N tests`, then OK or FAILED; ADR-2611211324 §5, §7)";
 
 /// Read a gate run. `uncounted` is the declaration of §6; without it the
 /// exit status alone never passes.
@@ -97,6 +97,48 @@ fn count_before(text: &str, word: &str) -> Option<u64> {
     words.windows(2).find(|w| w[1].trim_end_matches(['.', ':']) == word).and_then(|w| w[0].parse().ok())
 }
 
+/// The N of unittest's "Ran N tests in 0.002s" (or "Ran 1 test in …").
+fn unittest_ran(line: &str) -> Option<u64> {
+    let rest = line.strip_prefix("Ran ")?;
+    let (n, rest) = rest.split_once(' ')?;
+    let rest = rest.strip_prefix("tests").or_else(|| rest.strip_prefix("test"))?;
+    (rest.is_empty() || rest.starts_with(" in ")).then(|| n.parse().ok()).flatten()
+}
+
+/// The count `key=N` in a unittest verdict such as "OK (skipped=3)"; 0 if absent.
+fn unittest_count(line: &str, key: &str) -> u64 {
+    let Some(at) = line.find(&format!("{key}=")) else { return 0 };
+    line[at + key.len() + 1..].chars().take_while(char::is_ascii_digit).collect::<String>().parse().unwrap_or(0)
+}
+
+/// pytest's summary, "== 3 failed, 5 passed, 1 skipped in 0.31s ==" or the
+/// `-q` form "5 passed in 0.12s", as (passed, failed). Failures and errors
+/// fail; skipped, xfailed, xpassed, deselected and warnings pass nothing.
+/// "no tests ran in 0.01s" is (0, 0): recognised, and vacuous.
+fn pytest_summary(line: &str) -> Option<(u64, u64)> {
+    let body = line.trim_matches(|c: char| c == '=' || c.is_whitespace());
+    let (counts, took) = body.rsplit_once(" in ")?;
+    let secs = took.split_whitespace().next()?;
+    if !(secs.ends_with('s') && secs[..secs.len() - 1].parse::<f64>().is_ok()) {
+        return None;
+    }
+    if counts == "no tests ran" {
+        return Some((0, 0));
+    }
+    let (mut passed, mut failed) = (0, 0);
+    for part in counts.split(", ") {
+        let (n, word) = part.split_once(' ')?;
+        let n: u64 = n.parse().ok()?;
+        match word {
+            "passed" => passed += n,
+            "failed" | "error" | "errors" => failed += n,
+            "skipped" | "xfailed" | "xpassed" | "deselected" | "warning" | "warnings" | "rerun" | "reruns" => {}
+            _ => return None,
+        }
+    }
+    Some((passed, failed))
+}
+
 /// The number after `prefix` at the start of `line`, as in `# pass 3`.
 fn count_after(line: &str, prefix: &str) -> Option<u64> {
     line.strip_prefix(prefix)?.split_whitespace().next()?.parse().ok()
@@ -116,9 +158,43 @@ fn tally(output: &str) -> Tally {
     if let Some(passed) = json_count(output, "numPassedTests") {
         t.saw(passed, json_count(output, "numFailedTests").unwrap_or(0));
     }
+    // unittest prints "Ran N tests in Xs" and, a line or two later, the
+    // verdict: "OK", "OK (skipped=k)" or "FAILED (failures=a, errors=b)".
+    let mut ran: Option<u64> = None;
     for raw in output.lines() {
         let line = raw.trim();
         if line.is_empty() {
+            continue;
+        }
+
+        // unittest and Django (ADR-2611211324 §7).
+        if let Some(n) = unittest_ran(line) {
+            t.recognised = true;
+            ran = Some(n);
+            continue;
+        }
+        if let Some(n) = ran {
+            if line == "OK" || line.starts_with("OK (") {
+                let set_aside = unittest_count(line, "skipped") + unittest_count(line, "expected failures");
+                t.saw(n.saturating_sub(set_aside), 0);
+                ran = None;
+                continue;
+            }
+            if line.starts_with("FAILED (") || line == "FAILED" {
+                let failed = unittest_count(line, "failures") + unittest_count(line, "errors");
+                t.saw(0, failed.max(1));
+                ran = None;
+                continue;
+            }
+        }
+
+        // pytest (ADR-2611211324 §5).
+        if let Some((passed, failed)) = pytest_summary(line) {
+            t.saw(passed, failed);
+            continue;
+        }
+        if line.starts_with("collected 0 items") {
+            t.recognised = true;
             continue;
         }
 

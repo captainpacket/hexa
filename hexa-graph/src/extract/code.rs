@@ -34,6 +34,8 @@ impl Language {
             Some(Language::Go)
         } else if path.ends_with(".rs") {
             Some(Language::Rust)
+        } else if path.ends_with(".py") || path.ends_with(".pyi") {
+            Some(Language::Python)
         } else {
             None
         }
@@ -44,7 +46,7 @@ impl Language {
             Language::TypeScript => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
             Language::Go => Some(tree_sitter_go::LANGUAGE.into()),
             Language::Rust => Some(tree_sitter_rust::LANGUAGE.into()),
-            Language::Python => None,
+            Language::Python => Some(tree_sitter_python::LANGUAGE.into()),
         }
     }
 }
@@ -69,7 +71,7 @@ pub fn extract_file(source: &str, lang: Language) -> FileExtract {
         Language::Rust => extract_rust(&root, source),
         Language::TypeScript => extract_ts(&root, source),
         Language::Go => extract_go(&root, source),
-        Language::Python => FileExtract::default(),
+        Language::Python => extract_python(&root, source),
     }
 }
 
@@ -413,6 +415,59 @@ fn collect_go_imports(node: Node, source: &str, imports: &mut Vec<RawImport>) {
             }
             "import_spec_list" => collect_go_imports(child, source, imports),
             _ => {}
+        }
+    }
+}
+
+// ── Python (ADR-2611211324) ──────────────────────────────
+
+fn extract_python(root: &Node, source: &str) -> FileExtract {
+    let mut out = FileExtract::default();
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        let def = if child.kind() == "decorated_definition" { child.child_by_field_name("definition").unwrap_or(child) } else { child };
+        match def.kind() {
+            "function_definition" => push_named(&mut out.entities, def, source, NodeKind::Function),
+            "class_definition" => push_named(&mut out.entities, def, source, NodeKind::Class),
+            _ => {}
+        }
+    }
+    collect_python_imports(*root, source, &mut out.imports);
+    out
+}
+
+/// Every import, at any depth: one under `if TYPE_CHECKING:` is still one.
+fn collect_python_imports(node: Node, source: &str, imports: &mut Vec<RawImport>) {
+    let taken = |n: Node| -> Option<String> {
+        match n.kind() {
+            "aliased_import" => n.child_by_field_name("name").map(|m| text(m, source).to_string()),
+            _ => Some(text(n, source).to_string()),
+        }
+    };
+    match node.kind() {
+        "import_statement" => {
+            let mut cursor = node.walk();
+            for name in node.children_by_field_name("name", &mut cursor) {
+                if let Some(module) = taken(name) {
+                    imports.push(RawImport { raw_path: module, names: vec!["*".to_string()], line: line_of(node), kind: ImportKind::Use });
+                }
+            }
+        }
+        "import_from_statement" => {
+            if let Some(module) = node.child_by_field_name("module_name") {
+                let mut cursor = node.walk();
+                let mut names: Vec<String> = node.children_by_field_name("name", &mut cursor).filter_map(taken).collect();
+                if names.is_empty() {
+                    names.push("*".to_string());
+                }
+                imports.push(RawImport { raw_path: text(module, source).to_string(), names, line: line_of(node), kind: ImportKind::Use });
+            }
+        }
+        _ => {
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                collect_python_imports(child, source, imports);
+            }
         }
     }
 }

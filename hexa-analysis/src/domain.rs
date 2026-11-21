@@ -63,6 +63,8 @@ impl Language {
             Self::Go
         } else if path.ends_with(".rs") {
             Self::Rust
+        } else if path.ends_with(".py") || path.ends_with(".pyi") {
+            Self::Python
         } else {
             Self::Unknown
         }

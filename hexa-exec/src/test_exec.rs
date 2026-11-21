@@ -167,6 +167,9 @@ pub fn env_prefix(path_env: Option<&str>, target_dir: Option<&Path>) -> String {
 }
 
 /// The nearest directory at or above `file`, inside `root`, holding `marker`.
+/// The files that make a directory the one pytest runs from.
+const PYTEST_MARKERS: [&str; 4] = ["pyproject.toml", "pytest.ini", "tox.ini", "setup.cfg"];
+
 fn nearest(root: &Path, file: &Path, marker: &str) -> Option<PathBuf> {
     let mut dir = file.parent()?;
     loop {
@@ -239,6 +242,15 @@ pub fn plan_test(root: &Path, r: &str, cfg: &TestConfig, prefix: &str) -> Result
         Runner::Bash => {
             let arg = t.name.as_deref().map(|a| format!(" {}", shell_quote(a))).unwrap_or_default();
             Ok(Planned { cmd: format!("{prefix}bash {}{arg}", shell_quote(&t.file)), judge: Judge::Script })
+        }
+        Runner::Pytest => {
+            // From the nearest directory that configures pytest, as a person
+            // would run it there (ADR-2611211324 §8); the repository root if none.
+            let dir = PYTEST_MARKERS.iter().filter_map(|m| nearest(root, &abs, m)).max_by_key(|d| d.components().count());
+            let dir = dir.unwrap_or_else(|| root.to_path_buf());
+            let cd = if dir == root { String::new() } else { format!("cd {} && ", shell_quote(&rel(root, &dir))) };
+            let target = format!("{}::{name}", rel(&dir, &abs));
+            Ok(Planned { cmd: format!("{prefix}{cd}python3 -m pytest {} -q", shell_quote(&target)), judge: Judge::Counted })
         }
         Runner::Configured(template) => {
             let cmd = fill(&template, &[("file", &t.file), ("name", &name)]);

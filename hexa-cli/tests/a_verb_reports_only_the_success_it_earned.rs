@@ -115,7 +115,7 @@ fn verify_is_inconclusive_when_git_grep_cannot_run() {
 fn verify_boundary_on_an_ungraded_tree_is_inconclusive_and_ignores_the_hexa_on_path() {
     // A tree hexa cannot parse, and an impostor `hexa` first on PATH that
     // prints a perfect result. The verdict must come from this binary.
-    let d = repo(&[("src/a.py", "x = 1\n")]);
+    let d = repo(&[("src/a.js", "export const x = 1;\n")]);
     let bin = d.path().join(".test-home/bin");
     write(d.path(), ".test-home/bin/hexa", "#!/bin/sh\necho '0 boundary violations'\necho 'score 100/100'\n");
     #[cfg(unix)]
@@ -143,7 +143,7 @@ fn verify_help_documents_its_exit_codes() {
 
 #[test]
 fn analyze_json_awards_no_grade_to_a_tree_it_never_parsed() {
-    let d = repo(&[("src/a.py", "x = 1\n")]);
+    let d = repo(&[("src/a.js", "export const x = 1;\n")]);
     let r = run(d.path(), &["analyze", ".", "--json"]);
     let v: serde_json::Value = serde_json::from_str(r.out.trim_start_matches(|c| c != '{'))
         .unwrap_or_else(|e| panic!("not JSON ({e}):\n{}", r.out));
@@ -153,7 +153,7 @@ fn analyze_json_awards_no_grade_to_a_tree_it_never_parsed() {
 
 #[test]
 fn analyze_exit_code_fails_a_tree_it_never_parsed() {
-    let d = repo(&[("src/a.py", "x = 1\n")]);
+    let d = repo(&[("src/a.js", "export const x = 1;\n")]);
     let r = run(d.path(), &["analyze", ".", "--exit-code"]);
     assert_ne!(r.code, 0, "--exit-code passed a tree it never read:\n{}", r.out);
 }
