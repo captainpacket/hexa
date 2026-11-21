@@ -15,6 +15,8 @@ pub enum Language {
     TypeScript,
     Go,
     Rust,
+    /// Python, by `.py` and `.pyi` (ADR-2611211324 §1).
+    Python,
 }
 
 impl Language {
@@ -37,11 +39,12 @@ impl Language {
         }
     }
 
-    fn grammar(self) -> TsLanguage {
+    fn grammar(self) -> Option<TsLanguage> {
         match self {
-            Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-            Language::Go => tree_sitter_go::LANGUAGE.into(),
-            Language::Rust => tree_sitter_rust::LANGUAGE.into(),
+            Language::TypeScript => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
+            Language::Go => Some(tree_sitter_go::LANGUAGE.into()),
+            Language::Rust => Some(tree_sitter_rust::LANGUAGE.into()),
+            Language::Python => None,
         }
     }
 }
@@ -50,8 +53,11 @@ impl Language {
 /// parse failure rather than erroring — a graph build over many files should be
 /// resilient to one unparseable file.
 pub fn extract_file(source: &str, lang: Language) -> FileExtract {
+    let Some(grammar) = lang.grammar() else {
+        return FileExtract::default();
+    };
     let mut parser = Parser::new();
-    if parser.set_language(&lang.grammar()).is_err() {
+    if parser.set_language(&grammar).is_err() {
         return FileExtract::default();
     }
     let tree = match parser.parse(source, None) {
@@ -63,6 +69,7 @@ pub fn extract_file(source: &str, lang: Language) -> FileExtract {
         Language::Rust => extract_rust(&root, source),
         Language::TypeScript => extract_ts(&root, source),
         Language::Go => extract_go(&root, source),
+        Language::Python => FileExtract::default(),
     }
 }
 

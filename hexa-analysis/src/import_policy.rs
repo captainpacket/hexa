@@ -194,7 +194,7 @@ pub fn classify(lang: Language, raw: &str, names: &ProjectNames) -> Origin {
                 Origin::StandardLibrary
             }
         }
-        Language::Unknown => Origin::External,
+        Language::Python | Language::Unknown => Origin::External,
     }
 }
 

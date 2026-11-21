@@ -20,7 +20,7 @@ fn get_language(lang: Language) -> Result<TsLanguage, AnalysisError> {
         Language::TypeScript => Ok(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
         Language::Go => Ok(tree_sitter_go::LANGUAGE.into()),
         Language::Rust => Ok(tree_sitter_rust::LANGUAGE.into()),
-        Language::Unknown => Err(AnalysisError::Other(
+        Language::Python | Language::Unknown => Err(AnalysisError::Other(
             "cannot parse files with unknown language".to_string(),
         )),
     }
@@ -64,7 +64,7 @@ fn count_items_in(source: &str, lang: Language) -> Result<ItemCounts, AnalysisEr
         Language::Rust => rust(tree.root_node(), src, &mut c),
         Language::Go => go(tree.root_node(), &mut c),
         Language::TypeScript => typescript(tree.root_node(), &mut c),
-        Language::Unknown => {}
+        Language::Python | Language::Unknown => {}
     }
     Ok(c)
 }
@@ -226,7 +226,7 @@ impl AstPort for TreeSitterAdapter {
             Language::TypeScript => extract_ts_imports(&root, source, &from_file),
             Language::Go => extract_go_imports(&root, source, &from_file),
             Language::Rust => extract_rust_imports(&root, source, &from_file),
-            Language::Unknown => Ok(vec![]),
+            Language::Python | Language::Unknown => Ok(vec![]),
         }
     }
 
@@ -244,7 +244,7 @@ impl AstPort for TreeSitterAdapter {
             Language::TypeScript => extract_ts_exports(&root, source, &file),
             Language::Go => extract_go_exports(&root, source, &file),
             Language::Rust => extract_rust_exports(&root, source, &file),
-            Language::Unknown => Ok(vec![]),
+            Language::Python | Language::Unknown => Ok(vec![]),
         }
     }
 
@@ -1113,7 +1113,7 @@ pub fn extract_module_references(
         Language::TypeScript => collect_ts_references(tree.root_node(), source, &mut out),
         // Go cannot name a package without importing it, so there is nothing
         // here that `extract_imports` has not already seen.
-        Language::Go | Language::Unknown => {}
+        Language::Go | Language::Python | Language::Unknown => {}
     }
     Ok(out)
 }

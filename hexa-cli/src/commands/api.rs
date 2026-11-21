@@ -390,7 +390,7 @@ fn adapter(root: &Path, port: Option<&str>, out: Option<&str>, force: bool) -> a
         Language::Rust => "src/adapters/primary/http.rs",
         Language::Go => "adapters/primary/httpapi/handler.go",
         Language::TypeScript => "src/adapters/primary/http-handler.ts",
-        Language::Unknown => anyhow::bail!("{port_file}: no adapter for this language"),
+        Language::Python | Language::Unknown => anyhow::bail!("{port_file}: no adapter for this language"),
     };
     let Some(rel) = inside(out.unwrap_or(default_out)) else {
         eprintln!("{} --out must be a path inside the project, without `..`", "✗".red());

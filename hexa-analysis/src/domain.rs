@@ -47,6 +47,8 @@ pub enum Language {
     TypeScript,
     Go,
     Rust,
+    /// Python, by `.py` and `.pyi` (ADR-2611211324 §1).
+    Python,
     Unknown,
 }
 

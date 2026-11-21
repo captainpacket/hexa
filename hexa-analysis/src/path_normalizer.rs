@@ -285,7 +285,7 @@ impl WorkspacePackages {
                         (r, _) => join(dir, r),
                     });
                 }
-                Language::Unknown => {}
+                Language::Python | Language::Unknown => {}
             }
         }
         None

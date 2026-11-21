@@ -997,6 +997,7 @@ async fn print_layer_inventory(root: &Path) {
             Language::Rust => "rust",
             Language::Go => "go",
             Language::TypeScript => "typescript",
+            Language::Python => "python",
             Language::Unknown => "unknown",
         };
         // Go never declares an implementation; a dash, not a zero.
