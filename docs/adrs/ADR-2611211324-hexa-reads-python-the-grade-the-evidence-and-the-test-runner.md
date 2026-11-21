@@ -55,3 +55,11 @@ Every phase ends with `cargo check --workspace`, `cargo test --workspace` and `h
 - ADR-2611081151: the evidence reader
 - ADR-2609140020: a grade is a claim about files that were read
 - `hexa-core/src/domain/test_runner.rs`, `hexa-core/src/domain/evidence.rs`, `hexa-analysis/src/domain.rs`
+
+**Gate:** `cargo test -p hexa-cli --test adr_2611211324_spec && cargo test -p hexa-core --lib domain::evidence`
+
+**Built:** phases 1 to 4 on 2026-11-21, at bdf80f1 on the local branch `feat/python` (not upstream). The 45 sealed scenario tests in `hexa-cli/tests/adr_2611211324_spec.rs` were red at 3b2a9ef and pass; S46 is held by the CI grade step. One fixture amendment is recorded in the spec (S05: one edge per target). hexa grades itself A+ 95, as on main, with `scripts/` (build tooling, `.py`) added to `analyze.exclude`. Outside this ADR, and not built by it: `hexa spec tests` generating Python tests, `hexa scaffold` and `hexa init --scaffold` emitting Python, and `hexa init` explaining `lifecycle_enforcement` (decision 9; recorded as gaps).
+
+netbox-plugin (54c73e52, tracked files): read as python (pyproject.toml); 262 files analysed, 917 import edges; grade F 0/100; 0 of 262 files with a layer; analyze.layers needed: every package directory, none declared yet (netbox_plugin/utilities 147 files, management 33, change_control 22, api 6, graphql 4, templatetags 2, plus scripts/ and development/ to exclude); 759 dead exports, most of them Django and NetBox entry points reached by name (decision 9's framework-entry-point gap).
+
+nautobot-ssot-plugin (0739bd2, tracked files): read as python (pyproject.toml); 72 files analysed, 123 import edges; grade F 0/100; 0 of 72 files with a layer; analyze.layers needed: none declared yet (nautobot_ssot/integrations 30 files, management 11, api 3, and models.py, jobs.py, views.py, urls.py, navigation.py, __init__.py, plus scripts/ to exclude); 52 dead exports.
