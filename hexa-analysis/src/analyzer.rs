@@ -415,12 +415,13 @@ async fn detect_go_module_prefix(root: &Path) -> Option<String> {
     None
 }
 
-/// The files the grade reads: [`source_files_sync`] without Python test
-/// modules, which the grade's own walk leaves out. A report that counts
-/// files (the "Hex layers" tally) lists these, so it counts exactly what the
-/// grade reads (ADR-2611221646 §3).
+/// The files the grade reads: the grade's own walk ([`walk_graded_files`]),
+/// so a hidden folder it reads and a symlinked folder it follows are listed
+/// too. A report that counts files (the "Hex layers" tally) lists these, so
+/// it counts exactly what the grade reads (ADR-2611221646 §3). A tree the
+/// walk cannot read lists nothing, as the grade then grades nothing.
 pub fn graded_files_sync(root: &Path) -> Vec<String> {
-    source_files_sync(root).into_iter().filter(|rel| !is_python_test(rel)).collect()
+    walk_graded_files(root).unwrap_or_default()
 }
 
 /// The files `hexa analyze` grades, listed synchronously for the display
@@ -488,14 +489,22 @@ pub fn load_file_data_sync(root: &Path, adapter: &dyn AstPort) -> Vec<FileData> 
 
 /// Recursively collect source files under a directory.
 pub(crate) async fn collect_source_files(root: &Path) -> Result<Vec<String>, AnalysisError> {
+    Ok(walk_graded_files(root)?)
+}
+
+/// The grade's walk: every directory not matched by `EXCLUDE_PATTERNS` or
+/// `analyze.exclude` (symlinked directories followed), every source file in
+/// them that is not a Python test or excluded. One walk, shared by the grade
+/// and by [`graded_files_sync`], so the two cannot drift apart.
+fn walk_graded_files(root: &Path) -> std::io::Result<Vec<String>> {
     let mut files = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     let project_ex_owned = project_excludes(root);
     let project_ex: Vec<&str> = project_ex_owned.iter().map(String::as_str).collect();
 
     while let Some(dir) = stack.pop() {
-        let mut entries = tokio::fs::read_dir(&dir).await?;
-        while let Ok(Some(entry)) = entries.next_entry().await {
+        for entry in std::fs::read_dir(&dir)? {
+            let Ok(entry) = entry else { break };
             let path = entry.path();
             let rel = path
                 .strip_prefix(root)
