@@ -1,6 +1,7 @@
 # ADR-2611221644: Python reads the `@hexa:public` tag
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-22 Accepted: Accepted in craigjohnson's session: he accepted the spec, chose the fix under his rule (real bug fixes only; architectural correctness first), and its sealed tests, red before the code, pass on main
 **Date:** 2026-11-22
 **Drivers:** a Python SDK, a published Python library, graded B 80 after its conversion: all 24 dead exports were names in its modules' `__all__`, the public API that users outside the repository import. hexa's answer for a library's public API is the `@hexa:public` tag, and in Python it does nothing: `extract_python_exports` always writes `hexa_public: false`. The project had to add a test that imports each public name to make the grade count them as used.
 **Supersedes:** none. Completes the Python support of ADR-2611211324 the way ADR-2611221553 completed Go's.
