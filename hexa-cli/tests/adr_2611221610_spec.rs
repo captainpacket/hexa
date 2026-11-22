@@ -484,7 +484,7 @@ fn s11_the_edit_hook_prints_graph_context() {
     );
 }
 
-/// S12: With no graph the edit hook prints no context and does not block
+/// S12: With no graph, or for a file the graph does not hold, the edit hook prints no context and does not block
 #[test]
 fn s12_no_graph_means_no_context() {
     let (_t, root) = crate_repo(advisory());
@@ -493,6 +493,22 @@ fn s12_no_graph_means_no_context() {
     assert!(
         graph_lines(&r.out).is_empty(),
         "no graph, no context:\n{}",
+        r.all()
+    );
+    build(&root);
+    write(&root, "src/new.rs", "pub fn fresh() {}\n");
+    let r = pre_edit(&root, "src/new.rs");
+    assert_eq!(r.code, 0, "{}", r.all());
+    assert!(
+        graph_lines(&r.out).is_empty(),
+        "a file the graph does not hold gets no context:\n{}",
+        r.all()
+    );
+    // The control: the same hook, in the same session, does print for a file the graph holds.
+    let r = pre_edit(&root, "src/b.rs");
+    assert!(
+        !graph_lines(&r.out).is_empty(),
+        "the hook is live for a file the graph holds:\n{}",
         r.all()
     );
 }
@@ -848,8 +864,28 @@ fn s15_an_amended_sealed_test_is_accepted() {
 #[test]
 fn s16_an_unamended_sealed_test_is_refused() {
     let (_t, root) = sealed_repo();
+    let id = the_id();
     write(&root, "tests/t.sh", "#!/bin/bash\nexit 0\n");
     let before = git(&root, &["rev-parse", "HEAD"]);
+    let spec = spec_rel();
+    let gate = |root: &Path| {
+        hexa(
+            root,
+            &[
+                "do",
+                "gate",
+                "--local",
+                "--no-land",
+                "--files",
+                "tests/t.sh",
+                &spec,
+                "-e",
+                "bash tests/t.sh",
+                "-m",
+                "test: loosen",
+            ],
+        )
+    };
     let r = hexa(
         &root,
         &[
@@ -875,6 +911,47 @@ fn s16_an_unamended_sealed_test_is_refused() {
         git(&root, &["rev-parse", "HEAD"]),
         before,
         "nothing committed"
+    );
+    // An amendment recorded for other content does not cover this edit.
+    let sum = sha256_of(&root, "tests/t.sh");
+    let r = hexa(
+        &root,
+        &[
+            "spec",
+            "amend",
+            &id,
+            "--file",
+            "tests/t.sh",
+            "--reason",
+            "shorter",
+            "--by",
+            "t",
+            "--confirm",
+            &sum,
+        ],
+    );
+    assert_eq!(r.code, 0, "{}", r.all());
+    write(&root, "tests/t.sh", "#!/bin/bash\ntrue\n");
+    let r = gate(&root);
+    assert_ne!(
+        r.code,
+        0,
+        "an amendment whose `to` is not the file's content is refused:\n{}",
+        r.all()
+    );
+    assert_eq!(
+        git(&root, &["rev-parse", "HEAD"]),
+        before,
+        "nothing committed"
+    );
+    // The control: the edit the amendment recorded does pass.
+    write(&root, "tests/t.sh", "#!/bin/bash\nexit 0\n");
+    let r = gate(&root);
+    assert_eq!(
+        r.code,
+        0,
+        "the recorded edit passes, so the refusals were for the missing amendment:\n{}",
+        r.all()
     );
 }
 
@@ -924,6 +1001,16 @@ fn s18_no_remote_no_remote_wording() {
     assert!(
         !r.err.contains("remote runner"),
         "no remote wording without test.remote:\n{}",
+        r.err
+    );
+    // The control: the same project and command with test.remote set does name it.
+    let pj = serde_json::json!({ "name": "p", "id": "00000000-test",
+                                 "test": { "remote": "bash ci/remote.sh --commit {commit} --extra {cmd}" } });
+    write(&root, ".hexa/project.json", &pj.to_string());
+    let r = pre_bash(&root, "git commit -m x");
+    assert!(
+        r.err.contains("remote runner"),
+        "the wording follows the setting:\n{}",
         r.err
     );
 }
