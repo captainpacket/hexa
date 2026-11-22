@@ -310,9 +310,8 @@ imports, exports and layers, the evidence reader counts pytest and unittest,
 and a `.py` test has a built-in pytest runner. What a static reader cannot see
 it does not grade: imports made at run time (`importlib`, Django's string-named
 apps, Nautobot's `register_jobs`). The API contract (`@hexa:api`) is not read in
-Python, and the Rust-only health detectors stay Rust-only. With no compiler, put a type checker in front of the tests in the gate
-(`python3 -m mypy --strict <package> && python3 -m pytest -q`); `/hexa-workflow`
-says how.
+Python, and the Rust-only health detectors stay Rust-only. With no compiler, make the type checker part of the test run (`pytest --mypy`,
+with the `pytest-mypy` plugin and strict mypy); `/hexa-workflow` says how.
 
 ---
 

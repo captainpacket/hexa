@@ -158,18 +158,20 @@ was counted.
 vitest's summary and JSON report are counted too, and a gate that is exactly
 one bash script (`bash ci/check-x.sh`) counts as one test.
 
-**Python: put a type checker in front of the tests.** Python has no compiler,
-so without one the first gate an agent meets is the tests it wrote itself. Run a
-type checker first, in the same gate, so a wrong shape fails before any test
-runs, and hexa still counts the pytest result:
+**Python: make the type checker part of the test run.** Python has no
+compiler, so without one the first gate an agent meets is the tests it wrote
+itself. With the `pytest-mypy` plugin installed and `[tool.mypy] strict = true`
+in `pyproject.toml`, mypy runs as part of pytest: a type error is a failing
+test, and hexa counts the result like any pytest run:
 
 ```bash
-hexa loop gate "python3 -m mypy --strict <package> && python3 -m pytest -q"
-hexa do gate --files <file> -e "python3 -m mypy --strict <package> && python3 -m pytest -q" -m "<what changed>"
+hexa loop gate "pytest --mypy -q"
+hexa do gate --files <file> -e "pytest --mypy -q" -m "<what changed>"
 ```
 
-`pyright` works the same way. A type error fails the gate with nothing
-committed; a clean run is counted by the pytest summary that follows it.
+A type error fails the gate with nothing committed. Run pytest the way the
+project does (for example through `uv run`), with the package importable
+(`[tool.pytest.ini_options] pythonpath`), so the plugin and the code are found.
 
 **Where tests run.** A project that builds elsewhere sets `test.remote` in
 `.hexa/project.json` to a template with `{commit}` and `{cmd}`. `spec verify`,
