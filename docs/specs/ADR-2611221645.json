@@ -249,11 +249,12 @@
     {
       "id": "S19",
       "decision": [
-        "§3"
+        "§3",
+        "§5"
       ],
       "kind": "example",
-      "description": "A project with no paths grades exactly as before.",
-      "given": "A TypeScript project whose tsconfig.json has no compilerOptions.paths, with relative and package imports",
+      "description": "A project with no paths whose relative imports each name an existing .ts file as written grades exactly as before.",
+      "given": "A TypeScript project whose tsconfig.json has no compilerOptions.paths, with package imports and relative imports each of which names, with .ts added, a file that exists",
       "when": "hexa analyze runs on it before and after this change",
       "then": "violations, edge_count and health_score are identical"
     },
@@ -326,6 +327,39 @@
       "then": "For every import, the graph's target file equals the analyze edge's to_file, so consumers of a file are exactly the from_files of edges to it",
       "test": "hexa-cli/tests/adr_2611221645_spec.rs::s25_the_graph_and_analyze_agree_on_every_import_edge",
       "red": "d71d65b"
+    },
+    {
+      "id": "S26",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "A relative import of a .tsx file or a folder's index.ts resolves to that file.",
+      "given": "A project with no compilerOptions.paths, whose analyze.layers put src/domain/** in domain and src/ui/** in adapters/primary; src/ui/Button.tsx and src/ui/index.ts exist and src/ui/Button.ts does not; src/domain/a.ts imports \"../ui/Button\" and src/domain/b.ts imports \"../ui\"",
+      "when": "hexa analyze runs on it",
+      "then": "The import from src/domain/a.ts has resolved_path src/ui/Button.tsx and the one from src/domain/b.ts has resolved_path src/ui/index.ts; both edges are domain to adapters/primary and both are violations"
+    },
+    {
+      "id": "S27",
+      "decision": [
+        "§5"
+      ],
+      "kind": "negative",
+      "description": "A relative import that names no project file is named as before.",
+      "given": "A project with no compilerOptions.paths; src/domain/a.ts imports \"../gone/thing\" and no file src/gone/thing, src/gone/thing.ts, src/gone/thing.tsx, src/gone/thing/index.ts or src/gone/thing/index.tsx exists",
+      "when": "hexa analyze runs on it",
+      "then": "The import's resolved_path is src/gone/thing.ts, as before this change, and it is not a violation"
+    },
+    {
+      "id": "S28",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "A NodeNext .js specifier resolves to the .ts file of the same stem.",
+      "given": "A project with no compilerOptions.paths; src/domain/a.ts imports \"./b.js\"; src/domain/b.ts exists and src/domain/b.js does not",
+      "when": "hexa analyze runs on it",
+      "then": "The import's resolved_path is src/domain/b.ts"
     }
   ],
   "amendments": [
