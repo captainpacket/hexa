@@ -23,7 +23,7 @@ An export the grade cannot see is a boundary the grade cannot check. Its dead-ex
 
 ## Implementation
 
-**Gate:** `cargo test -p hexa-analysis --test adr_2611221609_spec`
+**Gate:** `cargo test -p hexa-analysis --test adr_2611221609_spec_2` (the 9 scenarios that fail before the fix; S05, S10, S12, S13, S14, S15 and S16 already hold and stay pending as guards)
 
 Every phase ends with `cargo test --workspace` and `hexa analyze .`.
 
