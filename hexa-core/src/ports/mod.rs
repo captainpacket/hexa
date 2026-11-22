@@ -9,6 +9,7 @@ pub mod spec;
 // Which runner a scenario's test names, and where tests run (ADR-2611191120).
 pub mod test_runner;
 // Which build a binary is, and whether it is behind (ADR-2610270853).
+pub mod orientation;
 pub mod project_floor;
 pub mod provenance;
 // The repository's forge: remote mapping, issue and PR texts, the secret scan (ADR-2611031914).

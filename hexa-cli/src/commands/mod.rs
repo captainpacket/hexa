@@ -3,6 +3,7 @@ pub mod adr;
 pub mod events;
 // The open work and the command that closes each item (ADR-2611161800).
 pub mod finish;
+pub mod orientation;
 // A gated commit lands on the base branch (ADR-2611161800 §4).
 pub mod land;
 pub mod claude_paths;

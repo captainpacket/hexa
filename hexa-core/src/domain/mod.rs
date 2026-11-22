@@ -16,6 +16,7 @@ pub mod design;
 pub mod evidence;
 pub mod ledger;
 pub mod messages;
+pub mod orientation;
 pub mod project_floor;
 pub mod provenance;
 pub mod spec;
