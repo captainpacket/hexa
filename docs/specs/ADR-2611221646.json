@@ -13,6 +13,9 @@
     "by": "craigjohnson",
     "sha256": "f05f531785b888a624f39f00dd26e83f813446a093dd78de228e6b533313d1b8"
   },
+  "sealed": {
+    "hexa-cli/tests/adr_2611221646_spec_2.rs": "b6f7739dc968338b19b5bbd786d6c7cad874be7600f5a544528f00bb28fc23d9"
+  },
   "specs": [
     {
       "id": "S01",
@@ -23,7 +26,9 @@
       "description": "A non-zero exit with a `result` on stdout surfaces that result",
       "given": "the claude CLI exits with status 1, writes `{\"result\":\"AWS SSO token expired\",\"terminal_reason\":\"auth\"}` to stdout, and writes nothing to stderr",
       "when": "hexa makes a `claude-text` call",
-      "then": "the call fails with an error that contains \"exited with 1\" and \"AWS SSO token expired\""
+      "then": "the call fails with an error that contains \"exited with 1\" and \"AWS SSO token expired\"",
+      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s01_nonzero_exit_surfaces_result",
+      "red": "a68c4e6"
     },
     {
       "id": "S02",
@@ -34,7 +39,9 @@
       "description": "With no `result`, the error falls back to `terminal_reason`",
       "given": "the claude CLI exits with status 2, writes `{\"terminal_reason\":\"rate_limited\"}` to stdout, and writes nothing to stderr",
       "when": "hexa makes a `claude-text` call",
-      "then": "the call fails with an error that contains \"exited with 2\" and \"rate_limited\""
+      "then": "the call fails with an error that contains \"exited with 2\" and \"rate_limited\"",
+      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s02_falls_back_to_terminal_reason",
+      "red": "a68c4e6"
     },
     {
       "id": "S03",
@@ -45,7 +52,9 @@
       "description": "Stderr is still reported alongside the stdout reason",
       "given": "the claude CLI exits with status 1, writes `{\"result\":\"model unavailable\"}` to stdout, and writes \"warning: retry exhausted\" to stderr",
       "when": "hexa makes a `claude-text` call",
-      "then": "the error contains both \"model unavailable\" and \"warning: retry exhausted\""
+      "then": "the error contains both \"model unavailable\" and \"warning: retry exhausted\"",
+      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s03_stderr_reported_alongside_stdout_reason",
+      "red": "a68c4e6"
     },
     {
       "id": "S04",
@@ -56,7 +65,9 @@
       "description": "A non-zero exit is never reported with nothing after the colon when the CLI said why",
       "given": "the claude CLI exits with status 1, writes `{\"result\":\"AWS SSO token expired\"}` to stdout, and leaves stderr empty",
       "when": "hexa makes a `claude-text` call",
-      "then": "the error message is not \"claude-text exited with 1: \" with only whitespace or nothing after the colon"
+      "then": "the error message is not \"claude-text exited with 1: \" with only whitespace or nothing after the colon",
+      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s04_never_nothing_after_colon",
+      "red": "a68c4e6"
     },
     {
       "id": "S05",
@@ -67,7 +78,9 @@
       "description": "`result` takes precedence over `terminal_reason`",
       "given": "the claude CLI exits with status 1 and writes `{\"result\":\"token expired\",\"terminal_reason\":\"error\"}` to stdout",
       "when": "hexa makes a `claude-text` call",
-      "then": "the error names \"token expired\" as the reason, and is not built from \"error\" alone"
+      "then": "the error names \"token expired\" as the reason, and is not built from \"error\" alone",
+      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s05_result_takes_precedence",
+      "red": "a68c4e6"
     },
     {
       "id": "S06",
@@ -78,7 +91,9 @@
       "description": "Every non-zero exit carries what the CLI wrote",
       "given": "any non-zero exit status, any stderr text, and any stdout JSON whose `result` or `terminal_reason` is a non-empty string",
       "when": "hexa makes a `claude-text` call that receives them",
-      "then": "the error contains the exit status, the stdout `result` if it is present (otherwise the `terminal_reason`), and the stderr text whenever stderr is non-empty"
+      "then": "the error contains the exit status, the stdout `result` if it is present (otherwise the `terminal_reason`), and the stderr text whenever stderr is non-empty",
+      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s06_every_nonzero_exit_carries_cli_output",
+      "red": "a68c4e6"
     },
     {
       "id": "S07",
@@ -89,7 +104,9 @@
       "description": "A missing evidence program stops the bench before any fixture runs",
       "given": "five selected fixtures whose evidence commands all start with `bun`, and no `bun` on PATH",
       "when": "the user runs `hexa bench agentic`",
-      "then": "the command refuses with an error that names `bun` and all five fixtures, no fixture runs, no model is invoked, and no pass rate is reported"
+      "then": "the command refuses with an error that names `bun` and all five fixtures, no fixture runs, no model is invoked, and no pass rate is reported",
+      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s07_missing_bun_stops_bench",
+      "red": "a68c4e6"
     },
     {
       "id": "S08",
@@ -111,7 +128,9 @@
       "description": "One missing program refuses the whole run and names only the fixtures that need it",
       "given": "selected fixtures A and B whose evidence starts with `cargo`, which is on PATH, and fixture C whose evidence starts with `pytest`, which is not on PATH",
       "when": "the user runs `hexa bench agentic`",
-      "then": "the bench refuses, the refusal names `pytest` and fixture C but not A or B, and none of A, B or C runs"
+      "then": "the bench refuses, the refusal names `pytest` and fixture C but not A or B, and none of A, B or C runs",
+      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s09_one_missing_program_refuses_whole_run",
+      "red": "a68c4e6"
     },
     {
       "id": "S10",
@@ -133,7 +152,9 @@
       "description": "The bench runs nothing unless every evidence program resolves",
       "given": "any set of selected fixtures and any PATH",
       "when": "the user runs `hexa bench agentic`",
-      "then": "if the first program of any selected fixture's evidence command is not found on PATH, no fixture runs and the refusal lists each missing program with the fixtures that need it; otherwise the bench proceeds"
+      "then": "if the first program of any selected fixture's evidence command is not found on PATH, no fixture runs and the refusal lists each missing program with the fixtures that need it; otherwise the bench proceeds",
+      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s11_bench_runs_nothing_unless_all_programs_resolve",
+      "red": "a68c4e6"
     },
     {
       "id": "S12",
@@ -188,7 +209,9 @@
       "description": "`pyproject.toml` alone means Python",
       "given": "a project root that contains `pyproject.toml` and none of `Cargo.toml`, `go.mod` or `package.json`",
       "when": "the session context is injected",
-      "then": "it shows Language: python"
+      "then": "it shows Language: python",
+      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s16_pyproject_alone_means_python",
+      "red": "a68c4e6"
     },
     {
       "id": "S17",
@@ -199,7 +222,9 @@
       "description": "`setup.py` or `setup.cfg` alone also means Python",
       "given": "one project root that contains only `setup.py` and another that contains only `setup.cfg`, among the manifests named",
       "when": "the session context is injected for each",
-      "then": "both show Language: python"
+      "then": "both show Language: python",
+      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_2::s17_setup_py_or_setup_cfg_alone_means_python",
+      "red": "a68c4e6"
     },
     {
       "id": "S18",
@@ -232,7 +257,9 @@
       "description": "Python is shown exactly when a Python manifest is present and the others are absent",
       "given": "any subset of {`pyproject.toml`, `setup.py`, `setup.cfg`, `Cargo.toml`, `go.mod`, `package.json`} present at a project root",
       "when": "the session context is injected",
-      "then": "it shows Language: python if and only if the subset contains at least one Python manifest and none of `Cargo.toml`, `go.mod` or `package.json`"
+      "then": "it shows Language: python if and only if the subset contains at least one Python manifest and none of `Cargo.toml`, `go.mod` or `package.json`",
+      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_2::s20_python_iff_python_manifest_and_no_others",
+      "red": "a68c4e6"
     },
     {
       "id": "S21",
@@ -243,7 +270,9 @@
       "description": "A project definition with only read tools runs in place",
       "given": "`.claude/agents/code-reviewer.md` in the project, with tools Read, Grep and Glob, on a branch where an editing agent would be blocked",
       "when": "a code-reviewer subagent is launched without `isolation: \"worktree\"`",
-      "then": "the pre-agent hook allows it, as it does for the fixed read-only types"
+      "then": "the pre-agent hook allows it, as it does for the fixed read-only types",
+      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_2::s21_project_definition_with_read_tools_runs_in_place",
+      "red": "a68c4e6"
     },
     {
       "id": "S22",
@@ -254,7 +283,9 @@
       "description": "The user's home definition is used when the project has none",
       "given": "no `.claude/agents/auditor.md` in the project, and `~/.claude/agents/auditor.md` with tools Read and Grep",
       "when": "an auditor subagent is launched without a worktree",
-      "then": "the pre-agent hook allows it"
+      "then": "the pre-agent hook allows it",
+      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_2::s22_home_definition_used_when_project_has_none",
+      "red": "a68c4e6"
     },
     {
       "id": "S23",
@@ -298,7 +329,9 @@
       "description": "A definition is exempt exactly when it lists tools and none of them writes",
       "given": "any subagent type not in the fixed read-only list, launched without `isolation: \"worktree\"`, and any definition state: absent, no `tools` list, or any `tools` list",
       "when": "the pre-agent hook evaluates it",
-      "then": "it is allowed as read-only if and only if the governing definition (the project's, else the home's) has a `tools` list containing none of Edit, Write, MultiEdit, NotebookEdit or Bash; otherwise the hook blocks or warns exactly as it did before this ADR"
+      "then": "it is allowed as read-only if and only if the governing definition (the project's, else the home's) has a `tools` list containing none of Edit, Write, MultiEdit, NotebookEdit or Bash; otherwise the hook blocks or warns exactly as it did before this ADR",
+      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_2::s26_exempt_iff_tools_listed_and_none_writes",
+      "red": "a68c4e6"
     }
   ]
 }
