@@ -1540,6 +1540,24 @@ fn project_names(root: &Path) -> hexa_analysis::import_policy::ProjectNames {
         }
     }
 
+    // Python: the top-level names an absolute import of the project's own code
+    // starts with, from the root and from `src/` (ADR-2611211324 §2). Without
+    // these, `from pkg.domain import X` reads as a third-party package.
+    for base in [root.to_path_buf(), root.join("src")] {
+        let Ok(entries) = std::fs::read_dir(&base) else { continue };
+        for e in entries.flatten() {
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().to_string();
+            if p.is_dir() && p.join("__init__.py").is_file() {
+                names.python_packages.push(name);
+            } else if let Some(stem) = name.strip_suffix(".py").or_else(|| name.strip_suffix(".pyi")) {
+                names.python_packages.push(stem.to_string());
+            }
+        }
+    }
+    names.python_packages.sort();
+    names.python_packages.dedup();
+
     names
 }
 
@@ -1662,7 +1680,11 @@ fn walk_manifests(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
 /// The first segment of a module path, which is the name that decides whether
 /// the path leaves the project at all.
 fn first_segment(lang: hexa_analysis::ports::Language, raw: &str) -> String {
-    let sep = if lang == hexa_analysis::ports::Language::Rust { "::" } else { "/" };
+    let sep = match lang {
+        hexa_analysis::ports::Language::Rust => "::",
+        hexa_analysis::ports::Language::Python => ".",
+        _ => "/",
+    };
     raw.trim().trim_start_matches("::").split(sep).next().unwrap_or("").to_string()
 }
 
@@ -1835,7 +1857,11 @@ fn denied_name(
     names: &hexa_analysis::import_policy::ProjectNames,
 ) -> String {
     let _ = names;
-    let sep = if lang == hexa_analysis::ports::Language::Rust { "::" } else { "/" };
+    let sep = match lang {
+        hexa_analysis::ports::Language::Rust => "::",
+        hexa_analysis::ports::Language::Python => ".",
+        _ => "/",
+    };
     let path = raw_path.trim().trim_start_matches("::");
     let mut best: Option<&str> = None;
     for d in deny {

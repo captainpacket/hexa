@@ -51,9 +51,9 @@ const EXCLUDE_PATTERNS: &[&str] = &[
     "/test/",
     "/__tests__/",
     "/target/",
-    // Python: generated migrations, environments and caches are not the
-    // project's code, and `*_test.py` is test code (ADR-2611211324 §4).
-    "/migrations/",
+    // Python environments and caches are not the project's code, and
+    // `*_test.py` is test code (ADR-2611211324 §4). Generated migrations are
+    // [`PYTHON_ONLY_EXCLUDES`]: a TypeORM or goose migration is written code.
     "/.venv/",
     "/venv/",
     "/site-packages/",
@@ -63,6 +63,16 @@ const EXCLUDE_PATTERNS: &[&str] = &[
     // the project's own sources.
     "/.claude/worktrees/",
 ];
+
+/// What the grade leaves out of a `.py` or `.pyi` file only: Django's and
+/// Alembic's generated migrations.
+const PYTHON_ONLY_EXCLUDES: &[&str] = &["/migrations/"];
+
+/// A file the grade leaves out by the built-in patterns.
+fn excluded_by_default(file_path: &str) -> bool {
+    matches_exclude(file_path, EXCLUDE_PATTERNS)
+        || ((file_path.ends_with(".py") || file_path.ends_with(".pyi")) && matches_exclude(file_path, PYTHON_ONLY_EXCLUDES))
+}
 
 fn matches_exclude(file_path: &str, patterns: &[&str]) -> bool {
     let segmented = format!("/{}/", file_path.trim_matches('/'));
@@ -423,7 +433,7 @@ pub fn source_files_sync(root: &Path) -> Vec<String> {
             .replace('\\', "/");
         let hidden = e.file_name().to_string_lossy().starts_with('.');
         !hidden
-            && !matches_exclude(&rel, EXCLUDE_PATTERNS)
+            && !excluded_by_default(&rel)
             && !matches_exclude(&rel, &project_ex)
     });
     for entry in walker.flatten() {
@@ -485,7 +495,7 @@ pub(crate) async fn collect_source_files(root: &Path) -> Result<Vec<String>, Ana
                 }
             } else if is_source_file(&rel)
                 && !is_python_test(&rel)
-                && !matches_exclude(&rel, EXCLUDE_PATTERNS)
+                && !excluded_by_default(&rel)
                 && !matches_exclude(&rel, &project_ex)
             {
                 files.push(rel);
@@ -997,6 +1007,16 @@ mod tests {
         assert!(matches_exclude(".claude/worktrees/agent-1/src/lib.rs", EXCLUDE_PATTERNS));
         assert!(!matches_exclude("crates/worktrees/src/lib.rs", EXCLUDE_PATTERNS));
         assert!(!matches_exclude("src/claude/worktrees/lib.rs", EXCLUDE_PATTERNS));
+    }
+
+    /// A generated Python migration is not graded; a TypeScript or Go
+    /// migration is code a person wrote, and is.
+    #[test]
+    fn only_a_python_migration_is_left_out() {
+        assert!(excluded_by_default("pkg/migrations/0001_initial.py"));
+        assert!(!excluded_by_default("src/migrations/1700000000-AddUser.ts"));
+        assert!(!excluded_by_default("db/migrations/00001_init.go"));
+        assert!(excluded_by_default("app/.venv/lib/x.ts"), "an environment is never project code");
     }
 
     #[tokio::test]

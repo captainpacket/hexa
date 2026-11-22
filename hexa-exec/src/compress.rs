@@ -50,7 +50,7 @@ pub fn cap_str(s: &str, head: usize, tail: usize) -> String {
 
 /// Rough token estimate (chars / 4) over the whole message array — enough to
 /// decide when the LLM-overflow summarization should fire.
-pub fn estimate_tokens(messages: &[Value]) -> usize {
+fn estimate_tokens(messages: &[Value]) -> usize {
     let mut chars = 0usize;
     for m in messages {
         chars += content_chars(m.get("content").unwrap_or(&Value::Null));
@@ -87,7 +87,7 @@ fn is_observation_turn(m: &Value) -> bool {
 /// Mechanically compress the transcript: cap every observation to head+tail, and
 /// collapse all but the last `keep_recent` observation turns to a one-line gist.
 /// The first message (the task/seed) and assistant reasoning turns pass through.
-pub fn compress_messages(messages: &[Value], opts: &CompressOpts) -> Vec<Value> {
+fn compress_messages(messages: &[Value], opts: &CompressOpts) -> Vec<Value> {
     // Index the observation turns so we can keep only the most recent K full.
     let obs_indices: Vec<usize> =
         messages.iter().enumerate().filter(|(_, m)| is_observation_turn(m)).map(|(i, _)| i).collect();

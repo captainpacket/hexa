@@ -26,7 +26,7 @@ pub struct RegistryBackends;
 /// The registry-backed [`PromptCompressor`]: a [`SemanticCompressor`] whose
 /// cheap model is tier `t1`, resolved through the tier configuration as every
 /// other cheap call is, and whose budget and verbatim window come from
-/// `.hexa/project.json` (see [`compressor_config_in`]).
+/// `.hexa/project.json` (`inference.compression`).
 pub struct RegistryCompressor;
 
 impl RegistryCompressor {
@@ -56,7 +56,7 @@ impl PromptCompressor for RegistryCompressor {
 ///   layer never fires below the ReAct loop's own budget;
 /// - `inference.compression.keep_recent_tool_results` sets how many recent
 ///   tool results stay verbatim.
-pub fn compressor_config_in(root: &std::path::Path) -> CompressorConfig {
+fn compressor_config_in(root: &std::path::Path) -> CompressorConfig {
     let mut cfg = CompressorConfig {
         cheap_model: crate::tiers::tier_model_in(root, "t1"),
         ..CompressorConfig::default()

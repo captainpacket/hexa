@@ -285,7 +285,15 @@ pub async fn build(
     let crate_roots = crate_roots(root, &file_set);
     for (from_rel, raw_path, names, kind) in &pending_imports {
         let from_file_id = id_for(NodeKind::File, from_rel, from_rel);
-        let resolved = resolve_import(from_rel, raw_path, &file_set, &crate_roots);
+        // A Python `from` import can reach one file per name it takes
+        // (`from pkg import a, b`); the first is the one names resolve
+        // against, and every one is an import edge (ADR-2611211324 §2).
+        let (resolved, also): (Option<String>, Vec<String>) = if is_python(from_rel) {
+            let mut t = python_targets(from_rel, raw_path, names, &file_set).into_iter();
+            (t.next(), t.collect())
+        } else {
+            (resolve_import(from_rel, raw_path, &file_set, &crate_roots), Vec::new())
+        };
 
         match kind {
             // `mod x;` wires a module in. It is not a use of its items.
@@ -345,7 +353,7 @@ pub async fn build(
         }
 
         // File→file import edge when the path resolves inside the project.
-        if let Some(target_rel) = &resolved {
+        for target_rel in resolved.iter().chain(also.iter()) {
             let to_file_id = id_for(NodeKind::File, target_rel, target_rel);
             add_edge(
                 &mut graph,
@@ -667,6 +675,105 @@ fn root_crate_name(root: &Path) -> Option<String> {
                 .to_string(),
         ),
     }
+}
+
+fn is_python(rel: &str) -> bool {
+    rel.ends_with(".py") || rel.ends_with(".pyi")
+}
+
+/// The project files one Python import reaches, in the order its names are
+/// written, never the importing file itself. `names` is `["*"]` for a plain
+/// `import a.b`. Importing `a.b` runs `a/__init__.py` first, so each package
+/// above a target is reached too.
+fn python_targets(from_rel: &str, module: &str, names: &[String], files: &HashSet<String>) -> Vec<String> {
+    let mut out = python_named_targets(from_rel, module, names, files);
+    let mut parents: Vec<String> = Vec::new();
+    for t in &out {
+        let mut dir: Vec<&str> = t.split('/').collect();
+        dir.pop();
+        if t.ends_with("/__init__.py") {
+            dir.pop();
+        }
+        while !dir.is_empty() {
+            let pkg = dir.join("/");
+            let init = format!("{pkg}/__init__.py");
+            // A module inside the package does not import its own package by
+            // importing a sibling: `from .x import y` in `a/b.py` runs nothing
+            // new, and an edge to `a/__init__.py` would be a loop of noise.
+            let inside = from_rel.starts_with(&format!("{pkg}/"));
+            if files.contains(&init) && !inside {
+                parents.push(init);
+            }
+            dir.pop();
+        }
+    }
+    for p in parents {
+        if p != from_rel && !out.contains(&p) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// The files the names of one Python import resolve to, first one first.
+fn python_named_targets(from_rel: &str, module: &str, names: &[String], files: &HashSet<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let taken: Vec<Option<&str>> = if names.is_empty() { vec![None] } else { names.iter().map(|n| Some(n.as_str())).collect() };
+    for name in taken {
+        if let Some(t) = resolve_python(from_rel, module, name.filter(|n| *n != "*"), files) {
+            if t != from_rel && !out.contains(&t) {
+                out.push(t);
+            }
+        }
+    }
+    out
+}
+
+/// The project file a Python import names, or `None` for the standard library,
+/// a third-party package or a module that does not exist. The rule is
+/// `hexa_analysis::path_normalizer::resolve_python_import`'s (ADR-2611211324
+/// §2), restated because this crate does not depend on that one; the two are
+/// held together by the graph and analysis tests over the same import forms.
+/// `from a import b` is the submodule `a/b.py` when there is one, else the
+/// package; a relative import starts from the importing file's package, an
+/// absolute one from the root, then `src/`.
+fn resolve_python(from_rel: &str, module: &str, name: Option<&str>, files: &HashSet<String>) -> Option<String> {
+    let dots = module.chars().take_while(|c| *c == '.').count();
+    let parts: Vec<&str> = module[dots..].split('.').filter(|s| !s.is_empty()).collect();
+    let bases: Vec<Vec<&str>> = if dots > 0 {
+        let mut dir: Vec<&str> = from_rel.split('/').collect();
+        dir.pop();
+        for _ in 1..dots {
+            dir.pop()?;
+        }
+        vec![dir]
+    } else if parts.is_empty() {
+        return None;
+    } else {
+        vec![Vec::new(), vec!["src"]]
+    };
+    let file_of = |segs: &[&str]| -> Option<String> {
+        if segs.is_empty() {
+            return None;
+        }
+        let stem = segs.join("/");
+        [format!("{stem}.py"), format!("{stem}/__init__.py")].into_iter().find(|c| files.contains(c))
+    };
+    for base in bases {
+        let mut module_path = base;
+        module_path.extend(&parts);
+        if let Some(n) = name {
+            let mut sub = module_path.clone();
+            sub.push(n);
+            if let Some(f) = file_of(&sub) {
+                return Some(f);
+            }
+        }
+        if let Some(f) = file_of(&module_path) {
+            return Some(f);
+        }
+    }
+    None
 }
 
 fn resolve_import(

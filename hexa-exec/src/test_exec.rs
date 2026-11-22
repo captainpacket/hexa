@@ -147,6 +147,7 @@ enum Judge {
     Vitest(String),
     Script,
     Counted,
+    Pytest,
 }
 
 /// A test, ready to run from the root of a checkout.
@@ -244,13 +245,22 @@ pub fn plan_test(root: &Path, r: &str, cfg: &TestConfig, prefix: &str) -> Result
             Ok(Planned { cmd: format!("{prefix}bash {}{arg}", shell_quote(&t.file)), judge: Judge::Script })
         }
         Runner::Pytest => {
+            // The test must be in the file, as for cargo: pytest exits 4 for a
+            // name it cannot find, and an exit that is not 0 must not be red.
+            // A parametrized case is named `test_p[1]`; the function is `test_p`.
+            let base = name.split_once('[').map_or(name.as_str(), |(f, _)| f);
+            let leaf = base.rsplit("::").next().unwrap_or(base);
+            let text = std::fs::read_to_string(&abs).unwrap_or_default();
+            if leaf.is_empty() || !text.contains(&format!("def {leaf}(")) {
+                return Err(TestRun::NotFound(format!("{leaf} not found in {}", t.file)));
+            }
             // From the nearest directory that configures pytest, as a person
             // would run it there (ADR-2611211324 §8); the repository root if none.
             let dir = PYTEST_MARKERS.iter().filter_map(|m| nearest(root, &abs, m)).max_by_key(|d| d.components().count());
             let dir = dir.unwrap_or_else(|| root.to_path_buf());
             let cd = if dir == root { String::new() } else { format!("cd {} && ", shell_quote(&rel(root, &dir))) };
             let target = format!("{}::{name}", rel(&dir, &abs));
-            Ok(Planned { cmd: format!("{prefix}{cd}python3 -m pytest {} -q", shell_quote(&target)), judge: Judge::Counted })
+            Ok(Planned { cmd: format!("{prefix}{cd}python3 -m pytest {} -q", shell_quote(&target)), judge: Judge::Pytest })
         }
         Runner::Configured(template) => {
             let cmd = fill(&template, &[("file", &t.file), ("name", &name)]);
@@ -275,6 +285,10 @@ pub fn judge(p: &Planned, ok: bool, out: &str) -> TestRun {
         Judge::Vitest(name) => judge_vitest(out, name),
         Judge::Script => judge_script(ok, out),
         Judge::Counted => judge_counted(ok, out),
+        Judge::Pytest => match pytest_ran_nothing(out) {
+            Some(run) => return run,
+            None => judge_counted(ok, out),
+        },
     };
     match verdict {
         Verdict::Passed => TestRun::Passed,
@@ -283,6 +297,28 @@ pub fn judge(p: &Planned, ok: bool, out: &str) -> TestRun {
         Verdict::Ambiguous(n) => TestRun::Ambiguous(n),
         Verdict::Unreadable(why) => TestRun::Broken { compile: false, tail: format!("{why}\n{}", tail(out, 10)) },
     }
+}
+
+/// pytest's own account of a run that ran no test, read before its exit
+/// code: exit 4 (no such test, a conftest that does not import, a usage
+/// error such as an `addopts` plugin that is not installed), exit 5 (none
+/// collected) and a Python without pytest all exit non-zero, and none of
+/// them is a test that failed.
+fn pytest_ran_nothing(out: &str) -> Option<TestRun> {
+    if out.contains("No module named pytest") {
+        return Some(TestRun::Broken { compile: false, tail: format!("pytest is not installed for python3\n{}", tail(out, 10)) });
+    }
+    if out.lines().any(|l| l.starts_with("ImportError while loading conftest") || l.starts_with("ERROR: usage:")) {
+        return Some(TestRun::Broken { compile: false, tail: tail(out, 10) });
+    }
+    if out.lines().any(|l| l.starts_with("ERROR: not found:")) {
+        return Some(TestRun::NotFound(tail(out, 10)));
+    }
+    let summary = out.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("");
+    if summary.trim_matches(|c| c == '=' || c == ' ').starts_with("no tests ran") {
+        return Some(TestRun::Vacuous);
+    }
+    None
 }
 
 fn judge_cargo(module: bool, ok: bool, out: &str) -> TestRun {
@@ -564,5 +600,46 @@ mod tests {
             assert_eq!(got[0].1.trim_end_matches('\n'), cmd.trim_end_matches('\n'), "{script}");
             assert_inert(d.path(), cmd);
         }
+    }
+
+    // ── a pytest run that never ran the test is not red (ADR-2611211324 §8) ──
+
+    fn pytest_plan(dir: &Path, body: &str, name: &str) -> Result<Planned, TestRun> {
+        std::fs::write(dir.join("test_x.py"), body).unwrap();
+        plan_test(dir, &format!("test_x.py::{name}"), &TestConfig::default(), "")
+    }
+
+    #[test]
+    fn a_pytest_test_the_file_does_not_define_is_not_found() {
+        let d = tempfile::tempdir().unwrap();
+        let got = pytest_plan(d.path(), "def test_a():\n    assert True\n", "test_missing");
+        assert!(matches!(got, Err(TestRun::NotFound(_))), "{got:?}");
+        let got = pytest_plan(d.path(), "class TestK:\n    async def test_m(self):\n        pass\n", "TestK::test_m");
+        assert!(got.is_ok(), "a method in a class, by its leaf: {got:?}");
+        let got = pytest_plan(d.path(), "import pytest\n@pytest.mark.parametrize('a', [1, 2])\ndef test_p(a):\n    assert a\n", "test_p[1]");
+        assert!(got.is_ok(), "one case of a parametrized test, by its id: {got:?}");
+        let got = pytest_plan(d.path(), "def test_p(a):\n    assert a\n", "test_p[a::b]");
+        assert!(got.is_ok(), "an id holding `::` is still test_p's: {got:?}");
+    }
+
+    /// pytest's own words, captured from pytest 9 (exit 4, 5, and a missing
+    /// pytest's exit 1): none ran the test, so none is the red a sealed test
+    /// must show. A real failure still is.
+    #[test]
+    fn a_pytest_run_that_ran_nothing_is_never_red() {
+        let d = tempfile::tempdir().unwrap();
+        let p = pytest_plan(d.path(), "def test_a():\n    assert True\n", "test_a").unwrap();
+        let not_found = "ERROR: not found: /tmp/p/test_x.py::test_a\n(no match in any of [<Module test_x.py>])\n\n\nno tests ran in 0.00s\n";
+        let none_ran = "\nno tests ran in 0.00s\n";
+        let no_pytest = "/usr/bin/python3: No module named pytest\n";
+        let bad_conftest = "ImportError while loading conftest '/tmp/p/conftest.py'.\nconftest.py:1: in <module>\n    import not_a_module_xyz\nE   ModuleNotFoundError: No module named 'not_a_module_xyz'\n";
+        let usage = "ERROR: usage: python -m pytest [options] [file_or_dir] [file_or_dir] [...]\npython -m pytest: error: unrecognized arguments: --cov\n  inifile: /tmp/p/pyproject.toml\n  rootdir: /tmp/p\n\n";
+        for out in [not_found, none_ran, no_pytest, bad_conftest, usage] {
+            let got = judge(&p, false, out);
+            assert!(!matches!(got, TestRun::Failed(_) | TestRun::Passed), "{out:?} judged {got:?}");
+        }
+        let failed = "test_x.py:2: AssertionError\n=========================== short test summary info ============================\nFAILED test_x.py::test_a - assert 1 == 2\n1 failed in 0.01s\n";
+        assert!(matches!(judge(&p, false, failed), TestRun::Failed(_)), "a real failure is red");
+        assert!(matches!(judge(&p, true, ".   [100%]\n1 passed in 0.00s\n"), TestRun::Passed));
     }
 }
