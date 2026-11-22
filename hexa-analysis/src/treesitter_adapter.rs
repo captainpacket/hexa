@@ -119,20 +119,24 @@ fn python_assignments<'a>(n: TsNode<'a>, source: &str) -> Vec<(String, TsNode<'a
 /// A module's exports (§3): its `__all__` when it assigns one, else every
 /// top-level `def`, `class` and assignment whose name does not start with `_`.
 fn extract_python_exports(root: &tree_sitter::Node, source: &str, file: &str) -> Result<Vec<ExportDeclaration>, AnalysisError> {
-    let mut defined: Vec<(String, usize, ExportKind)> = Vec::new();
-    let mut all: Option<Vec<(String, usize)>> = None;
+    let lines: Vec<&str> = source.split('\n').collect();
+    let mut defined: Vec<(String, usize, ExportKind, bool)> = Vec::new();
+    let mut all: Option<(Vec<(String, usize)>, bool)> = None;
     for ch in named_children_of(*root) {
         let line = ch.start_position().row + 1;
+        // A decorated definition starts at its first decorator, so its
+        // comment run is the one above that (ADR-2611221644 §1).
+        let tagged = python_comment_tagged(root, &lines, ch.start_position().row);
         let d = python_definition(ch);
         match d.kind() {
             "function_definition" => {
                 if let Some(n) = d.child_by_field_name("name") {
-                    defined.push((node_text(n, source), line, ExportKind::Function));
+                    defined.push((node_text(n, source), line, ExportKind::Function, tagged));
                 }
             }
             "class_definition" => {
                 if let Some(n) = d.child_by_field_name("name") {
-                    defined.push((node_text(n, source), line, ExportKind::Type));
+                    defined.push((node_text(n, source), line, ExportKind::Type, tagged));
                 }
             }
             _ => {
@@ -149,26 +153,66 @@ fn extract_python_exports(root: &tree_sitter::Node, source: &str, file: &str) ->
                                     .collect()
                             })
                             .unwrap_or_default();
-                        all = Some(listed);
+                        // A tag above `__all__` marks every name it lists (§2).
+                        all = Some((listed, tagged));
                     } else {
-                        defined.push((name, line, ExportKind::Value));
+                        defined.push((name, line, ExportKind::Value, tagged));
                     }
                 }
             }
         }
     }
-    let export = |name: String, line: usize, kind: ExportKind| ExportDeclaration { file: file.to_string(), name, line, hexa_public: false, kind };
+    let export = |name: String, line: usize, kind: ExportKind, hexa_public: bool| ExportDeclaration { file: file.to_string(), name, line, hexa_public, kind };
     Ok(match all {
-        Some(listed) => listed
+        Some((listed, all_tagged)) => listed
             .into_iter()
             .map(|(name, line)| {
-                let found = defined.iter().find(|(n, _, _)| *n == name);
-                let (line, kind) = found.map(|(_, l, k)| (*l, *k)).unwrap_or((line, ExportKind::Value));
-                export(name, line, kind)
+                let found = defined.iter().find(|(n, _, _, _)| *n == name);
+                let (line, kind, tagged) = found.map(|(_, l, k, t)| (*l, *k, *t)).unwrap_or((line, ExportKind::Value, false));
+                export(name, line, kind, all_tagged || tagged)
             })
             .collect(),
-        None => defined.into_iter().filter(|(n, _, _)| !n.starts_with('_')).map(|(n, l, k)| export(n, l, k)).collect(),
+        None => defined.into_iter().filter(|(n, _, _, _)| !n.starts_with('_')).map(|(n, l, k, t)| export(n, l, k, t)).collect(),
     })
+}
+
+/// Whether the run of `#` comment lines directly above `row` carries
+/// `@hexa:public` (ADR-2611221644 §1). Each line of the run holds only a
+/// comment, so a blank line or a code line ends it, and a `#` comment that
+/// ends a code line belongs to that line. Lines are read from the source:
+/// tree-sitter-python can file a column-0 comment inside the block before
+/// it, so siblings would miss it. Each `#` must start a comment node, not
+/// sit inside a string. A comment ending the item's own first line is the
+/// item's too.
+fn python_comment_tagged(root: &tree_sitter::Node, lines: &[&str], row: usize) -> bool {
+    // The comment that ends the item's own first line is that line's.
+    let own = lines.get(row).copied().unwrap_or("");
+    for (col, _) in own.match_indices('#') {
+        let at = tree_sitter::Point { row, column: col };
+        if root.descendant_for_point_range(at, at).is_some_and(|n| n.kind() == "comment") {
+            if own[col..].contains("@hexa:public") {
+                return true;
+            }
+            break;
+        }
+    }
+    let mut r = row;
+    while r > 0 {
+        r -= 1;
+        let line = lines.get(r).copied().unwrap_or("");
+        let col = line.len() - line.trim_start().len();
+        if !line[col..].starts_with('#') {
+            return false;
+        }
+        let at = tree_sitter::Point { row: r, column: col };
+        if root.descendant_for_point_range(at, at).map_or(true, |n| n.kind() != "comment") {
+            return false;
+        }
+        if line.contains("@hexa:public") {
+            return true;
+        }
+    }
+    false
 }
 
 /// Counts for the layer inventory: a class whose bases name `Protocol` or
