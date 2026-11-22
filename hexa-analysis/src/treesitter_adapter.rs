@@ -125,9 +125,11 @@ fn extract_python_exports(root: &tree_sitter::Node, source: &str, file: &str) ->
     for ch in named_children_of(*root) {
         let line = ch.start_position().row + 1;
         // A decorated definition starts at its first decorator, so its
-        // comment run is the one above that (ADR-2611221644 §1).
-        let tagged = python_comment_tagged(root, &lines, ch.start_position().row);
+        // comment run is the one above that (ADR-2611221644 §1); a comment
+        // ending its own `def`/`class` line tags it as it would undecorated.
         let d = python_definition(ch);
+        let tagged = python_comment_tagged(root, &lines, ch.start_position().row)
+            || python_line_tagged(root, &lines, d.start_position().row);
         match d.kind() {
             "function_definition" => {
                 if let Some(n) = d.child_by_field_name("name") {
@@ -185,16 +187,8 @@ fn extract_python_exports(root: &tree_sitter::Node, source: &str, file: &str) ->
 /// sit inside a string. A comment ending the item's own first line is the
 /// item's too.
 fn python_comment_tagged(root: &tree_sitter::Node, lines: &[&str], row: usize) -> bool {
-    // The comment that ends the item's own first line is that line's.
-    let own = lines.get(row).copied().unwrap_or("");
-    for (col, _) in own.match_indices('#') {
-        let at = tree_sitter::Point { row, column: col };
-        if root.descendant_for_point_range(at, at).is_some_and(|n| n.kind() == "comment") {
-            if own[col..].contains("@hexa:public") {
-                return true;
-            }
-            break;
-        }
+    if python_line_tagged(root, lines, row) {
+        return true;
     }
     let mut r = row;
     while r > 0 {
@@ -210,6 +204,19 @@ fn python_comment_tagged(root: &tree_sitter::Node, lines: &[&str], row: usize) -
         }
         if line.contains("@hexa:public") {
             return true;
+        }
+    }
+    false
+}
+
+/// Whether the `#` comment that ends line `row` carries `@hexa:public`: the
+/// first `#` that starts a comment node, not one inside a string.
+fn python_line_tagged(root: &tree_sitter::Node, lines: &[&str], row: usize) -> bool {
+    let own = lines.get(row).copied().unwrap_or("");
+    for (col, _) in own.match_indices('#') {
+        let at = tree_sitter::Point { row, column: col };
+        if root.descendant_for_point_range(at, at).is_some_and(|n| n.kind() == "comment") {
+            return own[col..].contains("@hexa:public");
         }
     }
     false
