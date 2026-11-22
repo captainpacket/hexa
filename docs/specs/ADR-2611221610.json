@@ -244,5 +244,16 @@
       "test": "hexa-cli/tests/adr_2611221610_spec.rs::s18_no_remote_no_remote_wording",
       "red": "2172049"
     }
+  ],
+  "amendments": [
+    {
+      "file": "hexa-cli/tests/adr_2611221610_spec.rs",
+      "from": "824e64a39807f9a4144e544dc1fad1b9d6fb7094fc8d79b1575fd1707dc843b0",
+      "to": "87494758226d5eb4ef0face444b5c9e1fcd08349b9eaac37c7e75284b8422a99",
+      "by": "builder B (the implementing agent), under gary's standing instruction to accept the ADRs and specs",
+      "reason": "Before the first seal: S12, S16 and S18 already held at b764fe5, so `hexa spec red` refused them as not written first. Each gained a live control (scenarios re-accepted at 89b5163), and all 18 were proved red at 2172049 and sealed there. `hexa spec amend` cannot record this edit because the file already matches its seal; this entry records it by hand so the chain runs from the file's first commit to the sealed hash.",
+      "at": "2026-11-22T22:30:00+00:00",
+      "base_commit": "b764fe5dd9a74d32cba01b33f920242ac17f6d99"
+    }
   ]
 }
