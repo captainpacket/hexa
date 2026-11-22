@@ -14,7 +14,7 @@ An export the grade cannot see is a boundary the grade cannot check. Its dead-ex
 ## Decision
 
 1. **A grouped var is an export like a grouped const.** Each spec in a `var ( … )` group whose name Go exports (it starts with an upper-case letter) is recorded as an export of kind `Value`, at its spec's line, exactly as a spec in a `const ( … )` group is.
-2. **Nothing else about Go exports changes.** An ungrouped var, a const group, a type group, functions and methods are read as before, and a grouped var whose name Go does not export is not an export.
+2. **Nothing else about Go exports changes** (except what ADR-2611221623 decides: Go's Unicode export rule, and every name of a var spec). An ungrouped var, a const group, a type group, functions and methods are read as before, and a grouped var whose name Go does not export is not an export.
 
 ## Consequences
 
