@@ -26,7 +26,7 @@
       "when": "extract_exports is called with Language::Go",
       "then": "The export named `Build`, of kind Function, has hexa_public == true",
       "test": "hexa-analysis/tests/adr_2611221553_spec_2.rs::part_1::s01_tagged_exported_go_function_is_public",
-      "red": "5bf575d"
+      "red": "24c8818"
     },
     {
       "id": "S02",
@@ -39,7 +39,7 @@
       "when": "extract_exports is called with Language::Go",
       "then": "The export `New` has hexa_public == true",
       "test": "hexa-analysis/tests/adr_2611221553_spec_2.rs::part_1::s02_tag_on_any_line_of_multi_line_doc_comment",
-      "red": "5bf575d"
+      "red": "24c8818"
     },
     {
       "id": "S03",
@@ -52,7 +52,7 @@
       "when": "extract_exports is called with Language::Go",
       "then": "The export `Send`, of kind Method, has hexa_public == true",
       "test": "hexa-analysis/tests/adr_2611221553_spec_2.rs::part_1::s03_tagged_method_is_public",
-      "red": "5bf575d"
+      "red": "24c8818"
     },
     {
       "id": "S04",
@@ -65,7 +65,7 @@
       "when": "extract_exports is called with Language::Go",
       "then": "The exports `Option`, `MaxRetries` and `DefaultTimeout` each have hexa_public == true",
       "test": "hexa-analysis/tests/adr_2611221553_spec_2.rs::part_1::s04_tagged_type_const_var_are_public",
-      "red": "5bf575d"
+      "red": "24c8818"
     },
     {
       "id": "S05",
@@ -78,7 +78,7 @@
       "when": "The project is analysed for dead exports",
       "then": "No DeadExport with export_name `Build` is reported",
       "test": "hexa-analysis/tests/adr_2611221553_spec_2.rs::part_1::s05_tagged_go_export_without_caller_not_dead",
-      "red": "5bf575d"
+      "red": "24c8818"
     },
     {
       "id": "S06",
@@ -102,7 +102,7 @@
       "when": "extract_exports is called with Language::Go",
       "then": "`Helper` has hexa_public == true and `Build` has hexa_public == false",
       "test": "hexa-analysis/tests/adr_2611221553_spec_2.rs::part_1::s07_run_ends_at_non_comment_line",
-      "red": "5bf575d"
+      "red": "24c8818"
     },
     {
       "id": "S08",
@@ -137,7 +137,7 @@
       "when": "The project is analysed for dead exports",
       "then": "`Unused` is absent from dead_exports, and the dead-export count does not include it",
       "test": "hexa-analysis/tests/adr_2611221553_spec_2.rs::part_1::s10_tagged_unused_const_not_reported_dead",
-      "red": "5bf575d"
+      "red": "24c8818"
     },
     {
       "id": "S11",
@@ -150,7 +150,7 @@
       "when": "extract_exports is called with Language::Go",
       "then": "For each export, hexa_public is true if and only if some line in the uninterrupted run of `//` lines ending on the line directly above its declaration contains `@hexa:public`",
       "test": "hexa-analysis/tests/adr_2611221553_spec_2.rs::part_1::s11_hexa_public_iff_contiguous_run_contains_tag",
-      "red": "5bf575d"
+      "red": "24c8818"
     },
     {
       "id": "S12",
@@ -163,7 +163,7 @@
       "when": "extract_exports is called with Language::Go",
       "then": "`A`, `B` and `C` each have hexa_public == true",
       "test": "hexa-analysis/tests/adr_2611221553_spec_2.rs::part_1::s12_tag_on_const_group_marks_every_spec",
-      "red": "5bf575d"
+      "red": "24c8818"
     },
     {
       "id": "S13",
@@ -176,7 +176,7 @@
       "when": "extract_exports is called with Language::Go",
       "then": "`Beta` has hexa_public == true; `Alpha` and `Gamma` have hexa_public == false",
       "test": "hexa-analysis/tests/adr_2611221553_spec_2.rs::part_1::s13_tag_on_one_spec_in_group_marks_only_that_spec",
-      "red": "5bf575d"
+      "red": "24c8818"
     },
     {
       "id": "S14",
@@ -189,7 +189,7 @@
       "when": "extract_exports is called with Language::Go",
       "then": "`X` and `Y` each have hexa_public == true",
       "test": "hexa-analysis/tests/adr_2611221553_spec_2.rs::part_2::s14_a_tag_on_a_var_group_covers_its_specs",
-      "red": "5bf575d"
+      "red": "24c8818"
     },
     {
       "id": "S15",
@@ -213,7 +213,7 @@
       "when": "extract_exports is called with Language::Go",
       "then": "`A` has hexa_public == true and `B` has hexa_public == false",
       "test": "hexa-analysis/tests/adr_2611221553_spec_2.rs::part_2::s16_a_specs_own_tag_does_not_spread_to_its_siblings",
-      "red": "5bf575d"
+      "red": "24c8818"
     },
     {
       "id": "S17",
@@ -226,7 +226,7 @@
       "when": "extract_exports is called with Language::Go",
       "then": "`A` has hexa_public == true and `B` has hexa_public == false",
       "test": "hexa-analysis/tests/adr_2611221553_spec_2.rs::part_2::s17_a_groups_tag_does_not_cover_a_declaration_after_the_group",
-      "red": "5bf575d"
+      "red": "24c8818"
     },
     {
       "id": "S18",
@@ -239,7 +239,7 @@
       "when": "extract_exports is called with Language::Go",
       "then": "For each grouped spec, hexa_public is true if and only if the tag is in the contiguous comment run directly above the spec or in the contiguous comment run directly above its group's keyword",
       "test": "hexa-analysis/tests/adr_2611221553_spec_2.rs::part_2::s18_a_grouped_spec_is_public_exactly_when_its_run_or_the_groups_run_carries_the_tag",
-      "red": "5bf575d"
+      "red": "24c8818"
     },
     {
       "id": "S19",
@@ -285,7 +285,7 @@
       "when": "extract_exports is called with Language::Go",
       "then": "The `Build` export has name `Build`, line 2, kind Function, and only hexa_public differs from the untagged version of the same file",
       "test": "hexa-analysis/tests/adr_2611221553_spec_2.rs::part_2::s22_the_tag_does_not_change_any_other_field_of_a_go_export",
-      "red": "5bf575d"
+      "red": "24c8818"
     },
     {
       "id": "S23",
