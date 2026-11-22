@@ -1222,6 +1222,13 @@ fn go_doc_tagged(node: &tree_sitter::Node, source: &str) -> bool {
         if p.kind() != "comment" || p.end_position().row + 1 != next_row {
             return false;
         }
+        // A comment that starts on the line where the node before it ends is
+        // that line's comment (`A = 1 // …`, `const ( // …`, `) // …`), not a
+        // doc line: the newline between them is hidden in the tree, so rows
+        // are the only way to tell.
+        if p.prev_sibling().is_some_and(|q| q.kind() != "comment" && q.end_position().row == p.start_position().row) {
+            return false;
+        }
         if node_text(p, source).contains("@hexa:public") {
             return true;
         }
