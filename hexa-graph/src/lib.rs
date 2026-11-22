@@ -158,21 +158,15 @@ pub async fn build(
         false
     };
 
-    for entry in WalkDir::new(root)
-        .sort_by_file_name() // deterministic traversal, independent of filesystem order
-        .into_iter()
-        .filter_entry(|e| !is_excluded(e))
-        .filter_map(|e| e.ok())
-    {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let path = entry.path();
-        let rel = rel_path(root, path);
+    // The project's own files only (ADR-2611221610 §1): sorted, so the
+    // traversal is deterministic and independent of filesystem order.
+    for rel in source_files(root) {
+        let path_buf = root.join(&rel);
+        let path = path_buf.as_path();
         let rel_lossy = rel.clone();
 
         // Size guard.
-        if let Ok(meta) = entry.metadata() {
+        if let Ok(meta) = std::fs::metadata(path) {
             if meta.len() > opts.max_file_bytes {
                 continue;
             }
@@ -484,29 +478,107 @@ pub async fn build(
 /// the graph on disk no longer describes the tree, and a consumer verdict read
 /// from it may be wrong.
 pub fn newer_sources(root: &Path, since: std::time::SystemTime, limit: usize) -> Vec<String> {
-    let mut out = Vec::new();
-    for entry in WalkDir::new(root)
+    source_files(root)
+        .into_iter()
+        .filter(|rel| {
+            std::fs::metadata(root.join(rel)).and_then(|m| m.modified()).is_ok_and(|m| m > since)
+        })
+        .take(limit)
+        .collect()
+}
+
+/// Where a build records what it read, beside the graph (ADR-2611221610 §2).
+pub const STAMP_FILE: &str = ".hexa/graph/stamp.json";
+
+/// The files a build reads, project-relative, forward-slashed and sorted
+/// (ADR-2611221610 §1): code and docs only. In a git checkout, the files git
+/// would track at `root` (tracked, plus untracked files that are not
+/// ignored); outside git, a walk. Either way nothing under a directory below
+/// `root` that holds its own `.git` (a nested repository or worktree) and
+/// nothing under an excluded directory name.
+pub fn source_files(root: &Path) -> Vec<String> {
+    let listed = git_listing(root).unwrap_or_else(|| walk_listing(root));
+    let mut nested: HashMap<std::path::PathBuf, bool> = HashMap::new();
+    let mut out: Vec<String> = listed
+        .into_iter()
+        .filter(|rel| Language::from_path(rel).is_some() || markdown::is_doc_file(rel))
+        .filter(|rel| !rel.split('/').any(|c| EXCLUDE_DIRS.contains(&c)))
+        .filter(|rel| !under_nested_repo(root, rel, &mut nested))
+        .filter(|rel| root.join(rel).is_file())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// What git would track at `root`, or `None` when `root` is in no checkout.
+fn git_listing(root: &Path) -> Option<Vec<String>> {
+    let o = std::process::Command::new("git")
+        .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    Some(
+        o.stdout
+            .split(|b| *b == 0)
+            .filter(|p| !p.is_empty())
+            .map(|p| String::from_utf8_lossy(p).replace('\\', "/"))
+            .collect(),
+    )
+}
+
+/// Every file under `root`, skipping excluded and nested-repository directories.
+fn walk_listing(root: &Path) -> Vec<String> {
+    WalkDir::new(root)
         .sort_by_file_name()
         .into_iter()
         .filter_entry(|e| !is_excluded(e))
         .filter_map(|e| e.ok())
-    {
-        if out.len() >= limit {
-            break;
+        .filter(|e| e.file_type().is_file())
+        .map(|e| rel_path(root, e.path()))
+        .collect()
+}
+
+/// Whether a directory between `root` (exclusive) and `rel` holds a `.git`.
+fn under_nested_repo(root: &Path, rel: &str, seen: &mut HashMap<std::path::PathBuf, bool>) -> bool {
+    let mut dir = Path::new(rel).parent();
+    while let Some(d) = dir {
+        if d.as_os_str().is_empty() {
+            return false;
         }
-        if !entry.file_type().is_file() {
-            continue;
+        let nested = *seen.entry(d.to_path_buf()).or_insert_with(|| root.join(d).join(".git").exists());
+        if nested {
+            return true;
         }
-        let rel = rel_path(root, entry.path());
-        if Language::from_path(&rel).is_none() && !markdown::is_doc_file(&rel) {
-            continue;
-        }
-        let modified = entry.metadata().ok().and_then(|m| m.modified().ok());
-        if modified.is_some_and(|m| m > since) {
-            out.push(rel);
-        }
+        dir = d.parent();
     }
-    out
+    false
+}
+
+/// A sha256 over every file [`source_files`] lists, with its path, size and
+/// modification time (ADR-2611221610 §2). An edit, an added file, a deleted
+/// file and a checkout of another branch each change it; nothing is parsed.
+pub fn tree_fingerprint(root: &Path) -> String {
+    use sha2::Digest;
+    let mut h = sha2::Sha256::new();
+    for rel in source_files(root) {
+        let (len, mtime) = std::fs::metadata(root.join(&rel))
+            .map(|m| {
+                let t = m
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map_or(0, |d| d.as_nanos());
+                (m.len(), t)
+            })
+            .unwrap_or((0, 0));
+        h.update(rel.as_bytes());
+        h.update([0]);
+        h.update(len.to_le_bytes());
+        h.update(mtime.to_le_bytes());
+    }
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 // ── helpers ──────────────────────────────────────────────
@@ -591,8 +663,12 @@ fn is_excluded(entry: &walkdir::DirEntry) -> bool {
     }
     if entry.file_type().is_dir() {
         if let Some(name) = entry.file_name().to_str() {
-            return EXCLUDE_DIRS.contains(&name);
+            if EXCLUDE_DIRS.contains(&name) {
+                return true;
+            }
         }
+        // Another repository or worktree inside this one (ADR-2611221610 §1).
+        return entry.path().join(".git").exists();
     }
     false
 }
