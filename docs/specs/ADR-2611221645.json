@@ -374,6 +374,15 @@
       "from": "ce8e6e0aedb502e2c877927a486e78b78e6a1f2b62b89c53fa88384f4cf0cd8f",
       "reason": "S02's fixture put an alias import and a relative import of the same module in one file and expected two edges; an import edge joins two files, and hexa keeps one edge per file pair (sealed ADR-2611211324 S05 relies on it), so the builder had changed that rule for TypeScript only. The relative control moves to its own file, src/app/other.ts; the scenario (the alias tries the same extensions and index files a relative import does) and every assertion are unchanged. Agreed with craigjohnson's rule that architectural correctness comes first.",
       "to": "1397c3d8530a7223d5687f147dc3d241997b344e41cf2160397c37d87da3ee35"
+    },
+    {
+      "at": "2026-11-22T22:50:51.286491027+00:00",
+      "base_commit": "1c57f8b07ca17f564432d725619ba85a7634bde1",
+      "by": "Claude Code agent (spec re-accepted by craigjohnson)",
+      "file": "hexa-cli/tests/adr_2611221645_spec_2.rs",
+      "from": "5151b8ccce42414db666c3d2ae0b3acb58167e12708e0f39383ef0b6d373b88c",
+      "reason": "S26's fixture named glob layer keys (src/ui/**), which analyze.layers does not read; the spec was corrected to path-prefix keys and re-accepted (339b228), and the test follows it",
+      "to": "615cce2c25a6115f1da9145c7f97e3ba6ff8e9006da0f4ee740d6137aff43aab"
     }
   ]
 }
