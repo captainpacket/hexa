@@ -178,11 +178,12 @@ pub fn ensure_ignored(root: &Path) -> std::io::Result<bool> {
     let dir = root.join(".hexa");
     let file = dir.join(".gitignore");
     let have = std::fs::read_to_string(&file).unwrap_or_default();
-    let want = ["tasks.json", "tasks.lock", ".tasks.json.*.tmp"];
+    // the ledger, and the Stop hook's count (ADR-2611220204 §6): local state, never committed
+    let want = ["tasks.json", "tasks.lock", ".tasks.json.*.tmp", "stop-blocks.json"];
     let missing: Vec<&str> = want
         .iter()
         .copied()
-        .filter(|w| !have.lines().any(|l| l.trim() == *w))
+        .filter(|w| !have.lines().any(|l| l.trim().trim_start_matches('/') == *w))
         .collect();
     if missing.is_empty() {
         return Ok(false);
