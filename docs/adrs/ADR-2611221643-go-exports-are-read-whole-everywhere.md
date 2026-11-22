@@ -1,6 +1,7 @@
 # ADR-2611221643: Go's exports are read whole, by every reader
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-22 Accepted: Accepted in craigjohnson's session: he accepted the spec, chose the fix under his rule (real bug fixes only; architectural correctness first), and its sealed tests, red before the code, pass on main
 **Date:** 2026-11-22
 **Drivers:** ADR-2611221609 and ADR-2611221623 fixed how the analyzer reads Go exports (grouped vars, every name of a var spec, Go's Unicode export rule) and left three readers behind, recorded as gaps: a const spec still records only its first name, the `@hexa:api` contract reader keeps an ASCII-only export rule, and the code graph still ignores grouped vars and second names. The owner's rule: architectural correctness first.
 **Supersedes:** ADR-2611221623 §3 (a const spec records its first name).
