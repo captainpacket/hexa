@@ -66,7 +66,13 @@ pub async fn land(root: &Path, gate: &str, uncounted: bool, local: bool) -> Land
             let files = git(root, &["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default().replace('\n', ", ");
             let _ = git(root, &["rebase", "--abort"]);
             let what = if files.is_empty() { e.lines().next().unwrap_or("the rebase failed").to_string() } else { format!("it conflicts with {base} in {files}") };
-            return not(format!("{branch} could not be rebased onto {base}: {what}; rebase it by hand, then land it with `hexa dev worktree merge {branch} --force`"));
+            // a landing that keeps the branch's commits (ADR-2611220204 §5)
+            let base_dir = checkout_of(root, &base).unwrap_or_else(|| root.to_path_buf());
+            return not(format!(
+                "{branch} could not be rebased onto {base}: {what}; merge {base} into {branch} (`git -C {} merge {base}`), resolve the conflicts, re-run the gate, then fast-forward {base} from its checkout: `git -C {} merge --ff-only {branch}`",
+                root.display(),
+                base_dir.display()
+            ));
         }
         let after = git(root, &["rev-parse", "HEAD"]).unwrap_or_default();
         if after != before {

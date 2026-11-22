@@ -1398,7 +1398,8 @@ fn tier_b_draft_with_config(
          cd {}\n\
          # edit the source ADR, then:\n\
          git commit --amend --no-edit\n\
-         hexa worktree merge {}\n\
+         # then, from main's checkout (a fast-forward keeps the branch's commits):\n\
+         git merge --ff-only {}\n\
          ```\n\
          \n\
          To discard:\n\

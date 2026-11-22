@@ -290,7 +290,7 @@ async fn merge_order(json: bool) -> anyhow::Result<()> {
         "order": order,
         "conflicts": conflicts,
         "not_ready": not_ready,
-        "note": "Inner layers merge first (domain, ports, use cases, adapters, composition root), each later task rebasing on the earlier and re-passing its gate; within a layer the order is by finish time. This verb merges nothing: use `hexa dev worktree merge <branch> --force`.",
+        "note": "Inner layers merge first (domain, ports, use cases, adapters, composition root), each later task rebasing on the earlier and re-passing its gate; within a layer the order is by finish time. This verb merges nothing. Land each branch so its commits stay its own (ADR-2611220204 §5): from the base's checkout, `git merge --ff-only <branch>` when the base is an ancestor of the branch; otherwise merge the base into the branch, re-run the gate, then fast-forward.",
     });
     if json || !std::io::stdout().is_terminal() {
         println!("{}", serde_json::to_string_pretty(&report)?);
