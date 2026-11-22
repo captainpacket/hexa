@@ -11,6 +11,9 @@
     "by": "craigjohnson",
     "sha256": "641f16333bd0e5baeadbee2f81e5d96ea62c02f1ec5860d7d04dbed2b5f48e4e"
   },
+  "sealed": {
+    "hexa-analysis/tests/adr_2611221623_spec_2.rs": "24098be104994578c64750b8e68364206370b83df09536bfa9669aa730cf416e"
+  },
   "specs": [
     {
       "id": "S01",
