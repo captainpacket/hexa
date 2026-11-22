@@ -369,10 +369,26 @@ fn failure_body(exit_code: i32, stdout: &[u8], stderr: &[u8]) -> String {
     let detail = match (reason, stderr.is_empty()) {
         (Some(r), true) => r,
         (Some(r), false) => format!("{r}; stderr: {stderr}"),
-        (None, _) => stderr,
+        (None, false) => stderr,
+        // No reason and no stderr: what it printed, shortened, so nothing
+        // after the colon is never the whole report.
+        (None, true) => {
+            let out = String::from_utf8_lossy(stdout);
+            let out = out.trim();
+            if out.is_empty() {
+                "no output on stdout or stderr".to_string()
+            } else {
+                let short: String = out.chars().take(STDOUT_IN_ERROR).collect();
+                if short.len() < out.len() { format!("stdout: {short}…") } else { format!("stdout: {short}") }
+            }
+        }
     };
     format!("claude-text exited with {exit_code}: {detail}")
 }
+
+/// How many characters of stdout a failure body carries when it has nothing
+/// else to say.
+const STDOUT_IN_ERROR: usize = 500;
 
 impl ClaudeCodeInferenceAdapter {
     /// A `claude-text` completion and the cost the CLI reported for it
