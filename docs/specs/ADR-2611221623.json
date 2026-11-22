@@ -9,10 +9,7 @@
   ],
   "accepted": {
     "by": "craigjohnson",
-    "sha256": "a778a2349102d014299c1ecce79f05d32118c7ef1b422e379bb4d1caa35d58c8"
-  },
-  "sealed": {
-    "hexa-analysis/tests/adr_2611221623_spec_2.rs": "f7bb772af27904263cce0d7fa60b11023c22e69c310b3cee1b33462d681f530c"
+    "sha256": "48a35c54e86cd027d24d15c71e903b213140fac2e0bda6adad914b6a4d9fa191"
   },
   "specs": [
     {
