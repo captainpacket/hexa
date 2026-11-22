@@ -142,8 +142,8 @@ are already modified, unless you name them with `--also` or pass
 
 **Counted or uncounted.** A gate or evidence command passes on what a test
 runner reports, not on exit 0 alone: zero tests is a failure, and output no
-known runner wrote (cargo test, go test, node --test, bun test,
-`hexa spec verify`) is a failure. A command that runs no tests — a build, a
+known runner wrote (cargo test, go test, node --test, bun test, pytest,
+unittest and Django's test runner, `hexa spec verify`) is a failure. A command that runs no tests — a build, a
 lint, `hexa analyze . --exit-code` — must be declared uncounted, or it fails
 every time:
 
