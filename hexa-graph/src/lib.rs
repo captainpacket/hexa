@@ -148,6 +148,8 @@ pub async fn build(
     // a method.
     let mut go_package: HashMap<String, String> = HashMap::new();
     let mut go_method_ids: HashSet<String> = HashSet::new();
+    // Go file → the (type, key) of each bare key of a literal of a named type.
+    let mut go_literal_keys: HashMap<String, Vec<(String, String)>> = HashMap::new();
     // collected (file_rel, raw_path, names, kind) imports to resolve after all files seen.
     let mut pending_imports: Vec<(String, String, Vec<String>, ImportKind)> = Vec::new();
     // prose chunks for the deep semantic pass: (file_rel, prose).
@@ -254,6 +256,9 @@ pub async fn build(
             }
             for m in &fx.go_methods {
                 go_method_ids.insert(id_for(NodeKind::Function, &rel_lossy, m));
+            }
+            if !fx.go_literal_keys.is_empty() {
+                go_literal_keys.insert(rel_lossy.clone(), fx.go_literal_keys);
             }
             for imp in fx.imports {
                 pending_imports.push((rel_lossy.clone(), imp.raw_path, imp.names, imp.kind));
@@ -373,7 +378,28 @@ pub async fn build(
             ImportKind::SamePackage => {
                 let dir = std::path::Path::new(from_rel).parent();
                 let pkg = go_package.get(from_rel.as_str());
-                for name in names {
+                let in_package = |f: &str| {
+                    f.ends_with(".go") && std::path::Path::new(f).parent() == dir && go_package.get(f) == pkg
+                };
+                // A literal's bare key is a field name when the package
+                // declares its type a struct; for any other named type it is
+                // an expression, and may be a use (over-report when unsure).
+                let is_package_struct = |ty: &str| {
+                    label_index.get(&ty.to_ascii_lowercase()).is_some_and(|ids| {
+                        ids.iter().any(|tid| {
+                            id_file.get(tid.as_str()).is_some_and(|f| {
+                                in_package(f) && *tid == id_for(NodeKind::Struct, f, ty)
+                            })
+                        })
+                    })
+                };
+                let mut names = names.clone();
+                for (ty, key) in go_literal_keys.get(from_rel.as_str()).into_iter().flatten() {
+                    if !is_package_struct(ty) && !names.contains(key) {
+                        names.push(key.clone());
+                    }
+                }
+                for name in &names {
                     let Some(targets) = label_index.get(&name.to_ascii_lowercase()) else {
                         continue;
                     };
@@ -944,8 +970,8 @@ fn ts_file_in(joined: &str, files: &HashSet<String>) -> Option<String> {
 /// each target project-relative: (pattern, targets in order).
 fn load_ts_paths(root: &Path) -> Vec<(String, Vec<String>)> {
     let read = |rel: &str| std::fs::read_to_string(root.join(rel)).ok();
-    let mut seen = Vec::new();
-    let (paths, base) = tsconfig_settings("tsconfig.json", &read, &mut seen);
+    let (mut chain, mut budget) = (Vec::new(), TSCONFIG_READ_BUDGET);
+    let (paths, base) = tsconfig_settings("tsconfig.json", &read, &mut chain, &mut budget);
     let Some((map, decl_dir)) = paths else { return Vec::new() };
     let base_dir = base.unwrap_or(decl_dir);
     map.into_iter()
@@ -958,15 +984,33 @@ fn load_ts_paths(root: &Path) -> Vec<(String, Vec<String>)> {
 
 type TsPathsMap = Vec<(String, Vec<String>)>;
 
+/// How many tsconfig files one load may read (as `path_normalizer`).
+const TSCONFIG_READ_BUDGET: usize = 256;
+
+/// `chain` is the `extends` path from the root to `rel`: only a file already
+/// on it is a cycle, so a base shared by two branches is read for both.
 fn tsconfig_settings(
     rel: &str,
     read: &dyn Fn(&str) -> Option<String>,
-    seen: &mut Vec<String>,
+    chain: &mut Vec<String>,
+    budget: &mut usize,
 ) -> (Option<(TsPathsMap, String)>, Option<String>) {
-    if seen.iter().any(|s| s == rel) || seen.len() > 32 {
+    if chain.iter().any(|s| s == rel) || chain.len() > 32 || *budget == 0 {
         return (None, None);
     }
-    seen.push(rel.to_string());
+    *budget -= 1;
+    chain.push(rel.to_string());
+    let out = tsconfig_settings_of(rel, read, chain, budget);
+    chain.pop();
+    out
+}
+
+fn tsconfig_settings_of(
+    rel: &str,
+    read: &dyn Fn(&str) -> Option<String>,
+    chain: &mut Vec<String>,
+    budget: &mut usize,
+) -> (Option<(TsPathsMap, String)>, Option<String>) {
     let Some(text) = read(rel) else { return (None, None) };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&strip_jsonc(&text)) else { return (None, None) };
     let dir = parent_dir(rel);
@@ -983,7 +1027,7 @@ fn tsconfig_settings(
         }
         let Some(target) = normalize_join(&dir, ext) else { continue };
         let target = if read(&target).is_none() && !target.ends_with(".json") { format!("{target}.json") } else { target };
-        let (p, b) = tsconfig_settings(&target, read, seen);
+        let (p, b) = tsconfig_settings(&target, read, chain, budget);
         if p.is_some() {
             paths = p;
         }

@@ -375,12 +375,13 @@ fn extract_go(root: &Node, source: &str) -> FileExtract {
     // A function and a method of one name share an entity id; the function
     // is a real target, so that name stays linkable.
     out.go_methods.retain(|m| !functions.contains(m));
-    let mut names = std::collections::BTreeSet::new();
+    let mut names = GoNames::default();
     collect_go_identifiers(*root, source, &mut names);
-    if !names.is_empty() {
+    out.go_literal_keys = names.keys.into_iter().collect();
+    if !names.names.is_empty() || !out.go_literal_keys.is_empty() {
         out.imports.push(RawImport {
             raw_path: ".".to_string(),
-            names: names.into_iter().collect(),
+            names: names.names.into_iter().collect(),
             line: 1,
             kind: ImportKind::SamePackage,
         });
@@ -388,20 +389,29 @@ fn extract_go(root: &Node, source: &str) -> FileExtract {
     out
 }
 
-type GoNames = std::collections::BTreeSet<String>;
+/// What a Go file writes that can name a package-level entity of its own
+/// package: bare identifiers, and the (type, key) of each bare key of a
+/// literal of a named type, a use unless that type is a struct of the package.
+#[derive(Default)]
+struct GoNames {
+    names: std::collections::BTreeSet<String>,
+    keys: std::collections::BTreeSet<(String, String)>,
+}
 
 /// Every identifier a Go file writes that can name a package-level entity of
 /// its own package, for its same-package references. A type qualified by
 /// another package (`http.Handler`) and a struct literal's field key
-/// (`T{Name: 1}`) are not such names. A local that shadows a package-level
-/// name is still collected: over-reporting keeps the deletion oracle
-/// conservative.
+/// (`struct{ N int }{N: 1}`) are not such names. The key of a literal of a
+/// named type (`T{N: 1}`) is kept aside: whether it is a field depends on a
+/// type another file of the package may declare. A local that shadows a
+/// package-level name is still collected: over-reporting keeps the deletion
+/// oracle conservative.
 fn collect_go_identifiers(node: Node, source: &str, names: &mut GoNames) {
     match node.kind() {
         "identifier" | "type_identifier" => {
             let t = text(node, source);
             if !t.is_empty() {
-                names.insert(t.to_string());
+                names.names.insert(t.to_string());
             }
             return;
         }
@@ -424,14 +434,36 @@ fn collect_go_identifiers(node: Node, source: &str, names: &mut GoNames) {
     }
 }
 
+/// How a composite literal's bare-identifier keys read, by its type.
+enum GoKeys {
+    /// An inline struct type, or elided from an unknown outer type.
+    Fields,
+    /// A map, slice or array: keys are expressions.
+    Expressions,
+    /// A named type: a field name only if the package declares it a struct.
+    OfNamed(String),
+}
+
+fn go_keys_of(ty: Option<Node>, source: &str) -> GoKeys {
+    let Some(t) = ty else { return GoKeys::Fields };
+    match t.kind() {
+        "map_type" | "slice_type" | "array_type" | "implicit_length_array_type" => GoKeys::Expressions,
+        "type_identifier" => GoKeys::OfNamed(text(t, source).to_string()),
+        "generic_type" => GoKeys::OfNamed(
+            t.child_by_field_name("type").map(|n| text(n, source).to_string()).unwrap_or_default(),
+        ),
+        // Another package's type is never a struct this package declares.
+        "qualified_type" => GoKeys::OfNamed(String::new()),
+        _ => GoKeys::Fields,
+    }
+}
+
 /// A composite literal's body, of type `ty` (`None` when elided from an
-/// unknown outer type). A bare-identifier key is a field name unless the type
-/// is a map, slice or array, whose keys are expressions.
+/// unknown outer type). A bare-identifier key is a field name for an inline
+/// struct type, an expression for a map, slice or array, and for a named
+/// type is left to the graph, which sees every file of the package.
 fn collect_go_literal(body: Node, ty: Option<Node>, source: &str, names: &mut GoNames) {
-    let keys_are_fields = !matches!(
-        ty.map(|t| t.kind()),
-        Some("map_type" | "slice_type" | "array_type" | "implicit_length_array_type")
-    );
+    let keys = go_keys_of(ty, source);
     // The type an elided inner literal (`[]T{{...}}`) has.
     let elem = ty.and_then(|t| match t.kind() {
         "map_type" => t.child_by_field_name("value"),
@@ -455,11 +487,16 @@ fn collect_go_literal(body: Node, ty: Option<Node>, source: &str, names: &mut Go
         match child.kind() {
             "keyed_element" => {
                 if let Some(key) = child.child_by_field_name("key") {
-                    let field_key = keys_are_fields
-                        && key.named_child_count() == 1
-                        && key.named_child(0).map(|k| k.kind()) == Some("identifier");
-                    if !field_key {
-                        element(key, names);
+                    let bare = (key.named_child_count() == 1)
+                        .then(|| key.named_child(0))
+                        .flatten()
+                        .filter(|k| k.kind() == "identifier");
+                    match (&keys, bare) {
+                        (GoKeys::Fields, Some(_)) => {}
+                        (GoKeys::OfNamed(t), Some(k)) => {
+                            names.keys.insert((t.clone(), text(k, source).to_string()));
+                        }
+                        _ => element(key, names),
                     }
                 }
                 if let Some(value) = child.child_by_field_name("value") {

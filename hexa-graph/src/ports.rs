@@ -61,4 +61,10 @@ pub struct FileExtract {
     /// The methods a Go file declares and no function of the file shares a
     /// name with. They are entities, but no same-package link targets one.
     pub go_methods: Vec<String>,
+    /// (type name, key) for each bare-identifier key of a Go composite
+    /// literal whose type is a named type. It is a field name if the package
+    /// declares that type a struct, else an expression that may name a
+    /// same-package entity, so the graph links it unless the type is a struct
+    /// of the package. A qualified type (`pkg.T`) has an empty name.
+    pub go_literal_keys: Vec<(String, String)>,
 }

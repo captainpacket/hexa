@@ -424,8 +424,8 @@ impl TsPaths {
     /// `extends` is followed (ADR-2611221645 §2); one that names a package
     /// is not.
     pub fn load(read: &dyn Fn(&str) -> Option<String>) -> Self {
-        let mut seen = Vec::new();
-        let (paths, base) = tsconfig_settings("tsconfig.json", read, &mut seen);
+        let (mut chain, mut budget) = (Vec::new(), TSCONFIG_READ_BUDGET);
+        let (paths, base) = tsconfig_settings("tsconfig.json", read, &mut chain, &mut budget);
         let Some((map, decl_dir)) = paths else { return Self::default() };
         let base_dir = base.unwrap_or(decl_dir);
         let patterns = map
@@ -494,17 +494,36 @@ fn ts_file_named(path: &str, exists: &dyn Fn(&str) -> bool) -> Option<String> {
 
 type PathsMap = Vec<(String, Vec<String>)>;
 
+/// How many tsconfig files one load may read: a bound on a diamond-heavy
+/// `extends` graph, which the per-chain cycle check alone does not bound.
+const TSCONFIG_READ_BUDGET: usize = 256;
+
 /// The `paths` (with the directory of the file that declares them) and the
 /// project-relative `baseUrl` that `rel` settles on after its `extends`.
+/// `chain` is the `extends` path from the root to `rel`: only a file already
+/// on it is a cycle, so a base shared by two branches is read for both.
 fn tsconfig_settings(
     rel: &str,
     read: &dyn Fn(&str) -> Option<String>,
-    seen: &mut Vec<String>,
+    chain: &mut Vec<String>,
+    budget: &mut usize,
 ) -> (Option<(PathsMap, String)>, Option<String>) {
-    if seen.iter().any(|s| s == rel) || seen.len() > 32 {
+    if chain.iter().any(|s| s == rel) || chain.len() > 32 || *budget == 0 {
         return (None, None);
     }
-    seen.push(rel.to_string());
+    *budget -= 1;
+    chain.push(rel.to_string());
+    let out = tsconfig_settings_of(rel, read, chain, budget);
+    chain.pop();
+    out
+}
+
+fn tsconfig_settings_of(
+    rel: &str,
+    read: &dyn Fn(&str) -> Option<String>,
+    chain: &mut Vec<String>,
+    budget: &mut usize,
+) -> (Option<(PathsMap, String)>, Option<String>) {
     let Some(text) = read(rel) else { return (None, None) };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&strip_jsonc(&text)) else { return (None, None) };
     let dir = dirname_posix(rel).to_string();
@@ -519,8 +538,13 @@ fn tsconfig_settings(
             continue;
         }
         let target = join_posix(&[&dir, ext]);
+        // Only project files are read: a tsconfig above the root is not
+        // followed (ADR-2611221645 §4, as the graph does).
+        if target == ".." || target.starts_with("../") {
+            continue;
+        }
         let target = if read(&target).is_none() && !target.ends_with(".json") { format!("{target}.json") } else { target };
-        let (p, b) = tsconfig_settings(&target, read, seen);
+        let (p, b) = tsconfig_settings(&target, read, chain, budget);
         if p.is_some() {
             paths = p;
         }
