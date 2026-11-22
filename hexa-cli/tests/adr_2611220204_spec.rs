@@ -254,7 +254,16 @@ mod part_1 {
         hexa_ok(&r, &["loop", "task", "add", "Write the parser"]);
         record_adr_with_closeout(&r);
 
-        let mut all: BTreeSet<String> = keys(&open_work(r.path())).into_iter().collect();
+        // The open work of the session that recorded it, read by the verb
+        // (the test process is not that session, so an in-process call reads none).
+        let fin = hexa_ok(&r, &["finish", "--json"]);
+        let v: serde_json::Value = serde_json::from_slice(&fin.stdout).expect("finish --json is JSON");
+        let mut all: BTreeSet<String> = v["open"]
+            .as_array()
+            .expect("an open list")
+            .iter()
+            .filter_map(|i| i["key"].as_str().map(String::from))
+            .collect();
         let (b, rep) = session_keys(r.path());
         all.extend(b);
         all.extend(rep);
@@ -820,7 +829,11 @@ mod part_2 {
         let held = Repo::new(true);
         for r in [&plain, &held] {
             r.touch_file("src/a.rs", "pub fn a() { /* edited */ }\n");
-            r.add_task("Land on main");
+            // `loop adr` appends the close-out steps; step 1 is then `Land on main`.
+            std::fs::create_dir_all(r.dir.join("docs/adrs")).unwrap();
+            std::fs::write(r.dir.join("docs/adrs/ADR-0001-held-work.md"), "# ADR-0001: held work\n\n**Status:** Accepted\n").unwrap();
+            let out = r.run(&["loop", "adr", "ADR-0001"]);
+            assert!(out.status.success(), "loop adr: {}", all(&out));
         }
         let h = held.hold("waiting on owner approval");
         assert!(h.status.success(), "hold refused: {}", all(&h));
@@ -857,6 +870,7 @@ mod part_2 {
         let script = r#""$0" loop gate true && "$0" loop task add 'Step one' && "$0" loop hold 'waiting on review'; s=$?; exit $s"#;
         let out = repo
             .base("sh", &a_env)
+            .env("HEXA_SESSION_PID", "0")
             .arg("-c")
             .arg(script)
             .arg(HEXA)
@@ -1790,7 +1804,8 @@ mod part_3 {
             "precondition: the ledger is listed: {original:?}"
         );
 
-        let out = hexa(&dir, &["init"], "");
+        // init runs again on an initialised project: that is `init --force`.
+        let out = hexa(&dir, &["init", "--force"], "");
         assert!(
             out.status.success(),
             "hexa init succeeds: {}",
