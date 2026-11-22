@@ -9,13 +9,16 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 fn write_fixture(corpus: &Path, id: &str, evidence: &str) {
-    let yaml = format!(
-        "id: {id}\nstatus: verified\ntitle: {id}\nlanguage: typescript\nprompt: Make the failing test pass.\ntask: Make the failing test pass.\noracle:\n  command: '{evidence}'\n"
-    );
-    fs::write(corpus.join(format!("{id}.yaml")), &yaml).unwrap();
-    let sub = corpus.join(id);
-    fs::create_dir_all(&sub).unwrap();
-    fs::write(sub.join("fixture.yaml"), &yaml).unwrap();
+    // The format hexa bench reads: <corpus>/<id>.json, every field present.
+    let fx = serde_json::json!({
+        "id": id,
+        "status": "verified",
+        "tier": "T1",
+        "instruction": "Make the failing test pass.",
+        "target_file": "src/lib.ts",
+        "oracle": { "command": evidence }
+    });
+    fs::write(corpus.join(format!("{id}.json")), serde_json::to_string_pretty(&fx).unwrap()).unwrap();
 }
 
 #[test]

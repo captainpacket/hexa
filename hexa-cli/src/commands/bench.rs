@@ -55,11 +55,8 @@ pub enum BenchAction {
 #[derive(Debug, Deserialize)]
 struct Fixture {
     id: String,
-    #[serde(default)]
     tier: String,
-    #[serde(alias = "task")]
     instruction: String,
-    #[serde(default)]
     target_file: String,
     oracle: Oracle,
     #[serde(default)]
@@ -430,18 +427,13 @@ fn load_fixtures(dir: &str, filter: Option<&str>, include_draft: bool) -> anyhow
     let mut entries: Vec<_> = std::fs::read_dir(path)?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.extension().map(|x| x == "json" || x == "yaml" || x == "yml").unwrap_or(false))
+        .filter(|p| p.extension().map(|x| x == "json").unwrap_or(false))
         .collect();
     entries.sort();
     let mut out = Vec::new();
     for p in entries {
         let raw = std::fs::read_to_string(&p)?;
-        let parsed: Result<Fixture, String> = if p.extension().map(|x| x == "json").unwrap_or(false) {
-            serde_json::from_str(&raw).map_err(|e| e.to_string())
-        } else {
-            serde_yaml::from_str(&raw).map_err(|e| e.to_string())
-        };
-        let fx: Fixture = match parsed {
+        let fx: Fixture = match serde_json::from_str(&raw) {
             Ok(f) => f,
             Err(e) => {
                 eprintln!("{} skipping {}: {}", "⚠".yellow(), p.display(), e);

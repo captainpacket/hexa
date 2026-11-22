@@ -49,8 +49,7 @@ fn write_json_fixture(corpus: &Path, id: &str, evidence: &str) {
         "tier": "T1",
         "language": language_for(program),
         "target_file": target_for(program),
-        "prompt": "Make the failing test pass.",
-        "description": "Make the failing test pass.",
+        "instruction": "Make the failing test pass.",
         "oracle": {
             "command": evidence
         }
