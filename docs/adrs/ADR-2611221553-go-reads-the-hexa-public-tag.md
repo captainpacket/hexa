@@ -15,7 +15,7 @@ A Go doc comment is the run of `//` lines directly above a declaration, with no 
 
 ## Decision
 
-1. **A Go export is public when its doc comment carries the tag.** A function, a method, a type spec, or a const or var spec that Go exports (a name starting with an upper-case letter) is `hexa_public` when any line of the run of `//` comment lines directly above its declaration contains `@hexa:public`. The run ends at the first line that is not a comment, or at a blank line: a comment separated from the declaration by a blank line is not its doc comment.
+1. **A Go export is public when its doc comment carries the tag.** A function, a method, a type spec, or a const or var spec that Go exports (a name starting with an upper-case letter) is `hexa_public` when any line of the run of comment lines (`//` or `/* … */`, as a Go doc comment may be either) directly above its declaration contains `@hexa:public`. A comment that ends a line holding other code is that line's comment, not a doc line. The run ends at the first line that is not a comment, or at a blank line: a comment separated from the declaration by a blank line is not its doc comment.
 2. **In a group, the group's doc comment covers every spec in it.** A spec inside `type ( … )`, `const ( … )` or `var ( … )` is `hexa_public` when the tag is in its own doc comment (the run directly above the spec, inside the group) or in the doc comment of the group (the run directly above `type`, `const` or `var`).
 3. **Nothing else changes** (except what ADR-2611221609 and ADR-2611221623, which fix how Go exports are read, decide). An export with no tag is graded as before, so a Go project that does not use the tag grades exactly as it does today. TypeScript and Rust read the tag exactly as they do today.
 

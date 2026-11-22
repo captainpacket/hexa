@@ -15,7 +15,7 @@ A var spec may declare several names: `var A, B = 1, 2`. hexa took the first. `B
 
 1. **A Go name is exported when its first character is a Unicode upper-case letter**, as the Go specification says, not only an ASCII one. This applies to every Go export hexa reads: functions, methods, types, consts and vars.
 2. **Every name a var spec declares is an export of its own**, each at the spec's line and of kind `Value`, grouped or not. `var A, B = 1, 2` exports `A` and `B`.
-3. **A const spec still records its first name.** `const A, B = 1, 2` exports `A`, as before; it is a known gap, not decided here.
+3. **A const spec still records its first name.** `const A, B = 1, 2` exports `A`, as before. This is a decision to leave consts unchanged here, not a claim that it is right for Go: exporting a const spec's later names needs a superseding ADR (recorded as gap:go-multi-name-specs).
 
 ## Consequences
 
