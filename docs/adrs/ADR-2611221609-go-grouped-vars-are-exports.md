@@ -1,6 +1,7 @@
 # ADR-2611221609: Go's grouped vars are exports
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-22 Accepted: Accepted in craigjohnson's session: he accepted the spec, chose the fix under his rule (no hexa core behaviour change except real bug fixes and new languages; architectural correctness first), and its sealed tests, red before the code, pass on main.
 **Date:** 2026-11-22
 **Drivers:** While building ADR-2611221553 (Go reads `@hexa:public`), two of its sealed scenarios failed for a reason unrelated to the tag: an exported var declared inside a `var ( … )` group is not an export to hexa at all. The grade, the dead-export finder and the tag never see it. The owner's rule for hexa work: architectural correctness comes first, even when a fix changes a grade.
 **Supersedes:** none. A defect in how `hexa analyze` reads Go exports.
