@@ -27,6 +27,9 @@ pub struct Item {
     pub kind: &'static str,
     pub what: String,
     pub fix: String,
+    /// What stays the same while the work is the same (ADR-2611220204 §1):
+    /// the text is what is printed, the key is what is compared.
+    pub key: String,
 }
 
 impl Item {
@@ -87,6 +90,7 @@ fn uncommitted_item(dir: &Path, files: &[String]) -> Option<Item> {
         kind: "uncommitted",
         what: format!("{} file{} changed and not committed: {shown}{more}", files.len(), if files.len() == 1 { "" } else { "s" }),
         fix: format!("commit it: hexa do gate --files {shown} -e '{}' -m '<what changed>'", gate_or_placeholder(dir)),
+        key: String::new(),
     })
 }
 
@@ -97,6 +101,7 @@ fn unpushed_item(dir: &Path) -> Option<Item> {
         kind: "unpushed",
         what: format!("{n} commit{} not on {upstream}", if n == 1 { "" } else { "s" }),
         fix: "push it: git push".to_string(),
+        key: String::new(),
     })
 }
 
@@ -145,6 +150,7 @@ fn branch_items(dir: &Path, base: &str, only: Option<&Path>) -> Vec<Item> {
                 kind: "unlanded",
                 what: format!("{branch}: {ahead} commit{} not on {base} ({shown})", if ahead == 1 { "" } else { "s" }),
                 fix: format!("land it: hexa dev worktree merge {branch} --force"),
+                key: String::new(),
             });
         } else if only.is_none() && path.is_dir() && uncommitted_files(&path).is_empty() {
             landed.push(format!("{branch} ({shown})"));
@@ -155,6 +161,7 @@ fn branch_items(dir: &Path, base: &str, only: Option<&Path>) -> Vec<Item> {
             kind: "landed",
             what: format!("{} worktree{} already on {base} and clean: {}", landed.len(), if landed.len() == 1 { "" } else { "s" }, landed.join(", ")),
             fix: "remove them: hexa dev worktree cleanup --force".to_string(),
+            key: String::new(),
         });
     }
     out
@@ -181,6 +188,7 @@ fn draft_items(dir: &Path) -> Vec<Item> {
             kind: "draft",
             what: format!("{} draft workplan{} never planned: {}", drafts.len(), if drafts.len() == 1 { "" } else { "s" }, drafts.join(", ")),
             fix: "discard them: hexa plan drafts clear".to_string(),
+            key: String::new(),
         });
     }
     let approved: Vec<String> = list(&dir.join("docs/workplans"))
@@ -193,6 +201,7 @@ fn draft_items(dir: &Path) -> Vec<Item> {
             kind: "draft",
             what: format!("{} workplan{} approved with no steps: {}", approved.len(), if approved.len() == 1 { "" } else { "s" }, approved.join(", ")),
             fix: format!("remove them: git rm {}", approved.join(" ")),
+            key: String::new(),
         });
     }
     out
@@ -206,6 +215,7 @@ fn task_items(entry: &Value) -> Vec<Item> {
             kind: "task",
             what: format!("[{}] {n} {title}", if st == "doing" { ">" } else { " " }),
             fix: format!("finish it, then: hexa loop task done {n}"),
+            key: String::new(),
         })
         .collect()
 }
@@ -227,6 +237,7 @@ fn adr_item(dir: &Path, entry: &Value) -> Option<Item> {
         kind: "adr",
         what: format!("{id} is {status}: the work it decided is not closed out"),
         fix: "close it out, once everything above is done: hexa loop stage done".to_string(),
+        key: String::new(),
     })
 }
 

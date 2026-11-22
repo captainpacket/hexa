@@ -1388,6 +1388,7 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
                         kind: "task",
                         what: format!("{} {}", i + 1, t.get("title").and_then(|v| v.as_str()).unwrap_or("")),
                         fix: format!("finish it, then: hexa loop task done {}", i + 1),
+                        key: String::new(),
                     })
                     .collect();
                 open.extend(crate::commands::finish::not_on_main(&cwd));
