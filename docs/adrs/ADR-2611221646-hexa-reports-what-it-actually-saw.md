@@ -35,7 +35,7 @@ CLAUDE.md: "A gate that degrades silently is worse than no gate."
 
 ## Implementation
 
-**Gate:** `cargo test -p hexa-cli --test adr_2611221646_spec_2`
+**Gate:** `cargo test -p hexa-cli --test adr_2611221646_spec_2 --test adr_2611221646_spec_3`
 
 Every phase ends with `cargo test --workspace` and `hexa analyze .`.
 
