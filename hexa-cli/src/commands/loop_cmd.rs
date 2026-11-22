@@ -664,6 +664,11 @@ fn pending_task(e: &serde_json::Value) -> Option<Task> {
 pub fn previous_lines(dir: &Path) -> Vec<String> {
     let Some((_, e)) = previous(dir) else { return Vec::new() };
     let mut out = checklist(&e);
+    // The reason the person reads at the next session start (ADR-2611220204,
+    // Consequences): a new session has a new id, so its own hold lines are empty.
+    if let Some(h) = entry_hold(&e) {
+        out.push(format!("the previous session's work was on hold: {} (since {})", h.reason, h.at));
+    }
     let next = match pending_task(&e) {
         Some(t) => format!("next: task {} {} — ", t.n, t.title),
         None => String::new(),
@@ -1287,6 +1292,11 @@ fn run_task(dir: &Path, action: TaskAction) -> anyhow::Result<()> {
             let title = title.trim().to_string();
             if title.is_empty() {
                 anyhow::bail!("a step needs a title");
+            }
+            // A step's title is its key (ADR-2611220204 §1): two steps with one
+            // title would be one piece of work to a hold and to the Stop hook.
+            if tasks.iter().any(|t| t.get("title").and_then(|v| v.as_str()) == Some(title.as_str())) {
+                anyhow::bail!("there is already a step titled '{title}': give this one a title of its own");
             }
             // The first step added to an empty list is the one in progress.
             let status = if tasks.iter().all(|t| closeout_kind(t).is_some()) { "doing" } else { "todo" };

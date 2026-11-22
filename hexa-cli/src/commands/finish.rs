@@ -140,19 +140,24 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     }
 }
 
+/// The command that fast-forwards `base` to `branch`: `git merge --ff-only`
+/// from the worktree that has `base` checked out, or, when none has, `git
+/// fetch . <branch>:<base>`, which moves the ref only on a fast-forward and
+/// needs no checkout. A merge run in a checkout of some other branch would do
+/// nothing and leave the branch unlanded.
+pub fn fast_forward(dir: &Path, branch: &str, base: &str) -> String {
+    match worktrees(dir).into_iter().find(|(_, b)| b.as_deref() == Some(base)) {
+        Some((p, _)) => format!("git -C {} merge --ff-only {branch}", p.display()),
+        None => format!("git -C {} fetch . {branch}:{base} ({base} is checked out nowhere; this moves it only on a fast-forward)", dir.display()),
+    }
+}
+
 /// How to land `branch` (checked out at `path`) on `base` so its commits stay
 /// its commits (ADR-2611220204 §5): a fast-forward from the base's checkout
 /// when the base is an ancestor of the branch; otherwise merge the base into
 /// the branch, re-run the gate, then fast-forward.
 pub fn landing_hint(dir: &Path, branch: &str, base: &str, path: &Path) -> String {
-    let trees = worktrees(dir);
-    let base_dir = trees
-        .iter()
-        .find(|(_, b)| b.as_deref() == Some(base))
-        .or_else(|| trees.first())
-        .map(|(p, _)| p.clone())
-        .unwrap_or_else(|| dir.to_path_buf());
-    let ff = format!("git -C {} merge --ff-only {branch}", base_dir.display());
+    let ff = fast_forward(dir, branch, base);
     if git(dir, &["merge-base", "--is-ancestor", base, branch]).is_some() {
         format!("land it from {base}'s checkout: {ff}")
     } else {

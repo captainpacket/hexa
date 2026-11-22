@@ -802,7 +802,12 @@ fn stop_until_finished(project_dir: &Path) -> Result<()> {
         let _ = std::fs::create_dir_all(project_dir.join(".hexa"));
         // the count is local state: keep it out of version control, even in a project that never re-ran init (§6)
         let _ = crate::commands::task_ledger::ensure_ignored(project_dir);
-        let _ = std::fs::write(&counts, serde_json::to_string(m).unwrap_or_default());
+        // Written whole, then renamed into place: two sessions stopping at once
+        // each see a complete file, never one torn mid-write that reads as empty.
+        let tmp = project_dir.join(".hexa").join(format!(".stop-blocks.json.{}.tmp", std::process::id()));
+        if std::fs::write(&tmp, serde_json::to_string(m).unwrap_or_default()).is_ok() && std::fs::rename(&tmp, &counts).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
     };
     let held_line = |h: &crate::commands::loop_cmd::Hold| {
         format!("on hold: {}; {} item{} wait{} on it", h.reason, held.len(), if held.len() == 1 { "" } else { "s" }, if held.len() == 1 { "s" } else { "" })
@@ -817,7 +822,7 @@ fn stop_until_finished(project_dir: &Path) -> Result<()> {
         m.insert(session, serde_json::json!({ "count": n + 1, "keys": keys }));
         save(&m);
         let mut reason = format!(
-            "Your work is not finished: a plan ends with its tasks done, its ADR closed and everything on main (ADR-2611161800). Finish these, or say plainly why one cannot be finished now:\n{}",
+            "Your work is not finished: a plan ends with its tasks done, its ADR closed and everything on main (ADR-2611161800). Finish these, or say plainly why one cannot be finished now:\n{}\nIf one waits on someone or something (a person's approval, a run still going, a review), record that once and stop being sent back for it: hexa loop hold '<why>' (ADR-2611220204).",
             list(&blocking)
         );
         if let Some(h) = hold.as_ref().filter(|_| !held.is_empty()) {

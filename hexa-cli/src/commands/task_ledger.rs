@@ -179,7 +179,7 @@ pub fn ensure_ignored(root: &Path) -> std::io::Result<bool> {
     let file = dir.join(".gitignore");
     let have = std::fs::read_to_string(&file).unwrap_or_default();
     // the ledger, and the Stop hook's count (ADR-2611220204 §6): local state, never committed
-    let want = ["tasks.json", "tasks.lock", ".tasks.json.*.tmp", "stop-blocks.json"];
+    let want = ["tasks.json", "tasks.lock", ".tasks.json.*.tmp", "stop-blocks.json", ".stop-blocks.json.*.tmp"];
     let missing: Vec<&str> = want
         .iter()
         .copied()

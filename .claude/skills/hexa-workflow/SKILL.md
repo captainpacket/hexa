@@ -209,7 +209,7 @@ on it, and fails if its gate starts passing.
 
 ## Closing out
 
-These are the rules a model skips, because nothing says *when*. There are four
+These are the rules a model skips, because nothing says *when*. There are five
 moments.
 
 1. **Before you start.** `hexa agent register --task <name> --lease <path>…`,
@@ -231,6 +231,14 @@ moments.
    then points at them. A list that exists only in the conversation is lost
    with it. Then close your claim:
    `hexa agent report --id <id> --outcome <passed|failed|killed> --commit <sha>`.
+
+5. **When the work waits on something you cannot do now** — a person's
+   approval, a test run still going, a review not yet back. The Stop hook sends
+   a session back while its work is open; say why it waits, once:
+   `hexa loop hold '<why>'`. The hold covers what is open now and nothing
+   opened later, `hexa loop` and the next session start show it, and
+   `hexa loop hold --clear` removes it. It changes no other check: `task done`,
+   `loop stage done` and `hexa finish` refuse as before (ADR-2611220204).
 
 Do not end a turn with a menu, or a question about work you were already asked
 to do: take the next item. If the next item needs a decision that is not yours,

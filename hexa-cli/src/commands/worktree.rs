@@ -574,6 +574,11 @@ async fn merge(
             total_files,
             "--force".bold()
         );
+        // This copies files in one new commit and leaves the branch's own
+        // commits off the base, a sealing commit among them (ADR-2611220204 §5).
+        println!(
+            "  This leaves each branch's commits off the base. To keep them, fast-forward instead: git merge --ff-only <branch> from the base's checkout, or git fetch . <branch>:<base>."
+        );
         return Ok(());
     }
 
