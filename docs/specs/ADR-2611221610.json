@@ -2,10 +2,10 @@
   "adr": "ADR-2611221610",
   "feature": "graph-fresh-and-remote-do-gate",
   "description": "The code graph is always built and fresh, and hexa do gate runs where the tests run",
-  "universal": [],
-  "accepted": null,
-  "sealed": {},
-  "red": null,
+  "accepted": {
+    "by": "gary (standing instruction: always accept the ADRs and specs; recorded by the implementing agent, builder B, 2026-11-22)",
+    "sha256": "7f14c4e6de4c0cba849f41e7f233d9dfd2bbda29662de640311ed52973195396"
+  },
   "specs": [
     {
       "id": "S01",
