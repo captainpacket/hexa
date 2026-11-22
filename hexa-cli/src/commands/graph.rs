@@ -50,6 +50,19 @@ pub enum GraphAction {
     /// safe excision — `hexa` doing "trace ALL consumers before deleting"
     /// itself, deterministically.
     Consumers(ConsumersArgs),
+    /// Whether the graph can be trusted: missing, stale or fresh, when it was
+    /// built and how many nodes it holds (ADR-2611221610 §3). Exits 0 in every state.
+    Status(StatusArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct StatusArgs {
+    /// Project directory (default: detected root).
+    #[arg(long, default_value = ".")]
+    pub path: String,
+    /// Emit `{state, built, fresh, built_at, nodes, changed}`.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -135,6 +148,7 @@ pub async fn run(action: GraphAction) -> anyhow::Result<()> {
         GraphAction::Explain(a) => explain(a),
         GraphAction::Context(a) => context(a).await,
         GraphAction::Consumers(a) => consumers(a),
+        GraphAction::Status(a) => status(a),
     }
 }
 
@@ -232,12 +246,269 @@ fn warn_if_stale(newer: &[String]) {
 
 const STALE_LIMIT: usize = 20;
 
+/// Write the graph atomically: a temporary file, then a rename, so a reader
+/// never sees half a graph (ADR-2611221610 §2).
 fn write_graph(out_path: &Path, graph: &KnowledgeGraph) -> anyhow::Result<()> {
+    let json = graph.to_json().map_err(|e| anyhow::anyhow!("serialize graph: {e}"))?;
+    write_atomic(out_path, json.as_bytes())
+}
+
+/// `.hexa/graph/` is build output: it ignores itself, so a project whose own
+/// `.gitignore` does not cover it never sees the graph, its stamp, its lock or
+/// its markers as untracked files.
+fn ensure_graph_dir(root: &Path) -> anyhow::Result<()> {
+    let dir = root.join(".hexa/graph");
+    std::fs::create_dir_all(&dir)?;
+    let ignore = dir.join(".gitignore");
+    if !ignore.is_file() {
+        std::fs::write(ignore, "# hexa graph build output (ADR-2611221610)\n*\n")?;
+    }
+    Ok(())
+}
+
+fn write_atomic(out_path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     if let Some(parent) = out_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let json = graph.to_json().map_err(|e| anyhow::anyhow!("serialize graph: {e}"))?;
-    std::fs::write(out_path, json)?;
+    let tmp = out_path.with_extension(format!("tmp-{}", std::process::id()));
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, out_path)?;
+    Ok(())
+}
+
+// ── freshness (ADR-2611221610 §2, §3, §5, §6) ────────────────────────────────
+
+/// Whether the graph at a root can be trusted.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphState {
+    /// `missing`, `stale` or `fresh`.
+    pub state: &'static str,
+    pub built_at: Option<String>,
+    pub nodes: u64,
+    /// Source files modified since the build.
+    pub changed: usize,
+}
+
+impl GraphState {
+    pub fn to_json(&self) -> serde_json::Value {
+        json!({
+            "state": self.state,
+            "built": self.state != "missing",
+            "fresh": self.state == "fresh",
+            "built_at": self.built_at,
+            "nodes": self.nodes,
+            "changed": self.changed,
+        })
+    }
+}
+
+fn read_stamp(root: &Path) -> Option<serde_json::Value> {
+    serde_json::from_str(&std::fs::read_to_string(root.join(hexa_graph::STAMP_FILE)).ok()?).ok()
+}
+
+/// The graph's state at `root`: `missing` with no graph file, `stale` with no
+/// stamp or a fingerprint that differs from the tree's, else `fresh`.
+pub fn graph_state(root: &Path) -> GraphState {
+    let file = graph_path(root);
+    let Ok(meta) = std::fs::metadata(&file) else {
+        return GraphState { state: "missing", built_at: None, nodes: 0, changed: 0 };
+    };
+    let stamp = read_stamp(root);
+    let built_at = stamp
+        .as_ref()
+        .and_then(|s| s["built_at"].as_str().map(str::to_string))
+        .or_else(|| meta.modified().ok().map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339()));
+    let since = built_at
+        .as_deref()
+        .and_then(|b| chrono::DateTime::parse_from_rfc3339(b).ok())
+        .map(std::time::SystemTime::from)
+        .or_else(|| meta.modified().ok());
+    let changed = since.map_or(0, |t| hexa_graph::newer_sources(root, t, usize::MAX).len());
+    let nodes = stamp.as_ref().and_then(|s| s["nodes"].as_u64()).unwrap_or(0);
+    let fresh = stamp
+        .as_ref()
+        .and_then(|s| s["fingerprint"].as_str())
+        .is_some_and(|fp| fp == hexa_graph::tree_fingerprint(root));
+    GraphState { state: if fresh { "fresh" } else { "stale" }, built_at, nodes, changed }
+}
+
+const LOCK_FILE: &str = ".hexa/graph/build.lock";
+const LOG_FILE: &str = ".hexa/graph/build.log";
+/// A lock older than this is a build that died, not one still running.
+const LOCK_LIFETIME: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+fn lock_held(root: &Path) -> bool {
+    std::fs::metadata(root.join(LOCK_FILE))
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age < LOCK_LIFETIME)
+}
+
+/// Build the graph for `root`, write it and its stamp, and return it.
+async fn build_and_stamp(root: &Path, mode: Mode, include_docs: bool, model: Option<String>) -> anyhow::Result<KnowledgeGraph> {
+    let project_id = root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "project".to_string());
+    let semantic: Box<dyn SemanticExtractor> =
+        if mode == Mode::Deep { Box::new(LocalSemanticExtractor { model }) } else { Box::new(NoopSemanticExtractor) };
+    // Before the read: a file changed during the build leaves the stamp stale, never falsely fresh.
+    ensure_graph_dir(root)?;
+    let fingerprint = hexa_graph::tree_fingerprint(root);
+    let started = chrono::Utc::now().to_rfc3339();
+    let opts = BuildOpts { project_id, mode, include_docs, ..Default::default() };
+    let graph = hexa_graph::build(root, opts, semantic.as_ref()).await;
+    let graph = match graph {
+        Ok(g) => g,
+        Err(e) => {
+            let _ = std::fs::remove_file(root.join(LOCK_FILE));
+            return Err(e);
+        }
+    };
+    // Always the current location; the legacy file is only ever read.
+    write_graph(&root.join(hexa_graph::GRAPH_FILE), &graph)?;
+    let stamp = json!({
+        "built_at": started,
+        "nodes": graph.meta.node_count,
+        "edges": graph.meta.edge_count,
+        "fingerprint": fingerprint,
+    });
+    write_atomic(&root.join(hexa_graph::STAMP_FILE), serde_json::to_string_pretty(&stamp)?.as_bytes())?;
+    let _ = std::fs::remove_file(root.join(LOCK_FILE));
+    Ok(graph)
+}
+
+/// `hexa init` builds the graph (ADR-2611221610 §4). One line either way; a
+/// failure never fails init.
+pub async fn build_after_init(root: &Path) {
+    match build_and_stamp(root, Mode::Ast, true, None).await {
+        Ok(g) => println!("  {} .hexa/graph/graph.json ({} nodes)", "\u{2713}".green(), g.meta.node_count),
+        Err(e) => println!("  {} code graph not built ({e}); `hexa graph build`", "\u{2717}".yellow()),
+    }
+}
+
+/// The SessionStart line, starting a detached rebuild when the graph is
+/// missing or stale and no rebuild holds the lock (ADR-2611221610 §5). The
+/// session never waits for it.
+pub fn refresh_for_session(root: &Path) -> String {
+    let st = graph_state(root);
+    if st.state == "fresh" {
+        return format!("graph: fresh ({} nodes)", st.nodes);
+    }
+    let what = match st.state {
+        "missing" => "missing".to_string(),
+        _ if st.changed > 0 => format!("stale ({} file(s) changed since the build)", st.changed),
+        _ => "stale".to_string(),
+    };
+    if lock_held(root) {
+        return format!("graph: {what} \u{2014} a rebuild is already running");
+    }
+    match spawn_background_build(root) {
+        Ok(()) => format!("graph: {what} \u{2014} rebuilding in the background"),
+        Err(e) => format!("graph: {what} \u{2014} could not start a rebuild ({e}); run `hexa graph build`"),
+    }
+}
+
+fn spawn_background_build(root: &Path) -> anyhow::Result<()> {
+    ensure_graph_dir(root)?;
+    std::fs::write(root.join(LOCK_FILE), format!("{}\n", chrono::Utc::now().to_rfc3339()))?;
+    let log = std::fs::File::create(root.join(LOG_FILE))?;
+    let mut cmd = std::process::Command::new(std::env::current_exe()?);
+    cmd.args(["graph", "build"])
+        .arg(root)
+        .current_dir(root)
+        .env("NO_COLOR", "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(log.try_clone()?)
+        .stderr(log);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    if let Err(e) = cmd.spawn() {
+        let _ = std::fs::remove_file(root.join(LOCK_FILE));
+        return Err(e.into());
+    }
+    Ok(())
+}
+
+/// At most this many lines of edit context, and this many items per list
+/// (ADR-2611221610 §6).
+pub const EDIT_CONTEXT_LINES: usize = 12;
+const EDIT_CONTEXT_EACH: usize = 5;
+
+/// The compact graph context the edit hook prints for `rel` (a path from
+/// `root`): empty when there is no graph or the graph does not hold the file.
+pub fn edit_context(root: &Path, rel: &str) -> Vec<String> {
+    let file = graph_path(root);
+    let Ok(raw) = std::fs::read_to_string(&file) else { return Vec::new() };
+    let Ok(graph) = KnowledgeGraph::from_json(&raw) else { return Vec::new() };
+    let opts = hexa_graph::context::ContextOpts { max_each: EDIT_CONTEXT_EACH };
+    let Some(b) = hexa_graph::context::context_for(&graph, rel, opts) else { return Vec::new() };
+    if b.kind != "file" {
+        return Vec::new();
+    }
+    let stale = graph_state(root).state != "fresh";
+    let list = |items: Vec<String>, key: &str| -> String {
+        let more = b.truncated.get(key).copied().unwrap_or(0);
+        let mut s = items.join(", ");
+        if more > 0 {
+            s.push_str(&format!(" (+{more})"));
+        }
+        s
+    };
+    let mut lines = vec![format!(
+        "[HEX] graph: {} \u{2014} defines {} \u{b7} imported by {} \u{b7} used by {}{}",
+        b.target,
+        b.defines.len() + b.truncated.get("defines").copied().unwrap_or(0),
+        b.imported_by.len() + b.truncated.get("imported_by").copied().unwrap_or(0),
+        b.used_by.len() + b.truncated.get("used_by").copied().unwrap_or(0),
+        if stale { " \u{b7} STALE graph: `hexa graph build`" } else { "" }
+    )];
+    if !b.defines.is_empty() {
+        lines.push(format!("  defines: {}", list(b.defines.iter().map(|e| e.label.clone()).collect(), "defines")));
+    }
+    if !b.imported_by.is_empty() {
+        lines.push(format!("  imported by: {}", list(b.imported_by.clone(), "imported_by")));
+    }
+    if !b.declared_in.is_empty() {
+        lines.push(format!("  declared in: {}", list(b.declared_in.clone(), "declared_in")));
+    }
+    if !b.used_by.is_empty() {
+        lines.push(format!(
+            "  used by: {}",
+            list(b.used_by.iter().map(|u| format!("{} \u{2192} {}", u.file, u.entity)).collect(), "used_by")
+        ));
+    }
+    if !b.imports.is_empty() {
+        lines.push(format!("  imports: {}", list(b.imports.clone(), "imports")));
+    }
+    lines.push(format!("  more: `hexa graph context {}` \u{b7} before deleting: `hexa graph consumers {}`", b.target, b.target));
+    lines.truncate(EDIT_CONTEXT_LINES);
+    lines
+}
+
+fn status(a: StatusArgs) -> anyhow::Result<()> {
+    let root = resolve_root(&a.path)?;
+    let st = graph_state(&root);
+    if a.json {
+        println!("{}", st.to_json());
+        return Ok(());
+    }
+    match st.state {
+        "missing" => println!("{} graph: missing \u{2014} `hexa graph build`", "\u{2717}".yellow()),
+        "stale" => println!(
+            "{} graph: stale ({} nodes, built {}, {} file(s) changed since) \u{2014} `hexa graph build`",
+            "\u{26a0}".yellow(),
+            st.nodes,
+            st.built_at.as_deref().unwrap_or("?"),
+            st.changed
+        ),
+        _ => println!("{} graph: fresh ({} nodes, built {})", "\u{2713}".green(), st.nodes, st.built_at.as_deref().unwrap_or("?")),
+    }
     Ok(())
 }
 
@@ -319,32 +590,10 @@ fn parse_triples(text: &str) -> Vec<SemanticTriple> {
 
 async fn build(a: BuildArgs) -> anyhow::Result<()> {
     let root = resolve_root(&a.path)?;
-    let project_id = root
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "project".to_string());
     let mode = Mode::from_label(&a.mode);
-
-    let semantic: Box<dyn SemanticExtractor> = if mode == Mode::Deep {
-        Box::new(LocalSemanticExtractor { model: a.model.clone() })
-    } else {
-        Box::new(NoopSemanticExtractor)
-    };
-
-    let opts = BuildOpts {
-        project_id,
-        mode,
-        include_docs: !a.no_docs,
-        ..Default::default()
-    };
-
     println!("{} building knowledge graph ({})…", "\u{2b21}".cyan(), a.mode);
-    let graph = hexa_graph::build(&root, opts, semantic.as_ref()).await?;
-
-    // Always the current location; the legacy file is only ever read.
+    let graph = build_and_stamp(&root, mode, !a.no_docs, a.model.clone()).await?;
     let out_path = root.join(hexa_graph::GRAPH_FILE);
-    write_graph(&out_path, &graph)?;
 
     println!(
         "{} {} nodes, {} edges, {} communities  [{}]",
