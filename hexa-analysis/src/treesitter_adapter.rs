@@ -1171,21 +1171,36 @@ fn extract_go_exports(
             }
             "const_declaration" | "var_declaration" => {
                 let group = go_doc_tagged(&child, source);
+                // A const group's specs are direct children; a var group's sit
+                // one level down, in a `var_spec_list` (ADR-2611221609 §1).
+                let mut specs = Vec::new();
                 let mut tc = child.walk();
-                for spec in child.children(&mut tc) {
-                    if spec.kind() == "const_spec" || spec.kind() == "var_spec" {
-                        if let Some(name_node) = spec.child_by_field_name("name") {
-                            let name = node_text(name_node, source);
-                            if is_go_exported(&name) {
-                                exports.push(ExportDeclaration {
-                                    file: file.to_string(),
-                                    name,
-                                    line: spec.start_position().row + 1,
-                                    hexa_public: group || go_doc_tagged(&spec, source),
-                                    kind: ExportKind::Value,
-                                });
-                            }
-                        }
+                for c in child.children(&mut tc) {
+                    if c.kind() == "var_spec_list" {
+                        let mut lc = c.walk();
+                        specs.extend(c.children(&mut lc).filter(|s| s.kind() == "var_spec"));
+                    } else if c.kind() == "const_spec" || c.kind() == "var_spec" {
+                        specs.push(c);
+                    }
+                }
+                for spec in specs {
+                    // Every name a var spec declares (`var A, B = 1, 2`); a const
+                    // spec, its first, as before (ADR-2611221609 §2).
+                    let names: Vec<String> = if spec.kind() == "var_spec" {
+                        let mut nc = spec.walk();
+                        spec.children_by_field_name("name", &mut nc).map(|n| node_text(n, source)).collect()
+                    } else {
+                        spec.child_by_field_name("name").map(|n| node_text(n, source)).into_iter().collect()
+                    };
+                    let tagged = group || go_doc_tagged(&spec, source);
+                    for name in names.into_iter().filter(|n| is_go_exported(n)) {
+                        exports.push(ExportDeclaration {
+                            file: file.to_string(),
+                            name,
+                            line: spec.start_position().row + 1,
+                            hexa_public: tagged,
+                            kind: ExportKind::Value,
+                        });
                     }
                 }
             }
@@ -1216,9 +1231,11 @@ fn go_doc_tagged(node: &tree_sitter::Node, source: &str) -> bool {
     false
 }
 
-/// Go exports are identified by capitalized names.
+/// Go exports are identified by capitalized names: the Go spec's rule is a
+/// first character that is a Unicode upper-case letter, so `Äpfel` is exported
+/// as `Apple` is (an ASCII-only check missed it).
 fn is_go_exported(name: &str) -> bool {
-    name.starts_with(|c: char| c.is_ascii_uppercase())
+    name.starts_with(|c: char| c.is_uppercase())
 }
 
 // ── Rust Export Extraction ───────────────────────────────
