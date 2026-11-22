@@ -1,6 +1,7 @@
 # ADR-2611211324: hexa reads Python: the grade, the evidence and the test runner
 
-**Status:** Accepted
+**Status:** Completed
+> 2026-11-21 Completed: landed on main at f8c1df5; gate `cargo test -p hexa-cli --test adr_2611211324_spec` passed (hexa loop stage done)
 > 2026-11-21 Accepted: Accepted under craigjohnson's instruction in this session: the spec was accepted by craigjohnson, the 45 sealed scenario tests were red at 3b2a9ef and pass at 731c8a1, two pre-landing reviews' findings are fixed (e6ec56f), and hexa grades itself A+ 100/100 with 224/224 files in a layer.
 **Date:** 2026-11-21
 **Drivers:** Two Python projects are mandated to use hexa and cannot: `netbox-plugin` (a NetBox plugin) and `nautobot-ssot-plugin` (a Nautobot app). `hexa analyze` on a Python tree prints "language: unsupported (Python; hexa grades Rust, Go and TypeScript)" (`hexa-cli/src/commands/analyze.rs`), and `examples/stress/game-wordle-py` is kept as "a tree it cannot read".
