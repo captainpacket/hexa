@@ -67,16 +67,6 @@ pub enum LoopAction {
     /// Carry the most recent ended session's work into this one: its ADR,
     /// gate (re-confirmed now), stage and checklist (ADR-2611160910)
     Resume,
-    /// Record that this session's open work is waiting, and why: the Stop
-    /// hook lets the session end while only that work is open (ADR-2611220204 §2)
-    Hold {
-        /// Why the work waits, e.g. 'waiting on the owner's approval'
-        #[arg(allow_hyphen_values = true, required_unless_present = "clear")]
-        reason: Option<String>,
-        /// Remove this session's hold
-        #[arg(long, conflicts_with = "reason")]
-        clear: bool,
-    },
     /// The checklist: the steps this work is made of, checked off as they land
     Task {
         #[command(subcommand)]
@@ -662,12 +652,8 @@ fn pending_task(e: &serde_json::Value) -> Option<Task> {
 /// its checklist and how to carry it over. Empty when there is none to show.
 /// For `hexa loop` and the session-start banner (ADR-2611160910 finding 2).
 pub fn previous_lines(dir: &Path) -> Vec<String> {
-    let Some((id, e)) = previous(dir) else { return Vec::new() };
+    let Some((_, e)) = previous(dir) else { return Vec::new() };
     let mut out = checklist(&e);
-    // The reason the person reads at the next session start (ADR-2611220204,
-    // Consequences): a new session has a new id, so its own hold lines are
-    // empty. hold_lines marks a hold whose keys have all closed as stale.
-    out.extend(hold_lines(dir, &id).into_iter().map(|l| format!("previous session: {l}")));
     let next = match pending_task(&e) {
         Some(t) => format!("next: task {} {} — ", t.n, t.title),
         None => String::new(),
@@ -1189,95 +1175,6 @@ fn bullet(items: &[crate::commands::finish::Item]) -> String {
     items.iter().map(|i| format!("\n  - {}: {}\n    {}", i.kind, i.what, i.fix)).collect()
 }
 
-/// A session's hold (ADR-2611220204 §2): why its work waits, since when, and
-/// the keys of the open work it covers.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Hold {
-    pub reason: String,
-    pub at: String,
-    pub keys: Vec<String>,
-}
-
-/// The hold recorded on a loop entry, if any.
-pub fn entry_hold(entry: &serde_json::Value) -> Option<Hold> {
-    let h = entry.get("hold").filter(|h| h.is_object())?;
-    Some(Hold {
-        reason: h.get("reason").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        at: h.get("at").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        keys: h
-            .get("keys")
-            .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
-            .unwrap_or_default(),
-    })
-}
-
-/// The lines that show a session's hold, for `hexa loop` and the
-/// session-start summary (ADR-2611220204 §3). A hold whose keys have all
-/// closed is stale: shown, and ignored by the Stop hook.
-pub fn hold_lines(dir: &Path, session: &str) -> Vec<String> {
-    let Some(hold) = session_entry(dir, session).as_ref().and_then(entry_hold) else { return Vec::new() };
-    let open: Vec<String> = crate::commands::finish::session_open(dir, session).blocking.into_iter().map(|i| i.key).collect();
-    let waiting = hold.keys.iter().filter(|k| open.contains(k)).count();
-    if waiting == 0 {
-        vec![format!(
-            "hold (stale: everything it held has closed): {} (since {}); `hexa loop hold --clear` removes it",
-            hold.reason, hold.at
-        )]
-    } else {
-        vec![format!(
-            "on hold: {} (since {}); {waiting} open item{} wait{} on it",
-            hold.reason,
-            hold.at,
-            if waiting == 1 { "" } else { "s" },
-            if waiting == 1 { "s" } else { "" }
-        )]
-    }
-}
-
-/// `hexa loop hold '<reason>'` and `hexa loop hold --clear` (ADR-2611220204 §2).
-fn run_hold(dir: &Path, reason: Option<String>, clear: bool) -> anyhow::Result<()> {
-    let session = session_id();
-    let retire = |obj: &mut serde_json::Map<String, serde_json::Value>| {
-        if let Some(old) = obj.remove("hold").filter(|h| !h.is_null()) {
-            let mut history = obj.get("hold_history").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-            history.push(old);
-            obj.insert("hold_history".to_string(), serde_json::json!(history));
-        }
-    };
-    if clear {
-        if session_entry(dir, &session).as_ref().and_then(entry_hold).is_none() {
-            println!("{} this session has no hold", "\u{2b21}".yellow());
-            return Ok(());
-        }
-        edit_entry(dir, &session, session_pid(), retire).map_err(|e| anyhow::anyhow!(e))?;
-        println!("{} hold cleared", "\u{2b21}".green());
-        return Ok(());
-    }
-    let reason = reason.unwrap_or_default().trim().to_string();
-    if reason.is_empty() {
-        anyhow::bail!("a hold needs a reason: say what the work waits on, e.g. `hexa loop hold 'waiting on the owner's approval'`");
-    }
-    let keys: Vec<String> = crate::commands::finish::session_open(dir, &session).blocking.into_iter().map(|i| i.key).collect();
-    if keys.is_empty() {
-        anyhow::bail!("nothing of this session's is open, so there is nothing to hold");
-    }
-    let hold = serde_json::json!({ "reason": reason, "at": chrono::Utc::now().to_rfc3339(), "keys": keys });
-    edit_entry(dir, &session, session_pid(), |obj| {
-        retire(obj);
-        obj.insert("hold".to_string(), hold);
-    })
-    .map_err(|e| anyhow::anyhow!(e))?;
-    println!(
-        "{} on hold: {reason}; {} open item{} wait{} on it. Anything opened from now on still blocks the stop",
-        "\u{2b21}".green(),
-        keys.len(),
-        if keys.len() == 1 { "" } else { "s" },
-        if keys.len() == 1 { "s" } else { "" }
-    );
-    Ok(())
-}
-
 fn run_task(dir: &Path, action: TaskAction) -> anyhow::Result<()> {
     let mut tasks = tasks_json(dir);
     let index = |n: usize, len: usize| -> anyhow::Result<usize> {
@@ -1291,11 +1188,6 @@ fn run_task(dir: &Path, action: TaskAction) -> anyhow::Result<()> {
             let title = title.trim().to_string();
             if title.is_empty() {
                 anyhow::bail!("a step needs a title");
-            }
-            // A step's title is its key (ADR-2611220204 §1): two steps with one
-            // title would be one piece of work to a hold and to the Stop hook.
-            if tasks.iter().any(|t| t.get("title").and_then(|v| v.as_str()) == Some(title.as_str())) {
-                anyhow::bail!("there is already a step titled '{title}': give this one a title of its own");
             }
             // The first step added to an empty list is the one in progress.
             let status = if tasks.iter().all(|t| closeout_kind(t).is_some()) { "doing" } else { "todo" };
@@ -1372,9 +1264,6 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
         LoopAction::Line => println!("{}", glance_line(&cwd)),
         LoopAction::Show => {
             println!("{} {}", "\u{2b21}".cyan(), status_line(&cwd));
-            for l in hold_lines(&cwd, &session_id()) {
-                println!("  {l}");
-            }
             let prev = previous_lines(&cwd);
             for l in &prev {
                 println!("  {l}");
@@ -1396,7 +1285,6 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
             }
         }
         LoopAction::Task { action } => run_task(&cwd, action)?,
-        LoopAction::Hold { reason, clear } => run_hold(&cwd, reason, clear)?,
         LoopAction::Adr { id } => {
             if !adr_exists(&cwd, &id) {
                 anyhow::bail!(
@@ -1500,7 +1388,6 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
                         kind: "task",
                         what: format!("{} {}", i + 1, t.get("title").and_then(|v| v.as_str()).unwrap_or("")),
                         fix: format!("finish it, then: hexa loop task done {}", i + 1),
-                        key: crate::commands::finish::task_key(t),
                     })
                     .collect();
                 open.extend(crate::commands::finish::not_on_main(&cwd));

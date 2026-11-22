@@ -303,16 +303,6 @@ async fn session_start(project_dir: &Path) -> Result<()> {
         println!("{} {}", "\u{26a0}".yellow(), line);
     }
 
-    // A hold is the record of why this session's work waits (ADR-2611220204 §3).
-    let session = hook_payload()["session_id"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .unwrap_or_else(crate::commands::loop_cmd::session_id);
-    for l in crate::commands::loop_cmd::hold_lines(project_dir, &session) {
-        println!("\u{2b21} {l}");
-    }
-
     let project_json = project_dir.join(".hexa/project.json");
 
     if !project_json.exists() {
@@ -704,15 +694,12 @@ async fn subagent_stop() -> Result<()> {
     }
     for (path, branch, ahead) in worktrees_with_unmerged_commits() {
         println!(
-            "worktree {} on {} holds {} commit{} not on this branch; land them so the commits stay theirs (ADR-2611220204 §5): \
-             from this checkout, `git merge --ff-only {}` when this branch is an ancestor of it; otherwise merge this branch into it \
-             (`git -C {} merge <this branch>`), re-run its gate, then fast-forward",
+            "worktree {} on {} holds {} commit{} not on this branch; land them with: hexa dev worktree merge {}",
             path,
             branch,
             ahead,
             if ahead == 1 { "" } else { "s" },
-            branch,
-            path
+            branch
         );
     }
     Ok(())
@@ -754,94 +741,40 @@ fn worktrees_with_unmerged_commits() -> Vec<(String, String, usize)> {
 /// end, and say why.
 const STOP_BLOCKS: u64 = 3;
 
-/// A session's run of blocks in `.hexa/stop-blocks.json` (ADR-2611220204 §4):
-/// how many in a row, and the keys they blocked on. A bare number, written by
-/// an older hexa, is that count with no keys.
-fn stop_run(v: Option<&serde_json::Value>) -> (u64, Vec<String>) {
-    match v {
-        Some(serde_json::Value::Number(n)) => (n.as_u64().unwrap_or(0), Vec::new()),
-        Some(serde_json::Value::Object(o)) => (
-            o.get("count").and_then(|c| c.as_u64()).unwrap_or(0),
-            o.get("keys")
-                .and_then(|k| k.as_array())
-                .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
-                .unwrap_or_default(),
-        ),
-        _ => (0, Vec::new()),
-    }
-}
-
 /// Stop — a session does not stop with its own work open. While something it
 /// can finish itself is open, answer `block` with the list as the reason, so
-/// the agent carries on. Three times in a row on the same open work at most;
-/// then let every stop through with the list printed, until the work changes.
-/// Work the session's hold covers does not block (ADR-2611220204 §3, §4).
-/// Commits not pushed are said, never forced.
+/// the agent carries on. Three times in a row at most; then let the stop
+/// through and print the list. Commits not pushed are said, never forced.
 fn stop_until_finished(project_dir: &Path) -> Result<()> {
     let v = hook_payload();
     let session = v["session_id"].as_str().filter(|s| !s.is_empty()).map(String::from).unwrap_or_else(crate::commands::loop_cmd::session_id);
     let open = crate::commands::finish::session_open(project_dir, &session);
-    // a hold covers the keys it holds and nothing else; one whose keys have all closed changes nothing
-    let hold = crate::commands::loop_cmd::session_entry(project_dir, &session).as_ref().and_then(crate::commands::loop_cmd::entry_hold);
-    let held_keys: Vec<String> = hold.as_ref().map(|h| h.keys.clone()).unwrap_or_default();
-    let (held, blocking): (Vec<_>, Vec<_>) = open.blocking.iter().cloned().partition(|i| held_keys.contains(&i.key));
-    let mut keys: Vec<String> = blocking.iter().map(|i| i.key.clone()).collect();
-    keys.sort();
-    keys.dedup();
-
     let counts = project_dir.join(".hexa").join("stop-blocks.json");
     let mut m: serde_json::Map<String, serde_json::Value> =
         std::fs::read_to_string(&counts).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-    let (before, last_keys) = stop_run(m.get(&session));
-    let n = if last_keys == keys { before } else { 0 };
+    let n = m.get(&session).and_then(|x| x.as_u64()).unwrap_or(0);
     let list = |items: &[crate::commands::finish::Item]| items.iter().map(|i| format!("- {}: {}\n  {}", i.kind, i.what, i.fix)).collect::<Vec<_>>().join("\n");
     let save = |m: &serde_json::Map<String, serde_json::Value>| {
-        if m.is_empty() && !counts.exists() {
-            return;
-        }
         let _ = std::fs::create_dir_all(project_dir.join(".hexa"));
-        // the count is local state: keep it out of version control, even in a project that never re-ran init (§6)
-        let _ = crate::commands::task_ledger::ensure_ignored(project_dir);
-        // Written whole, then renamed into place: a reader never sees a file torn
-        // mid-write. Not locked: two sessions stopping at the same instant can
-        // still lose one count, which costs that session at most one extra block.
-        let tmp = project_dir.join(".hexa").join(format!(".stop-blocks.json.{}.tmp", std::process::id()));
-        if std::fs::write(&tmp, serde_json::to_string(m).unwrap_or_default()).is_ok() && std::fs::rename(&tmp, &counts).is_err() {
-            let _ = std::fs::remove_file(&tmp);
-        }
+        let _ = std::fs::write(&counts, serde_json::to_string(m).unwrap_or_default());
     };
-    let held_line = |h: &crate::commands::loop_cmd::Hold| {
-        format!("on hold: {}; {} item{} wait{} on it", h.reason, held.len(), if held.len() == 1 { "" } else { "s" }, if held.len() == 1 { "s" } else { "" })
-    };
-    if blocking.is_empty() {
-        m.remove(&session);
-        save(&m);
-        if let Some(h) = hold.as_ref().filter(|_| !held.is_empty()) {
-            println!("[HEX] {}", held_line(h));
-        }
-    } else if n < STOP_BLOCKS {
-        m.insert(session, serde_json::json!({ "count": n + 1, "keys": keys }));
+    if !open.blocking.is_empty() && n < STOP_BLOCKS {
+        m.insert(session, serde_json::json!(n + 1));
         save(&m);
         let mut reason = format!(
-            "Your work is not finished: a plan ends with its tasks done, its ADR closed and everything on main (ADR-2611161800). Finish these, or say plainly why one cannot be finished now:\n{}\nIf one waits on someone or something (a person's approval, a run still going, a review), record that once and stop being sent back for it: hexa loop hold '<why>' (ADR-2611220204).",
-            list(&blocking)
+            "Your work is not finished: a plan ends with its tasks done, its ADR closed and everything on main (ADR-2611161800). Finish these, or say plainly why one cannot be finished now:\n{}",
+            list(&open.blocking)
         );
-        if let Some(h) = hold.as_ref().filter(|_| !held.is_empty()) {
-            reason.push_str(&format!("\nThe rest is {}", held_line(h)));
-        }
         if !open.reported.is_empty() {
             reason.push_str(&format!("\nAlso, not forced (a push can need someone's approval):\n{}", list(&open.reported)));
         }
         println!("{}", serde_json::json!({ "decision": "block", "reason": reason }));
         return Ok(());
-    } else {
-        // the bound holds until the open work changes: no reset into a cycle
-        m.insert(session, serde_json::json!({ "count": n, "keys": keys }));
-        save(&m);
-        println!("[HEX] stopping with work still open, after {STOP_BLOCKS} times sent back to finish it:\n{}", list(&blocking));
-        if let Some(h) = hold.as_ref().filter(|_| !held.is_empty()) {
-            println!("[HEX] {}", held_line(h));
-        }
+    }
+    m.remove(&session);
+    save(&m);
+    if !open.blocking.is_empty() {
+        println!("[HEX] stopping with work still open, after {STOP_BLOCKS} times sent back to finish it:\n{}", list(&open.blocking));
     }
     if !open.reported.is_empty() {
         println!("[HEX] {}", list(&open.reported));

@@ -290,7 +290,7 @@ async fn merge_order(json: bool) -> anyhow::Result<()> {
         "order": order,
         "conflicts": conflicts,
         "not_ready": not_ready,
-        "note": "Inner layers merge first (domain, ports, use cases, adapters, composition root), each later task rebasing on the earlier and re-passing its gate; within a layer the order is by finish time. This verb merges nothing. Land each branch so its commits stay its own (ADR-2611220204 §5): from the base's checkout, `git merge --ff-only <branch>` when the base is an ancestor of the branch; otherwise merge the base into the branch, re-run the gate, then fast-forward.",
+        "note": "Inner layers merge first (domain, ports, use cases, adapters, composition root), each later task rebasing on the earlier and re-passing its gate; within a layer the order is by finish time. This verb merges nothing: use `hexa dev worktree merge <branch> --force`.",
     });
     if json || !std::io::stdout().is_terminal() {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -573,11 +573,6 @@ async fn merge(
             "\u{26a0}".yellow(),
             total_files,
             "--force".bold()
-        );
-        // This copies files in one new commit and leaves the branch's own
-        // commits off the base, a sealing commit among them (ADR-2611220204 §5).
-        println!(
-            "  This leaves each branch's commits off the base. To keep them, fast-forward instead: git merge --ff-only <branch> from the base's checkout, or, when the base is checked out nowhere, git fetch . <branch>:<base>."
         );
         return Ok(());
     }

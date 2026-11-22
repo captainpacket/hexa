@@ -53,8 +53,8 @@ assembled for one loop, not the number of loops.
 - **Worktrees separate agents.** Multi-agent work is harness subagents, one
   worktree each. The `pre-agent` hook blocks a code-writing subagent whose
   Agent call lacks `isolation: "worktree"`, and `subagent-stop` names every
-  worktree branch holding commits the current branch lacks, with a
-  fast-forward that lands them and keeps their commits (ADR-2611220204 §5). hexa's own isolated runs
+  worktree branch holding commits the current branch lacks, with the
+  `hexa dev worktree merge` command that lands them. hexa's own isolated runs
   (`hexa bench`) use `hexa/auto/<id>` worktrees beside the repo, hard-guarded
   against committing to the operator's tree. Interactive `hexa do` commits on
   the current branch.

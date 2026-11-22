@@ -27,14 +27,11 @@ pub struct Item {
     pub kind: &'static str,
     pub what: String,
     pub fix: String,
-    /// What stays the same while the work is the same (ADR-2611220204 §1):
-    /// the text is what is printed, the key is what is compared.
-    pub key: String,
 }
 
 impl Item {
     fn json(&self) -> Value {
-        json!({ "kind": self.kind, "what": self.what, "fix": self.fix, "key": self.key })
+        json!({ "kind": self.kind, "what": self.what, "fix": self.fix })
     }
 }
 
@@ -80,25 +77,17 @@ fn gate_or_placeholder(dir: &Path) -> String {
     crate::commands::loop_cmd::full_gate(dir).unwrap_or_else(|| "<the test command>".to_string())
 }
 
-/// Files not yet tracked, as paths relative to `dir`, leaving out what git ignores.
-fn untracked_files(dir: &Path) -> Vec<String> {
-    let Some(out) = git(dir, &["ls-files", "--others", "--exclude-standard"]) else { return Vec::new() };
-    out.lines().map(|l| l.trim_matches('"').to_string()).filter(|p| !p.is_empty() && !is_state(p)).collect()
-}
-
-/// One item per file (ADR-2611220204 §1): its key is its path, so a second
-/// file changed does not make the first one new work.
-fn uncommitted_items(dir: &Path, files: &[String]) -> Vec<Item> {
-    let gate = gate_or_placeholder(dir);
-    files
-        .iter()
-        .map(|f| Item {
-            kind: "uncommitted",
-            what: format!("{f} changed and not committed"),
-            fix: format!("commit it: hexa do gate --files {f} -e '{gate}' -m '<what changed>'"),
-            key: format!("uncommitted:{f}"),
-        })
-        .collect()
+fn uncommitted_item(dir: &Path, files: &[String]) -> Option<Item> {
+    if files.is_empty() {
+        return None;
+    }
+    let shown = files.iter().take(8).cloned().collect::<Vec<_>>().join(" ");
+    let more = if files.len() > 8 { format!(" (+{} more)", files.len() - 8) } else { String::new() };
+    Some(Item {
+        kind: "uncommitted",
+        what: format!("{} file{} changed and not committed: {shown}{more}", files.len(), if files.len() == 1 { "" } else { "s" }),
+        fix: format!("commit it: hexa do gate --files {shown} -e '{}' -m '<what changed>'", gate_or_placeholder(dir)),
+    })
 }
 
 fn unpushed_item(dir: &Path) -> Option<Item> {
@@ -108,7 +97,6 @@ fn unpushed_item(dir: &Path) -> Option<Item> {
         kind: "unpushed",
         what: format!("{n} commit{} not on {upstream}", if n == 1 { "" } else { "s" }),
         fix: "push it: git push".to_string(),
-        key: format!("unpushed:{upstream}"),
     })
 }
 
@@ -140,46 +128,6 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// The command that fast-forwards `base` to `branch`: `git merge --ff-only`
-/// from the worktree that has `base` checked out, or, when none has, `git
-/// fetch . <branch>:<base>`, which moves the ref only on a fast-forward and
-/// needs no checkout. A merge run in a checkout of some other branch would do
-/// nothing and leave the branch unlanded.
-pub fn fast_forward(dir: &Path, branch: &str, base: &str) -> String {
-    match worktrees(dir).into_iter().find(|(_, b)| b.as_deref() == Some(base)) {
-        Some((p, _)) => format!("git -C {} merge --ff-only {branch}", p.display()),
-        None => format!("git -C {} fetch . {branch}:{base}", dir.display()),
-    }
-}
-
-/// The words before [`fast_forward`]'s command: where it runs. Kept outside
-/// the command, so the command can be pasted as it is.
-fn fast_forward_lead(dir: &Path, base: &str) -> String {
-    if worktrees(dir).iter().any(|(_, b)| b.as_deref() == Some(base)) {
-        format!("from {base}'s checkout")
-    } else {
-        format!("({base} is checked out nowhere; this moves it only on a fast-forward)")
-    }
-}
-
-/// How to land `branch` (checked out at `path`) on `base` so its commits stay
-/// its commits (ADR-2611220204 §5): a fast-forward from the base's checkout
-/// when the base is an ancestor of the branch; otherwise merge the base into
-/// the branch, re-run the gate, then fast-forward.
-pub fn landing_hint(dir: &Path, branch: &str, base: &str, path: &Path) -> String {
-    let ff = fast_forward(dir, branch, base);
-    let lead = fast_forward_lead(dir, base);
-    if git(dir, &["merge-base", "--is-ancestor", base, branch]).is_some() {
-        format!("land it {lead}: {ff}")
-    } else {
-        format!(
-            "{base} has moved: merge {base} into {branch} (git -C {} merge {base}), re-run the gate ({}), then fast-forward {lead}: {ff}",
-            path.display(),
-            gate_or_placeholder(dir)
-        )
-    }
-}
-
 /// Branches with commits not on the base, and branches already on it whose
 /// worktree is clean and could go. `only` limits it to one worktree.
 fn branch_items(dir: &Path, base: &str, only: Option<&Path>) -> Vec<Item> {
@@ -193,26 +141,20 @@ fn branch_items(dir: &Path, base: &str, only: Option<&Path>) -> Vec<Item> {
         let ahead: usize = git(dir, &["rev-list", "--count", &format!("{base}..{branch}")]).and_then(|n| n.parse().ok()).unwrap_or(0);
         let shown = path.display().to_string();
         if ahead > 0 {
-            let tip = git(dir, &["rev-parse", &format!("refs/heads/{branch}")]).unwrap_or_default();
-            let short: String = tip.chars().take(7).collect();
             out.push(Item {
                 kind: "unlanded",
-                what: format!("{branch} at {short}: {ahead} commit{} not on {base} ({shown})", if ahead == 1 { "" } else { "s" }),
-                fix: landing_hint(dir, &branch, base, &path),
-                key: format!("unlanded:{branch}@{tip}"),
+                what: format!("{branch}: {ahead} commit{} not on {base} ({shown})", if ahead == 1 { "" } else { "s" }),
+                fix: format!("land it: hexa dev worktree merge {branch} --force"),
             });
         } else if only.is_none() && path.is_dir() && uncommitted_files(&path).is_empty() {
-            landed.push((branch.clone(), format!("{branch} ({shown})")));
+            landed.push(format!("{branch} ({shown})"));
         }
     }
     if !landed.is_empty() {
-        let names: Vec<&str> = landed.iter().map(|(b, _)| b.as_str()).collect();
-        let shown: Vec<&str> = landed.iter().map(|(_, s)| s.as_str()).collect();
         out.push(Item {
             kind: "landed",
-            what: format!("{} worktree{} already on {base} and clean: {}", landed.len(), if landed.len() == 1 { "" } else { "s" }, shown.join(", ")),
+            what: format!("{} worktree{} already on {base} and clean: {}", landed.len(), if landed.len() == 1 { "" } else { "s" }, landed.join(", ")),
             fix: "remove them: hexa dev worktree cleanup --force".to_string(),
-            key: format!("landed:{}", names.join(",")),
         });
     }
     out
@@ -239,7 +181,6 @@ fn draft_items(dir: &Path) -> Vec<Item> {
             kind: "draft",
             what: format!("{} draft workplan{} never planned: {}", drafts.len(), if drafts.len() == 1 { "" } else { "s" }, drafts.join(", ")),
             fix: "discard them: hexa plan drafts clear".to_string(),
-            key: format!("draft:{}", drafts.join(",")),
         });
     }
     let approved: Vec<String> = list(&dir.join("docs/workplans"))
@@ -252,25 +193,12 @@ fn draft_items(dir: &Path) -> Vec<Item> {
             kind: "draft",
             what: format!("{} workplan{} approved with no steps: {}", approved.len(), if approved.len() == 1 { "" } else { "s" }, approved.join(", ")),
             fix: format!("remove them: git rm {}", approved.join(" ")),
-            key: format!("draft:{}", approved.join(",")),
         });
     }
     out
 }
 
-/// The key of one checklist step (ADR-2611220204 §1): its title, or which
-/// close-out step it is. Never its position or its marker.
-pub fn task_key(task: &Value) -> String {
-    let title = task.get("title").and_then(|v| v.as_str()).unwrap_or("");
-    match task.get("closeout").and_then(|v| v.as_str()) {
-        Some("land") => "closeout:land".to_string(),
-        Some("close") => format!("closeout:close:{}", task.get("adr").and_then(|v| v.as_str()).unwrap_or("")),
-        _ => format!("task:{title}"),
-    }
-}
-
 fn task_items(entry: &Value) -> Vec<Item> {
-    let raw: Vec<Value> = entry.get("tasks").and_then(|t| t.as_array()).cloned().unwrap_or_default();
     crate::commands::loop_cmd::entry_tasks(entry)
         .into_iter()
         .filter(|(_, _, st)| st != "done")
@@ -278,7 +206,6 @@ fn task_items(entry: &Value) -> Vec<Item> {
             kind: "task",
             what: format!("[{}] {n} {title}", if st == "doing" { ">" } else { " " }),
             fix: format!("finish it, then: hexa loop task done {n}"),
-            key: raw.get(n - 1).map(task_key).unwrap_or_else(|| format!("task:{title}")),
         })
         .collect()
 }
@@ -300,7 +227,6 @@ fn adr_item(dir: &Path, entry: &Value) -> Option<Item> {
         kind: "adr",
         what: format!("{id} is {status}: the work it decided is not closed out"),
         fix: "close it out, once everything above is done: hexa loop stage done".to_string(),
-        key: format!("adr:{id}"),
     })
 }
 
@@ -317,7 +243,7 @@ fn loop_entry(dir: &Path) -> Option<Value> {
 pub fn open_work(dir: &Path) -> Vec<Item> {
     let base = base_branch(dir);
     let mut out = Vec::new();
-    out.extend(uncommitted_items(dir, &uncommitted_files(dir)));
+    out.extend(uncommitted_item(dir, &uncommitted_files(dir)));
     out.extend(unpushed_item(dir));
     let entry = loop_entry(dir).unwrap_or(Value::Null);
     out.extend(task_items(&entry));
@@ -335,7 +261,7 @@ pub fn open_work(dir: &Path) -> Vec<Item> {
 pub fn not_on_main(dir: &Path) -> Vec<Item> {
     let base = base_branch(dir);
     let mut out = Vec::new();
-    out.extend(uncommitted_items(dir, &uncommitted_files(dir)));
+    out.extend(uncommitted_item(dir, &uncommitted_files(dir)));
     out.extend(branch_items(dir, &base, None).into_iter().filter(|i| i.kind == "unlanded"));
     out
 }
@@ -356,15 +282,9 @@ pub fn session_open(dir: &Path, session: &str) -> SessionOpen {
         .into_iter()
         .filter(|f| !Path::new(f).is_absolute())
         .collect();
-    // a file the session made and never added is as uncommitted as one it changed
-    let mut dirty: Vec<String> = uncommitted_files(dir).into_iter().filter(|f| touched.contains(f)).collect();
-    for f in untracked_files(dir).into_iter().filter(|f| touched.contains(f)) {
-        if !dirty.contains(&f) {
-            dirty.push(f);
-        }
-    }
+    let dirty: Vec<String> = uncommitted_files(dir).into_iter().filter(|f| touched.contains(f)).collect();
     let mut blocking = Vec::new();
-    blocking.extend(uncommitted_items(dir, &dirty));
+    blocking.extend(uncommitted_item(dir, &dirty));
     blocking.extend(task_items(&entry));
     let base = base_branch(dir);
     blocking.extend(branch_items(dir, &base, Some(dir)));
