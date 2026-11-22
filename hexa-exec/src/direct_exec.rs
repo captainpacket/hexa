@@ -609,7 +609,7 @@ fn persist_run_async(runs: &dyn crate::ports::RunLog, run: DirectRun) {
 /// reported 8% pass over 5 real runs. `runs_from_rows` drops those rows
 /// before assigning display ids, so ids number only real runs
 /// (ADR-2609151100).
-pub fn runs_snapshot(runs: &dyn crate::ports::RunLog) -> Vec<DirectRun> {
+pub(crate) fn runs_snapshot(runs: &dyn crate::ports::RunLog) -> Vec<DirectRun> {
     runs_from_rows(runs.recent(RUN_HISTORY))
 }
 
@@ -673,11 +673,6 @@ pub fn runs_for_repo(runs: &dyn crate::ports::RunLog, repo: Option<&str>) -> (Ve
     let mine: Vec<DirectRun> = all.into_iter().filter(|r| r.repo == repo).collect();
     let hidden = total - mine.len();
     (mine, hidden)
-}
-
-/// Aggregate counters for an at-a-glance monitor header.
-pub fn runs_summary(runs: &dyn crate::ports::RunLog) -> Value {
-    summary_of(&runs_snapshot(runs))
 }
 
 /// Count `runs` into the monitor-header shape: total, passed, failed,
