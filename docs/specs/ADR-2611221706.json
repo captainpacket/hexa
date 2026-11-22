@@ -10,6 +10,10 @@
     "by": "craigjohnson",
     "sha256": "3d57bc0df32061a11563985535e16ec54f6089991356f4ed9dd30f739d352301"
   },
+  "sealed": {
+    "hexa-analysis/tests/adr_2611221706_spec.rs": "2f5fdd1f7949888ba78e677617b7d122063668e99af988a36cfbe9bd55da4e53"
+  },
+  "red": "4a0354c",
   "specs": [
     {
       "id": "S01",
@@ -20,7 +24,8 @@
       "description": "An export used only by a .test.tsx file beside its component is not dead",
       "given": "A TypeScript project with src/ui/Button.tsx exporting `Button` and `buttonVariants`. src/ui/App.tsx imports `Button`. src/ui/Button.test.tsx, which is not under any test folder, imports `buttonVariants` from ./Button. No other file names `buttonVariants`.",
       "when": "ArchAnalysisPort::analyze runs on the project root",
-      "then": "dead_exports has no entry with file src/ui/Button.tsx and export_name `buttonVariants`"
+      "then": "dead_exports has no entry with file src/ui/Button.tsx and export_name `buttonVariants`",
+      "test": "hexa-analysis/tests/adr_2611221706_spec.rs::part_1::s01_export_used_only_by_test_tsx_is_not_dead"
     },
     {
       "id": "S02",
@@ -53,7 +58,8 @@
       "description": "The rule holds at any depth and at the project root",
       "given": "Three files: Root.test.tsx at the project root, src/features/billing/deep/Invoice.spec.tsx, and src/ui/__tests__/Modal.test.tsx. Each imports a distinct export from its own component, and that export has no other user.",
       "when": "analyze runs",
-      "then": "none of the three files appears in coverage.unclassified or counts in coverage.total, and none of the three imported exports appears in dead_exports"
+      "then": "none of the three files appears in coverage.unclassified or counts in coverage.total, and none of the three imported exports appears in dead_exports",
+      "test": "hexa-analysis/tests/adr_2611221706_spec.rs::part_1::s04_rule_holds_at_any_depth_and_at_root"
     },
     {
       "id": "S05",
@@ -108,7 +114,8 @@
       "description": "A .tsx test is read exactly as a .ts test with the same content",
       "given": "Any TypeScript project P that contains a file F named X.test.ts or X.spec.ts at any path, and P', which is P with F renamed to X.test.tsx or X.spec.tsx respectively and its content unchanged",
       "when": "analyze runs on P and on P'",
-      "then": "dead_exports, coverage.total, coverage.classified, coverage.unclassified, file_count and health_score are equal for P and P'"
+      "then": "dead_exports, coverage.total, coverage.classified, coverage.unclassified, file_count and health_score are equal for P and P'",
+      "test": "hexa-analysis/tests/adr_2611221706_spec.rs::part_1::s09_tsx_test_read_as_ts_test"
     },
     {
       "id": "S10",
@@ -119,7 +126,8 @@
       "description": "For every path ending in .test.tsx or .spec.tsx, the file is excluded and its imports are uses",
       "given": "Any project and any file at any path whose name ends in `.test.tsx` or `.spec.tsx`",
       "when": "analyze runs",
-      "then": "the file is not in coverage.unclassified and does not count in coverage.total; no dead_exports entry has it as file; no export the file imports by name appears in dead_exports"
+      "then": "the file is not in coverage.unclassified and does not count in coverage.total; no dead_exports entry has it as file; no export the file imports by name appears in dead_exports",
+      "test": "hexa-analysis/tests/adr_2611221706_spec.rs::part_1::s10_every_test_or_spec_tsx_is_excluded_and_its_imports_are_uses"
     },
     {
       "id": "S11",
@@ -163,7 +171,8 @@
       "description": "The change does not extend to other JS/TS test suffixes the ADR does not name",
       "given": "src/ui/Widget.test.jsx outside any test folder, exporting `helper`, which no file names",
       "when": "analyze runs",
-      "then": "src/ui/Widget.test.jsx is graded as it was before this ADR: it counts in coverage.total and its `helper` export appears in dead_exports"
+      "then": "src/ui/Widget.test.jsx is graded as it was before this ADR: it counts in coverage.total and its `helper` export appears in dead_exports",
+      "test": "hexa-analysis/tests/adr_2611221706_spec.rs::part_2::s14_test_jsx_is_not_a_test_file"
     },
     {
       "id": "S15",
@@ -196,7 +205,8 @@
       "description": "Adding a .test.tsx file changes nothing about the other files",
       "given": "Any project P and P', which is P plus one file T named *.test.tsx or *.spec.tsx at any path",
       "when": "analyze runs on P and on P'",
-      "then": "coverage.unclassified is the same for P and P'; coverage.total is the same; dead_exports for P' equals dead_exports for P minus exactly the entries whose exports T imports by name"
+      "then": "coverage.unclassified is the same for P and P'; coverage.total is the same; dead_exports for P' equals dead_exports for P minus exactly the entries whose exports T imports by name",
+      "test": "hexa-analysis/tests/adr_2611221706_spec.rs::part_2::s17_adding_a_tsx_test_changes_nothing_about_the_other_files"
     }
   ]
 }
