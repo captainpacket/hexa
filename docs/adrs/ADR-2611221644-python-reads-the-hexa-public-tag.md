@@ -26,7 +26,7 @@ Treating every name in `__all__` as public would be wrong for a module that is i
 
 ## Implementation
 
-**Gate:** `cargo test -p hexa-analysis --test adr_2611221644_spec`
+**Gate:** `cargo test -p hexa-analysis --test adr_2611221644_spec_2`
 
 Every phase ends with `cargo test --workspace` and `hexa analyze .`.
 

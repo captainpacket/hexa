@@ -293,8 +293,8 @@
         "§5"
       ],
       "kind": "negative",
-      "description": "A definition that grants Bash is still blocked",
-      "given": "`.claude/agents/reviewer.md` with tools Read, Grep and Bash, on a branch where editing agents are blocked",
+      "description": "A definition that grants Bash, every tool (`*`), or a tool not known to be read-only is still blocked",
+      "given": "`.claude/agents/reviewer.md` with tools Read, Grep and Bash (and, separately, one with `tools: \"*\"` and one with Read and an MCP write tool), on a branch where editing agents are blocked",
       "when": "a reviewer subagent is launched without a worktree",
       "then": "the pre-agent hook blocks it as before"
     },
@@ -326,10 +326,10 @@
         "§5"
       ],
       "kind": "property",
-      "description": "A definition is exempt exactly when it lists tools and none of them writes",
+      "description": "A definition is exempt exactly when it lists tools and every one is a read-only tool",
       "given": "any subagent type not in the fixed read-only list, launched without `isolation: \"worktree\"`, and any definition state: absent, no `tools` list, or any `tools` list",
       "when": "the pre-agent hook evaluates it",
-      "then": "it is allowed as read-only if and only if the governing definition (the project's, else the home's) has a `tools` list containing none of Edit, Write, MultiEdit, NotebookEdit or Bash; otherwise the hook blocks or warns exactly as it did before this ADR",
+      "then": "it is allowed as read-only if and only if the governing definition (the project's, else the home's) has a `tools` list every entry of which is one of Read, Grep, Glob, LS, NotebookRead, WebFetch or WebSearch; otherwise the hook blocks or warns exactly as it did before this ADR",
       "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_2::s26_exempt_iff_tools_listed_and_none_writes",
       "red": "a68c4e6"
     }

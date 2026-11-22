@@ -17,7 +17,7 @@ The export record is `ExportDeclaration` in `hexa-analysis/src/domain.rs`.
 
 1. **Every name a const spec declares is an export**, each at the spec's line and of kind `Value`, grouped or not, as for a var spec. `const A, B = 1, 2` exports `A` and `B`. Only the identifiers are names: the commas between them are not.
 2. **The API contract reader uses Go's export rule for struct fields**: a field is exported when its first character is a Unicode upper-case letter, as in the analyzer.
-3. **The code graph reads Go's consts and vars as the analyzer does**: the specs of a var group (inside `var_spec_list`) and of a const group, and every name each spec declares, each an entity of kind `Const` at the spec's line.
+3. **The code graph reads Go's consts and vars as the analyzer does**: the specs of a var group (inside `var_spec_list`) and of a const group, and every name each spec declares, each an entity of kind `Const` at the spec's line. A Go file uses its package's names with no import, so a name one `.go` file uses is linked to the entity of that name another file of the same package declares; without that link `hexa graph consumers` saw no same-package user of any Go entity and called used code safe to remove (ADR-2609122048).
 
 ## Consequences
 
@@ -27,7 +27,7 @@ The export record is `ExportDeclaration` in `hexa-analysis/src/domain.rs`.
 
 ## Implementation
 
-**Gate:** `cargo test -p hexa-analysis --test adr_2611221643_spec`
+**Gate:** `cargo test -p hexa-cli --test adr_2611221643_spec_2`
 
 Every phase ends with `cargo test --workspace` and `hexa analyze .`.
 

@@ -25,17 +25,17 @@ CLAUDE.md: "A gate that degrades silently is worse than no gate."
 2. **`hexa bench agentic` checks its evidence can run before it runs anything.** Before the first fixture, the program each selected fixture's evidence command starts with is looked up on `PATH`; when one is missing, the bench refuses with the program and the fixtures that need it, and runs no fixture.
 3. **The "Hex layers" tally counts the files the grade reads.** A file the grade excludes (by `analyze.exclude` or the built-in patterns) is not counted in any layer.
 4. **The session context names Python.** A project whose root has `pyproject.toml`, `setup.py` or `setup.cfg`, and none of `Cargo.toml`, `go.mod` or `package.json`, is shown as language `python`.
-5. **A subagent whose definition grants no tool that writes is read-only.** When the subagent type has a definition (`.claude/agents/<type>.md` in the project, else in the user's home) whose `tools` list names none of `Edit`, `Write`, `MultiEdit`, `NotebookEdit` or `Bash`, the pre-agent hook lets it run without a worktree, as it does for the fixed read-only types. A definition with no `tools` list, or one that names any of them, is treated as before.
+5. **A subagent whose definition grants only tools that read is read-only.** When the subagent type has a definition (`.claude/agents/<type>.md` in the project, else in the user's home) whose `tools` list names only tools that read (`Read`, `Grep`, `Glob`, `LS`, `NotebookRead`, `WebFetch`, `WebSearch`), the pre-agent hook lets it run without a worktree, as it does for the fixed read-only types. A definition with no `tools` list, one that names `*` (every tool), or one that names any other tool (`Edit`, `Write`, `Bash`, an MCP tool, …) is treated as before: a tool hexa does not know to be read-only is assumed to write.
 
 ## Consequences
 
 - A failure to reach the model, a benchmark with no runner, and a layer count are each reported as they are.
 - A read-only reviewer runs in the main checkout, where it can read uncommitted work, instead of being sent to a worktree cut from HEAD.
-- No check becomes weaker: an agent that can write is blocked or warned as before.
+- No check becomes weaker: an agent that can write, or one whose tools hexa does not know, is blocked or warned as before.
 
 ## Implementation
 
-**Gate:** `cargo test -p hexa-cli --test adr_2611221646_spec`
+**Gate:** `cargo test -p hexa-cli --test adr_2611221646_spec_2`
 
 Every phase ends with `cargo test --workspace` and `hexa analyze .`.
 
