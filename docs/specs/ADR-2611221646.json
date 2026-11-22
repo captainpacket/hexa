@@ -14,7 +14,8 @@
     "sha256": "5ff31694280d7c2e17cd4733ad31159575212e6e2d6d6e4e8c4e8ad298f18cd5"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611221646_spec_2.rs": "b6f7739dc968338b19b5bbd786d6c7cad874be7600f5a544528f00bb28fc23d9"
+    "hexa-cli/tests/adr_2611221646_spec_2.rs": "d3d7fc624aa1b29aa7c06bb1005286703504386520d4dc9e143b7c3018f7af26",
+    "hexa-cli/tests/adr_2611221646_spec_3.rs": "f105418a60467e76dcaa8aebdb36bc27e1021dbef59a9201056f62b77327e249"
   },
   "specs": [
     {
@@ -105,8 +106,8 @@
       "given": "five selected fixtures whose evidence commands all start with `bun`, and no `bun` on PATH",
       "when": "the user runs `hexa bench agentic`",
       "then": "the command refuses with an error that names `bun` and all five fixtures, no fixture runs, no model is invoked, and no pass rate is reported",
-      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s07_missing_bun_stops_bench",
-      "red": "a68c4e6"
+      "test": "hexa-cli/tests/adr_2611221646_spec_3.rs::s07_missing_bun_refuses_before_any_fixture",
+      "red": "64aa6f3"
     },
     {
       "id": "S08",
@@ -129,8 +130,8 @@
       "given": "selected fixtures A and B whose evidence starts with `cargo`, which is on PATH, and fixture C whose evidence starts with `pytest`, which is not on PATH",
       "when": "the user runs `hexa bench agentic`",
       "then": "the bench refuses, the refusal names `pytest` and fixture C but not A or B, and none of A, B or C runs",
-      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s09_one_missing_program_refuses_whole_run",
-      "red": "a68c4e6"
+      "test": "hexa-cli/tests/adr_2611221646_spec_3.rs::s09_one_missing_program_refuses_whole_run",
+      "red": "64aa6f3"
     },
     {
       "id": "S10",
@@ -153,8 +154,8 @@
       "given": "any set of selected fixtures and any PATH",
       "when": "the user runs `hexa bench agentic`",
       "then": "if the first program of any selected fixture's evidence command is not found on PATH, no fixture runs and the refusal lists each missing program with the fixtures that need it; otherwise the bench proceeds",
-      "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s11_bench_runs_nothing_unless_all_programs_resolve",
-      "red": "a68c4e6"
+      "test": "hexa-cli/tests/adr_2611221646_spec_3.rs::s11_runs_nothing_unless_every_program_resolves",
+      "red": "64aa6f3"
     },
     {
       "id": "S12",
