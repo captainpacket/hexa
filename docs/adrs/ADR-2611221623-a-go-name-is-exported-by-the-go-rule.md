@@ -1,6 +1,7 @@
 # ADR-2611221623: A Go name is exported by Go's rule, and every name a var spec declares is one
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-22 Accepted: Accepted in craigjohnson's session: he accepted the spec, chose the fix under his rule (no hexa core behaviour change except real bug fixes and new languages; architectural correctness first), and its sealed tests, red before the code, pass on main.
 **Date:** 2026-11-22
 **Drivers:** Building ADR-2611221609 (Go's grouped vars are exports) fixed two more defects in how `hexa analyze` reads Go exports. A property scenario of that ADR drew the name `Ä` and found hexa does not treat it as exported, and a scenario with `var C, D = 2, 3` found hexa records `C` and not `D`. Both were fixed, but ADR-2611221609 decides only grouped vars, and says an ungrouped var is "read as before". This ADR records the two fixes as decisions, so the code and the record agree.
 **Supersedes:** none. Amends what ADR-2611221609 §2 and ADR-2611221553 §3 say does not change.
