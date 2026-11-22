@@ -21,7 +21,7 @@ use super::domain::{
 };
 use super::frontend_checker;
 use super::layer_classifier::{adapters_from_project, LayerMap};
-use super::path_normalizer::{normalize_path, normalize_path_in, resolve_import_path, resolve_python_import, WorkspacePackages};
+use super::path_normalizer::{normalize_path, normalize_path_in, resolve_import_path, resolve_python_import, TsPaths, WorkspacePackages};
 use super::ports::{AnalysisError, AstPort, ArchAnalysisPort};
 
 /// Source file glob patterns for supported languages.
@@ -214,9 +214,20 @@ pub fn apply_rule_errors(result: &mut ArchAnalysisResult, rule_errors: usize) {
 
 /// One edge per target a file reaches. A module both imported and named
 /// inline is one crossing, and each violation costs ten points.
+///
+/// A TypeScript file has no inline module paths, and each import statement
+/// that names a file is its own edge: an alias import and a relative import
+/// of the same file are reported side by side (ADR-2611221645 §1), each with
+/// the specifier the reader will find in the source.
 fn one_edge_per_target(edges: Vec<ImportEdge>) -> Vec<ImportEdge> {
     let mut seen = HashSet::new();
-    edges.into_iter().filter(|e| seen.insert(e.to_file.clone())).collect()
+    edges
+        .into_iter()
+        .filter(|e| {
+            let spelled = (Language::from_path(&e.from_file) == Language::TypeScript).then(|| e.import_path.clone());
+            seen.insert((e.to_file.clone(), spelled))
+        })
+        .collect()
 }
 
 /// The boundary violations in one file, by exactly the rules the grade
@@ -322,6 +333,7 @@ pub(crate) fn discover_packages(root: &Path) -> WorkspacePackages {
     let project_ex_owned = project_excludes(root);
     let project_ex: Vec<&str> = project_ex_owned.iter().map(String::as_str).collect();
     let mut pkgs = WorkspacePackages::default();
+    pkgs.set_ts_paths(TsPaths::load(&|rel: &str| std::fs::read_to_string(root.join(rel)).ok()));
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let rel = dir.strip_prefix(root).unwrap_or(&dir).to_string_lossy().replace('\\', "/");
@@ -337,6 +349,10 @@ pub(crate) fn discover_packages(root: &Path) -> WorkspacePackages {
                 {
                     stack.push(p);
                 }
+                continue;
+            }
+            if name.ends_with(".ts") || name.ends_with(".tsx") {
+                pkgs.add_ts_file(&if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") });
                 continue;
             }
             let Ok(text) = std::fs::read_to_string(&p) else { continue };

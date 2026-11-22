@@ -294,6 +294,7 @@ pub async fn build(
 
     // ── Resolve import + reference edges (now that all files/entities are known).
     let crate_roots = crate_roots(root, &file_set);
+    let ts_paths = load_ts_paths(root);
     let id_label: HashMap<String, String> =
         graph.nodes.iter().map(|n| (n.id.clone(), n.label.clone())).collect();
     for (from_rel, raw_path, names, kind) in &pending_imports {
@@ -304,6 +305,9 @@ pub async fn build(
         let (resolved, also): (Option<String>, Vec<String>) = if is_python(from_rel) {
             let mut t = python_targets(from_rel, raw_path, names, &file_set).into_iter();
             (t.next(), t.collect())
+        } else if is_typescript(from_rel) && !raw_path.starts_with('.') && !ts_paths.is_empty() {
+            let aliased = resolve_ts_alias(&ts_paths, raw_path, &file_set).filter(|t| t != from_rel);
+            (aliased.or_else(|| resolve_import(from_rel, raw_path, &file_set, &crate_roots)), Vec::new())
         } else {
             (resolve_import(from_rel, raw_path, &file_set, &crate_roots), Vec::new())
         };
@@ -724,6 +728,10 @@ fn root_crate_name(root: &Path) -> Option<String> {
     }
 }
 
+fn is_typescript(rel: &str) -> bool {
+    [".ts", ".tsx", ".js", ".jsx"].iter().any(|e| rel.ends_with(e))
+}
+
 fn is_python(rel: &str) -> bool {
     rel.ends_with(".py") || rel.ends_with(".pyi")
 }
@@ -905,9 +913,15 @@ fn resolve_relative_ts(from_rel: &str, raw: &str, files: &HashSet<String>) -> Op
         .or_else(|| raw.strip_suffix(".jsx"))
         .unwrap_or(raw);
     let joined = normalize_join(&base_dir, raw_noext)?;
+    ts_file_in(&joined, files)
+}
 
+/// The file a TypeScript module path names, by the extensions and index
+/// files an import tries.
+fn ts_file_in(joined: &str, files: &HashSet<String>) -> Option<String> {
+    let joined = joined.strip_suffix(".js").or_else(|| joined.strip_suffix(".jsx")).unwrap_or(joined);
     let candidates = [
-        joined.clone(),
+        joined.to_string(),
         format!("{joined}.ts"),
         format!("{joined}.tsx"),
         format!("{joined}.js"),
@@ -917,6 +931,171 @@ fn resolve_relative_ts(from_rel: &str, raw: &str, files: &HashSet<String>) -> Op
         format!("{joined}/index.js"),
     ];
     candidates.into_iter().find(|c| files.contains(c))
+}
+
+// ── TypeScript path aliases (ADR-2611221645 §4) ──────────
+//
+// The same resolution `hexa-analysis` makes (`path_normalizer::TsPaths`), so
+// `graph consumers` counts the files that import through an alias. hexa-graph
+// does not depend on hexa-analysis, so the pure resolver is repeated here;
+// adr_2611221645_spec::s25 holds the two to the same edges.
+
+/// The root `tsconfig.json`'s `compilerOptions.paths`, `extends` followed,
+/// each target project-relative: (pattern, targets in order).
+fn load_ts_paths(root: &Path) -> Vec<(String, Vec<String>)> {
+    let read = |rel: &str| std::fs::read_to_string(root.join(rel)).ok();
+    let mut seen = Vec::new();
+    let (paths, base) = tsconfig_settings("tsconfig.json", &read, &mut seen);
+    let Some((map, decl_dir)) = paths else { return Vec::new() };
+    let base_dir = base.unwrap_or(decl_dir);
+    map.into_iter()
+        .map(|(pattern, targets)| {
+            let targets = targets.iter().filter(|t| !t.starts_with('/')).filter_map(|t| normalize_join(&base_dir, t)).collect();
+            (pattern, targets)
+        })
+        .collect()
+}
+
+type TsPathsMap = Vec<(String, Vec<String>)>;
+
+fn tsconfig_settings(
+    rel: &str,
+    read: &dyn Fn(&str) -> Option<String>,
+    seen: &mut Vec<String>,
+) -> (Option<(TsPathsMap, String)>, Option<String>) {
+    if seen.iter().any(|s| s == rel) || seen.len() > 32 {
+        return (None, None);
+    }
+    seen.push(rel.to_string());
+    let Some(text) = read(rel) else { return (None, None) };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&strip_jsonc(&text)) else { return (None, None) };
+    let dir = parent_dir(rel);
+    let (mut paths, mut base) = (None, None);
+    let extends: Vec<&str> = match v.get("extends") {
+        Some(serde_json::Value::String(s)) => vec![s.as_str()],
+        Some(serde_json::Value::Array(a)) => a.iter().filter_map(|x| x.as_str()).collect(),
+        _ => Vec::new(),
+    };
+    for ext in extends {
+        // A package-name extends is not followed (ADR-2611221645 §2).
+        if !(ext.starts_with("./") || ext.starts_with("../")) {
+            continue;
+        }
+        let Some(target) = normalize_join(&dir, ext) else { continue };
+        let target = if read(&target).is_none() && !target.ends_with(".json") { format!("{target}.json") } else { target };
+        let (p, b) = tsconfig_settings(&target, read, seen);
+        if p.is_some() {
+            paths = p;
+        }
+        if b.is_some() {
+            base = b;
+        }
+    }
+    let opts = v.get("compilerOptions");
+    if let Some(b) = opts.and_then(|o| o.get("baseUrl")).and_then(|b| b.as_str()) {
+        base = normalize_join(&dir, b);
+    }
+    if let Some(map) = opts.and_then(|o| o.get("paths")).and_then(|p| p.as_object()) {
+        let map = map
+            .iter()
+            .map(|(k, t)| (k.clone(), t.as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string)).collect()))
+            .collect();
+        paths = Some((map, dir));
+    }
+    (paths, base)
+}
+
+/// The project file a bare TypeScript specifier names through an alias: an
+/// exact pattern first, else the longest matching prefix; its targets in
+/// order, the first that names a file.
+fn resolve_ts_alias(paths: &[(String, Vec<String>)], spec: &str, files: &HashSet<String>) -> Option<String> {
+    let mut best: Option<(&Vec<String>, &str, usize)> = None;
+    for (pattern, targets) in paths {
+        match pattern.split_once('*') {
+            None => {
+                if pattern == spec {
+                    best = Some((targets, "", usize::MAX));
+                    break;
+                }
+            }
+            Some((pre, post)) => {
+                if post.contains('*') || spec.len() < pre.len() + post.len() {
+                    continue;
+                }
+                if spec.starts_with(pre) && spec.ends_with(post) && best.is_none_or(|b| pre.len() > b.2) {
+                    best = Some((targets, &spec[pre.len()..spec.len() - post.len()], pre.len()));
+                }
+            }
+        }
+    }
+    let (targets, capture, _) = best?;
+    targets.iter().find_map(|t| ts_file_in(&t.replacen('*', capture, 1), files))
+}
+
+/// `tsconfig.json` text as plain JSON: comments outside strings removed, a
+/// trailing comma before `}` or `]` dropped.
+fn strip_jsonc(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let skip_comment = |j: &mut usize| -> bool {
+        if chars.get(*j) == Some(&'/') && chars.get(*j + 1) == Some(&'/') {
+            while *j < chars.len() && chars[*j] != '\n' {
+                *j += 1;
+            }
+            true
+        } else if chars.get(*j) == Some(&'/') && chars.get(*j + 1) == Some(&'*') {
+            *j += 2;
+            while *j < chars.len() && !(chars[*j] == '*' && chars.get(*j + 1) == Some(&'/')) {
+                *j += 1;
+            }
+            *j += 2;
+            true
+        } else {
+            false
+        }
+    };
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '"' {
+            out.push(c);
+            i += 1;
+            while i < chars.len() {
+                out.push(chars[i]);
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    out.push(chars[i + 1]);
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+                if chars[i - 1] == '"' {
+                    break;
+                }
+            }
+            continue;
+        }
+        if skip_comment(&mut i) {
+            continue;
+        }
+        if c == ',' {
+            let mut j = i + 1;
+            loop {
+                while j < chars.len() && chars[j].is_whitespace() {
+                    j += 1;
+                }
+                if !skip_comment(&mut j) {
+                    break;
+                }
+            }
+            if matches!(chars.get(j), Some('}') | Some(']')) {
+                i += 1;
+                continue;
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
 }
 
 fn resolve_rust_mod(from_rel: &str, modname: &str, files: &HashSet<String>) -> Option<String> {

@@ -270,6 +270,10 @@ pub struct WorkspacePackages {
     /// (language, import name, project-relative dir, TS entry file).
     /// Longest name first, so `example.com/a/b` wins over `example.com/a`.
     entries: Vec<(Language, String, String, Option<String>)>,
+    /// The project's `tsconfig.json` aliases (ADR-2611221645).
+    ts_paths: TsPaths,
+    /// The project's TypeScript files, for the file an import names.
+    ts_files: HashSet<String>,
 }
 
 impl WorkspacePackages {
@@ -289,6 +293,28 @@ impl WorkspacePackages {
         self.push(Language::TypeScript, name.to_string(), dir, Some(entry.to_string()));
     }
 
+    /// The project's `tsconfig.json` aliases.
+    pub fn set_ts_paths(&mut self, paths: TsPaths) {
+        self.ts_paths = paths;
+    }
+
+    /// A TypeScript file of the project, which an import can name.
+    pub fn add_ts_file(&mut self, rel: &str) {
+        self.ts_files.insert(rel.to_string());
+    }
+
+    /// The project file a TypeScript import names: a relative import by the
+    /// extensions and index files it tries, a bare one through the project's
+    /// aliases (ADR-2611221645 §1). `None` when it names no project file.
+    fn resolve_ts(&self, from_file: &str, import_path: &str) -> Option<String> {
+        let exists = |c: &str| self.ts_files.contains(c);
+        if import_path.starts_with('.') {
+            let joined = join_posix(&[dirname_posix(from_file), import_path]);
+            return ts_file_named(&joined, &exists);
+        }
+        self.ts_paths.resolve(import_path, &exists)
+    }
+
     fn push(&mut self, lang: Language, name: String, dir: &str, entry: Option<String>) {
         let dir = dir.trim_matches('/').to_string();
         self.entries.push((lang, name, dir, entry));
@@ -300,6 +326,11 @@ impl WorkspacePackages {
     /// resolution.
     pub fn resolve(&self, from_file: &str, import_path: &str) -> Option<String> {
         let lang = Language::from_path(from_file);
+        if lang == Language::TypeScript {
+            if let Some(f) = self.resolve_ts(from_file, import_path) {
+                return Some(f);
+            }
+        }
         let join = |dir: &str, rest: &str| {
             if dir.is_empty() { rest.to_string() } else { format!("{dir}/{rest}") }
         };
@@ -369,6 +400,221 @@ fn strip_rust_item_name<'a>(segments: &'a [&'a str]) -> Vec<&'a str> {
         }
     }
     segments.to_vec()
+}
+
+// ── TypeScript path aliases (ADR-2611221645) ─────────────
+
+/// The `compilerOptions.paths` of a project's root `tsconfig.json`, with
+/// `extends` followed, each target already made project-relative (against
+/// `baseUrl` when one is set, else the directory of the `tsconfig.json`
+/// that declares `paths`).
+///
+/// Without it, `@/lib/http` stayed the literal `@/lib/http.ts`: no project
+/// file, no layer, never a violation — and a project that imports through
+/// an alias was graded on part of its import graph.
+#[derive(Debug, Clone, Default)]
+pub struct TsPaths {
+    /// (pattern as written, project-relative targets in order).
+    patterns: Vec<(String, Vec<String>)>,
+}
+
+impl TsPaths {
+    /// Load the alias map from `tsconfig.json` at the project root. `read`
+    /// returns the text of a project-relative file, or `None`. A relative
+    /// `extends` is followed (ADR-2611221645 §2); one that names a package
+    /// is not.
+    pub fn load(read: &dyn Fn(&str) -> Option<String>) -> Self {
+        let mut seen = Vec::new();
+        let (paths, base) = tsconfig_settings("tsconfig.json", read, &mut seen);
+        let Some((map, decl_dir)) = paths else { return Self::default() };
+        let base_dir = base.unwrap_or(decl_dir);
+        let patterns = map
+            .into_iter()
+            .map(|(pattern, targets)| {
+                let targets = targets.iter().filter(|t| !t.starts_with('/')).map(|t| join_posix(&[&base_dir, t])).collect();
+                (pattern, targets)
+            })
+            .collect();
+        Self { patterns }
+    }
+
+    /// True when the project declares no alias.
+    pub fn is_empty(&self) -> bool {
+        self.patterns.is_empty()
+    }
+
+    /// The project file `spec` names through an alias: the pattern that
+    /// matches it (an exact pattern first, else the longest prefix), each
+    /// target tried in order, the first that names a file by `exists`.
+    /// `None` when no pattern matches or no target names a file
+    /// (ADR-2611221645 §1, §3).
+    pub fn resolve(&self, spec: &str, exists: &dyn Fn(&str) -> bool) -> Option<String> {
+        let mut best: Option<(&Vec<String>, &str, usize)> = None;
+        for (pattern, targets) in &self.patterns {
+            match pattern.split_once('*') {
+                None => {
+                    if pattern == spec {
+                        best = Some((targets, "", usize::MAX));
+                        break;
+                    }
+                }
+                Some((pre, post)) => {
+                    if post.contains('*') || spec.len() < pre.len() + post.len() {
+                        continue;
+                    }
+                    if spec.starts_with(pre) && spec.ends_with(post) && best.is_none_or(|b| pre.len() > b.2) {
+                        best = Some((targets, &spec[pre.len()..spec.len() - post.len()], pre.len()));
+                    }
+                }
+            }
+        }
+        let (targets, capture, _) = best?;
+        targets.iter().find_map(|t| ts_file_named(&t.replacen('*', capture, 1), exists))
+    }
+}
+
+/// The file a TypeScript module path names, by the extensions and index files
+/// an import tries: as written, `.js`/`.jsx` read as `.ts`/`.tsx`, then
+/// `.ts`, `.tsx`, `/index.ts`, `/index.tsx`.
+fn ts_file_named(path: &str, exists: &dyn Fn(&str) -> bool) -> Option<String> {
+    let mut candidates = vec![path.to_string()];
+    if let Some(stem) = path.strip_suffix(".js") {
+        candidates.extend([format!("{stem}.ts"), format!("{stem}.tsx")]);
+    } else if let Some(stem) = path.strip_suffix(".jsx") {
+        candidates.push(format!("{stem}.tsx"));
+    }
+    candidates.extend([
+        format!("{path}.ts"),
+        format!("{path}.tsx"),
+        format!("{path}/index.ts"),
+        format!("{path}/index.tsx"),
+    ]);
+    candidates.into_iter().find(|c| exists(c))
+}
+
+type PathsMap = Vec<(String, Vec<String>)>;
+
+/// The `paths` (with the directory of the file that declares them) and the
+/// project-relative `baseUrl` that `rel` settles on after its `extends`.
+fn tsconfig_settings(
+    rel: &str,
+    read: &dyn Fn(&str) -> Option<String>,
+    seen: &mut Vec<String>,
+) -> (Option<(PathsMap, String)>, Option<String>) {
+    if seen.iter().any(|s| s == rel) || seen.len() > 32 {
+        return (None, None);
+    }
+    seen.push(rel.to_string());
+    let Some(text) = read(rel) else { return (None, None) };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&strip_jsonc(&text)) else { return (None, None) };
+    let dir = dirname_posix(rel).to_string();
+    let (mut paths, mut base) = (None, None);
+    let extends: Vec<&str> = match v.get("extends") {
+        Some(serde_json::Value::String(s)) => vec![s.as_str()],
+        Some(serde_json::Value::Array(a)) => a.iter().filter_map(|x| x.as_str()).collect(),
+        _ => Vec::new(),
+    };
+    for ext in extends {
+        if !(ext.starts_with("./") || ext.starts_with("../")) {
+            continue;
+        }
+        let target = join_posix(&[&dir, ext]);
+        let target = if read(&target).is_none() && !target.ends_with(".json") { format!("{target}.json") } else { target };
+        let (p, b) = tsconfig_settings(&target, read, seen);
+        if p.is_some() {
+            paths = p;
+        }
+        if b.is_some() {
+            base = b;
+        }
+    }
+    let opts = v.get("compilerOptions");
+    if let Some(b) = opts.and_then(|o| o.get("baseUrl")).and_then(|b| b.as_str()) {
+        base = Some(join_posix(&[&dir, b]));
+    }
+    if let Some(map) = opts.and_then(|o| o.get("paths")).and_then(|p| p.as_object()) {
+        let map = map
+            .iter()
+            .map(|(k, t)| {
+                let targets = t.as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string)).collect();
+                (k.clone(), targets)
+            })
+            .collect();
+        paths = Some((map, dir));
+    }
+    (paths, base)
+}
+
+/// JSON with comments and trailing commas (as `tsconfig.json` allows) made
+/// plain JSON: `//` and `/* */` comments outside strings removed, and a comma
+/// before a closing `}` or `]` dropped.
+pub fn strip_jsonc(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '"' {
+            out.push(c);
+            i += 1;
+            while i < chars.len() {
+                out.push(chars[i]);
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    out.push(chars[i + 1]);
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+                if chars[i - 1] == '"' {
+                    break;
+                }
+            }
+            continue;
+        }
+        if c == '/' && chars.get(i + 1) == Some(&'/') {
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if c == '/' && chars.get(i + 1) == Some(&'*') {
+            i += 2;
+            while i < chars.len() && !(chars[i] == '*' && chars.get(i + 1) == Some(&'/')) {
+                i += 1;
+            }
+            i += 2;
+            continue;
+        }
+        if c == ',' {
+            let mut j = i + 1;
+            // Skip whitespace and comments to see what the comma precedes.
+            loop {
+                while j < chars.len() && chars[j].is_whitespace() {
+                    j += 1;
+                }
+                if chars.get(j) == Some(&'/') && chars.get(j + 1) == Some(&'/') {
+                    while j < chars.len() && chars[j] != '\n' {
+                        j += 1;
+                    }
+                } else if chars.get(j) == Some(&'/') && chars.get(j + 1) == Some(&'*') {
+                    j += 2;
+                    while j < chars.len() && !(chars[j] == '*' && chars.get(j + 1) == Some(&'/')) {
+                        j += 1;
+                    }
+                    j += 2;
+                } else {
+                    break;
+                }
+            }
+            if matches!(chars.get(j), Some('}') | Some(']')) {
+                i += 1;
+                continue;
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
 }
 
 // ── Tests ────────────────────────────────────────────────
@@ -541,4 +787,38 @@ mod tests {
         assert_eq!(normalize_path("src/foo.js"), "src/foo.ts");
     }
 
+    // TypeScript path aliases (ADR-2611221645)
+
+    fn ts_paths(files: &[(&str, &str)]) -> TsPaths {
+        let files: Vec<(String, String)> = files.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
+        TsPaths::load(&|rel: &str| files.iter().find(|(p, _)| p == rel).map(|(_, t)| t.clone()))
+    }
+
+    #[test]
+    fn a_tsconfig_with_comments_and_trailing_commas_is_read() {
+        let p = ts_paths(&[(
+            "tsconfig.json",
+            "{\n // the alias\n \"compilerOptions\": { /* \"x\" */ \"paths\": { \"@/*\": [\"./src/*\",], }, },\n \"url\": \"http://a//b\",\n}",
+        )]);
+        let files: HashSet<String> = ["src/lib/http.ts".to_string()].into();
+        assert_eq!(p.resolve("@/lib/http", &|c| files.contains(c)).as_deref(), Some("src/lib/http.ts"));
+    }
+
+    #[test]
+    fn a_scoped_package_that_resembles_an_alias_is_not_rewritten() {
+        let p = ts_paths(&[("tsconfig.json", r#"{"compilerOptions": {"paths": {"@/*": ["./src/*"]}}}"#)]);
+        let files: HashSet<String> = ["src/types/node.ts".to_string(), "srctypes/node.ts".to_string()].into();
+        assert_eq!(p.resolve("@types/node", &|c| files.contains(c)), None);
+        assert_eq!(p.resolve("react", &|c| files.contains(c)), None);
+    }
+
+    #[test]
+    fn the_longest_matching_prefix_wins() {
+        let p = ts_paths(&[(
+            "tsconfig.json",
+            r#"{"compilerOptions": {"paths": {"@/*": ["./src/*"], "@/lib/*": ["./vendor/*"]}}}"#,
+        )]);
+        let files: HashSet<String> = ["src/lib/http.ts".to_string(), "vendor/http.ts".to_string()].into();
+        assert_eq!(p.resolve("@/lib/http", &|c| files.contains(c)).as_deref(), Some("vendor/http.ts"));
+    }
 }
