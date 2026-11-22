@@ -1,6 +1,7 @@
 # ADR-2611221645: TypeScript path aliases are import edges
 
-**Status:** Accepted
+**Status:** Completed
+> 2026-11-22 Completed: landed on main at f249f06; gate `cargo test -p hexa-cli --test adr_2611221645_spec --test adr_2611221645_spec_2` passed (hexa loop stage done)
 > 2026-11-22 Accepted: Accepted in craigjohnson's session: he accepted the spec (re-accepted after §5 and S26), chose the fix under his rule (real bug fixes only; architectural correctness first), and its sealed tests, red before the code, pass on main
 **Date:** 2026-11-22
 **Drivers:** a TypeScript user's portal (React and TypeScript, 1112 graded files) imports almost everything through `@/…`, which its `tsconfig.json` maps to `./src/*`. hexa graded it F with 178 violations while the project's own alias-resolving layer test finds 508 file-to-file layer violations. A reproducer built from three real portal edges and the portal's own layer map (`a local fixture, ts-path-aliases-portal,`, commit b046c9f) has hexa report 2 violations, both from relative imports, where 5 are real. The grade is computed from part of the import graph. The owner's rule: architectural correctness first, even if a grade changes.
