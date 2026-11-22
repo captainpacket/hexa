@@ -26,7 +26,7 @@
       "when": "extract_exports is called on it with Language::Go",
       "then": "the result contains an ExportDeclaration with file `p.go`, name `Äpfel`, line 3 and kind Function",
       "test": "hexa-analysis/tests/adr_2611221623_spec_2.rs::part_1::s01_function_with_non_ascii_capital_is_export",
-      "red": "9bec090"
+      "red": "92ceac7"
     },
     {
       "id": "S02",
@@ -39,7 +39,7 @@
       "when": "extract_exports is called on it with Language::Go",
       "then": "the result contains `Ωmega` with kind Type, `Ärger` with kind Method, and `Ñame` and `Øre` each with kind Value, each at the line where it is declared",
       "test": "hexa-analysis/tests/adr_2611221623_spec_2.rs::part_1::s02_unicode_rule_covers_types_methods_consts_vars",
-      "red": "9bec090"
+      "red": "92ceac7"
     },
     {
       "id": "S03",
@@ -85,7 +85,7 @@
       "when": "extract_exports is called on it with Language::Go",
       "then": "an ExportDeclaration named `N` is present if and only if the first character of `N` is an upper-case letter under Unicode (Rust `char::is_uppercase`), regardless of whether that character is ASCII",
       "test": "hexa-analysis/tests/adr_2611221623_spec_2.rs::part_1::s06_exported_iff_first_char_unicode_uppercase",
-      "red": "9bec090"
+      "red": "92ceac7"
     },
     {
       "id": "S07",
@@ -98,7 +98,7 @@
       "when": "extract_exports is called on it with Language::Go",
       "then": "the result contains an ExportDeclaration named `A` and one named `B`, both with file `p.go`, line 3 and kind Value",
       "test": "hexa-analysis/tests/adr_2611221623_spec_2.rs::part_1::s07_ungrouped_var_spec_exports_both_names",
-      "red": "9bec090"
+      "red": "92ceac7"
     },
     {
       "id": "S08",
@@ -111,7 +111,7 @@
       "when": "extract_exports is called on it with Language::Go",
       "then": "the result contains `C` and `D`, each with line 4 and kind Value",
       "test": "hexa-analysis/tests/adr_2611221623_spec_2.rs::part_1::s08_grouped_multi_name_var_spec_exports_each",
-      "red": "9bec090"
+      "red": "92ceac7"
     },
     {
       "id": "S09",
@@ -124,7 +124,7 @@
       "when": "extract_exports is called on it with Language::Go",
       "then": "the result contains `X`, `Y` and `Z`, each at that line with kind Value",
       "test": "hexa-analysis/tests/adr_2611221623_spec_2.rs::part_1::s09_typed_multi_name_var_without_initialiser",
-      "red": "9bec090"
+      "red": "92ceac7"
     },
     {
       "id": "S10",
@@ -137,7 +137,7 @@
       "when": "the project is analysed for dead exports",
       "then": "`B` is reported as a dead export at the spec's line and `A` is not",
       "test": "hexa-analysis/tests/adr_2611221623_spec_2.rs::part_1::s10_second_name_of_var_spec_can_be_dead",
-      "red": "9bec090"
+      "red": "92ceac7"
     },
     {
       "id": "S11",
@@ -150,7 +150,7 @@
       "when": "extract_exports is called on it with Language::Go",
       "then": "the result is not only `A`: exactly one ExportDeclaration named `B` is present, and no name of the spec is recorded twice",
       "test": "hexa-analysis/tests/adr_2611221623_spec_2.rs::part_1::s11_var_spec_not_reduced_to_first_name",
-      "red": "9bec090"
+      "red": "92ceac7"
     },
     {
       "id": "S12",
@@ -175,7 +175,7 @@
       "when": "extract_exports is called on it with Language::Go",
       "then": "neither `A` nor `B` has a kind other than Value, and neither has a line other than 3",
       "test": "hexa-analysis/tests/adr_2611221623_spec_2.rs::part_1::s13_var_spec_names_have_value_kind_and_spec_line",
-      "red": "9bec090"
+      "red": "92ceac7"
     },
     {
       "id": "S14",
@@ -188,7 +188,7 @@
       "when": "extract_exports is called on the file with Language::Go",
       "then": "for each Ni whose first character is a Unicode upper-case letter there is exactly one ExportDeclaration named Ni with line L and kind Value, and no ExportDeclaration is produced for any Ni that is not exported",
       "test": "hexa-analysis/tests/adr_2611221623_spec_2.rs::part_1::s14_every_exported_var_spec_name_is_own_value_export",
-      "red": "9bec090"
+      "red": "92ceac7"
     },
     {
       "id": "S15",
@@ -223,7 +223,7 @@
       "when": "extract_exports is called on it with Language::Go",
       "then": "`V`, `W` and `C` are present and `D` is absent",
       "test": "hexa-analysis/tests/adr_2611221623_spec_2.rs::part_2::s17_var_rule_does_not_spill_over_to_consts",
-      "red": "9bec090"
+      "red": "92ceac7"
     },
     {
       "id": "S18",
