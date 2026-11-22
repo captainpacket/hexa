@@ -178,12 +178,14 @@ fn is_read_only_agent(kind: &str) -> bool {
     READ_ONLY_AGENTS.iter().any(|t| kind.eq_ignore_ascii_case(t))
 }
 
-/// Tools that write: a definition granting any of them is not read-only.
-const WRITING_TOOLS: &[&str] = &["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"];
+/// Tools that only read (ADR-2611221646 §5). A definition is read-only when
+/// its `tools` names nothing else: `*`, any other tool, or one hexa does not
+/// know is assumed to write.
+const READ_TOOLS: &[&str] = &["Read", "Grep", "Glob", "LS", "NotebookRead", "WebFetch", "WebSearch"];
 
 /// Whether a subagent type is read-only: a fixed read-only type, or one whose
 /// definition (`.claude/agents/<type>.md` in the project, else in the user's
-/// home) lists `tools` and none of them writes (ADR-2611221646 §5).
+/// home) lists `tools` and every one of them only reads (ADR-2611221646 §5).
 fn agent_is_read_only(kind: &str, project_dir: &Path) -> bool {
     if is_read_only_agent(kind) {
         return true;
@@ -207,27 +209,75 @@ fn definition_grants_only_reads(kind: &str, project_dir: &Path, home: Option<&Pa
         }
     };
     let Ok(text) = std::fs::read_to_string(&def) else { return false };
-    match definition_tools(&text) {
-        Some(tools) => !tools.iter().any(|t| {
-            let name = t.split('(').next().unwrap_or("").trim();
-            WRITING_TOOLS.contains(&name)
-        }),
+    match definition_tools(&text, kind) {
+        Some(tools) => tools.iter().all(|t| is_read_tool(t)),
         None => false,
     }
 }
 
-/// The `tools` list in a definition's YAML frontmatter: `None` when there is
-/// no frontmatter or no (non-empty) `tools` entry.
-fn definition_tools(text: &str) -> Option<Vec<String>> {
+/// Whether one `tools` entry, such as `Read` or `WebFetch(domain:x.com)`,
+/// names a tool that only reads. Case does not matter; `*` anywhere is
+/// every tool, so never read-only.
+fn is_read_tool(entry: &str) -> bool {
+    if entry.contains('*') {
+        return false;
+    }
+    let name = entry.split('(').next().unwrap_or("").trim();
+    READ_TOOLS.iter().any(|t| name.eq_ignore_ascii_case(t))
+}
+
+/// Split a `tools` string on commas and whitespace outside parentheses:
+/// `Read, Grep`, `Read Grep` and `WebFetch(domain: x.com) Read` each name
+/// their tools.
+fn split_tools(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut depth = 0usize;
+    for c in s.chars() {
+        match c {
+            '(' => {
+                depth += 1;
+                cur.push(c);
+            }
+            ')' => {
+                depth = depth.saturating_sub(1);
+                cur.push(c);
+            }
+            c if depth == 0 && (c == ',' || c.is_whitespace()) => {
+                out.push(std::mem::take(&mut cur));
+            }
+            c => cur.push(c),
+        }
+    }
+    out.push(cur);
+    out.into_iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect()
+}
+
+/// The `tools` list in a definition's YAML frontmatter. `None` — a
+/// definition hexa cannot read, treated as none — when there is no
+/// frontmatter, no (non-empty) `tools` entry, a list item that is not a
+/// string, or a `name:` other than the requested subagent type.
+fn definition_tools(text: &str, kind: &str) -> Option<Vec<String>> {
     let mut lines = text.lines();
     if lines.next()?.trim() != "---" {
         return None;
     }
     let front: Vec<&str> = lines.take_while(|l| l.trim() != "---").collect();
     let yaml: serde_yaml::Value = serde_yaml::from_str(&front.join("\n")).ok()?;
+    if let Some(name) = yaml.get("name") {
+        if name.as_str().map(str::trim) != Some(kind) {
+            return None;
+        }
+    }
     let tools: Vec<String> = match yaml.get("tools")? {
-        serde_yaml::Value::String(s) => s.split(',').map(|t| t.trim().to_string()).collect(),
-        serde_yaml::Value::Sequence(seq) => seq.iter().filter_map(|v| v.as_str().map(|s| s.trim().to_string())).collect(),
+        serde_yaml::Value::String(s) => split_tools(s),
+        serde_yaml::Value::Sequence(seq) => {
+            let mut all = Vec::new();
+            for v in seq {
+                all.extend(split_tools(v.as_str()?));
+            }
+            all
+        }
         _ => return None,
     };
     let tools: Vec<String> = tools.into_iter().filter(|t| !t.is_empty()).collect();
