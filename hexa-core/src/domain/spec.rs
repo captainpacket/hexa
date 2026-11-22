@@ -635,10 +635,29 @@ pub fn rebind(previous: &Spec, accepted: &Spec) -> Spec {
 /// comments and attributes (§2).
 /// The names of the `#[test]` functions in `source`, read as code: text in
 /// a string or a comment is not a test.
+/// Every item in `from..to`, and in the body of every inline `mod` among
+/// them, at any depth: a generation batched into `mod part_N { … }` puts its
+/// tests one module down.
+fn items_deep(src: &str, mask: &[bool], from: usize, to: usize) -> Vec<Item> {
+    let mut out = Vec::new();
+    for it in items(src, mask, from, to) {
+        if kind_of(&it.header) == "mod" {
+            if let Some((open, close)) = it.body {
+                out.extend(items_deep(src, mask, open + 1, close.saturating_sub(1)));
+            }
+        }
+        out.push(it);
+    }
+    out
+}
+
 pub fn test_fns(source: &str) -> Vec<String> {
     let mask = code_mask(source);
-    items(source, &mask, 0, source.len())
+    let mut found: Vec<(usize, Item)> = items_deep(source, &mask, 0, source.len()).into_iter().map(|it| (it.span.0, it)).collect();
+    found.sort_by_key(|(at, _)| *at);
+    found
         .into_iter()
+        .map(|(_, it)| it)
         .filter(|it| {
             kind_of(&it.header) == "fn"
                 && it.lead.iter().any(|a| {
@@ -659,7 +678,7 @@ pub fn without_tests(source: &str, names: &[String]) -> String {
     }
     let mask = code_mask(source);
     let mut cut: Vec<(usize, usize)> = Vec::new();
-    for it in items(source, &mask, 0, source.len()) {
+    for it in items_deep(source, &mask, 0, source.len()) {
         let is_test = it.lead.iter().any(|a| {
             let c: String = a.chars().filter(|c| !c.is_whitespace()).collect();
             c == "#[test]" || (c.starts_with("#[") && c.ends_with("::test]"))
@@ -675,6 +694,7 @@ pub fn without_tests(source: &str, names: &[String]) -> String {
             cut.push((it.span.0, end));
         }
     }
+    cut.sort();
     let mut out = String::with_capacity(source.len());
     let mut at = 0;
     for (a, b) in cut {
@@ -688,6 +708,21 @@ pub fn without_tests(source: &str, names: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A generation batched into `mod part_N { … }` blocks puts its tests one
+    /// module down. A test that passed before the code is set aside as a guard
+    /// (ADR-2611161600 §3), which must reach it there: walking only the top
+    /// level left it in the file, and the whole generation was refused.
+    #[test]
+    fn tests_inside_a_module_are_found_and_set_aside() {
+        let src = "mod part_1 {\n    use super::*;\n\n    #[test]\n    fn s01_red() {\n        assert!(false);\n    }\n\n    #[test]\n    fn s02_green() {\n        assert!(true);\n    }\n}\n\nmod part_2 {\n    #[test]\n    fn s03_red() {}\n}\n";
+        let found = test_fns(src);
+        assert_eq!(found, ["s01_red", "s02_green", "s03_red"], "every test in every module");
+        let kept = without_tests(src, &["s02_green".to_string()]);
+        assert!(!kept.contains("fn s02_green("), "the named test inside part_1 is cut: {kept}");
+        assert!(kept.contains("fn s01_red(") && kept.contains("fn s03_red("), "the others stay: {kept}");
+        assert!(kept.contains("mod part_1 {") && kept.contains("mod part_2 {"), "the modules stay: {kept}");
+    }
 
     fn sc(id: &str, d: &[&str], kind: Kind) -> Scenario {
         Scenario {
