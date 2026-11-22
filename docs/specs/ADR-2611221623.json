@@ -190,5 +190,16 @@
       "test": "hexa-analysis/tests/adr_2611221623_spec_2.rs::part_1::s14_every_exported_var_spec_name_is_own_value_export",
       "red": "9bec090"
     }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-22T17:36:06.352712681+00:00",
+      "base_commit": "625361582d4e0d73854f01b2d357993d472b671c",
+      "by": "Claude (agent, in craigjohnson's session; for review)",
+      "file": "hexa-analysis/tests/adr_2611221623_spec_2.rs",
+      "from": "f7bb772af27904263cce0d7fa60b11023c22e69c310b3cee1b33462d681f530c",
+      "reason": "S17 retired with ADR-2611221623 decision 3, superseded by ADR-2611221643 §1 (both accepted by craigjohnson; ADR-2611221623 re-accepted with S15-S18 removed). The S17 test asserted a const spec's second name is not an export, the opposite of ADR-2611221643. It leaves the file; no other test or assertion changes.",
+      "to": "24098be104994578c64750b8e68364206370b83df09536bfa9669aa730cf416e"
+    }
   ]
 }
