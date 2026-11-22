@@ -1,6 +1,7 @@
 # ADR-2611220204: A session can wait without being sent back
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-22 Accepted: Accepted by craigjohnson in session (he approved the decision, accepted its spec, chose the fixture amendments and the untracked-file rule, and chose to land it): 30 sealed scenarios red at 5a267c1 pass at fb703e0; three code reviews' findings fixed; hexa A+ 100/100.
 **Date:** 2026-11-22
 **Drivers:** On 2026-11-21 one hexa session was sent back by the Stop hook more than forty times while it waited, correctly, on a 30-minute test run, two code reviews and the owner's approval. A second session (a Python SDK) reported the same loop on a branch whose landing is the owner's call, and that the hook told it to run `hexa dev worktree merge <branch> --force`. The same session found `.hexa/stop-blocks.json` left untracked by `hexa init`.
 **Supersedes:** none. Amends ADR-2611161800 §5 (the Stop hook's bound) and the `unlanded` item of §1.
