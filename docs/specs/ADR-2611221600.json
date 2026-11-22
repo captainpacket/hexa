@@ -3,18 +3,22 @@
   "feature": "agent_orientation",
   "description": "Every hexa project provides agent orientation via AGENTS.md, CLAUDE.md, roles, skills, and module READMEs.",
   "universal": [
-    "\u00a71",
-    "\u00a72",
-    "\u00a73",
-    "\u00a74",
-    "\u00a75",
-    "\u00a76"
+    "§1",
+    "§2",
+    "§3",
+    "§4",
+    "§5",
+    "§6"
   ],
+  "accepted": {
+    "by": "gary (standing instruction: always accept the ADRs and specs; the owner asked for this work on 2026-11-22; recorded by the implementing agent)",
+    "sha256": "c9737b426e8b8168bd080323bfba23f91a0194fe7c6bdf2b4ae6ea7170ddedf5"
+  },
   "specs": [
     {
       "id": "S01",
       "decision": [
-        "\u00a71"
+        "§1"
       ],
       "kind": "example",
       "description": "hexa init writes AGENTS.md with the managed section.",
@@ -25,7 +29,7 @@
     {
       "id": "S02",
       "decision": [
-        "\u00a71"
+        "§1"
       ],
       "kind": "negative",
       "description": "An AGENTS.md without markers keeps its text and gets the section appended",
@@ -36,7 +40,7 @@
     {
       "id": "S03",
       "decision": [
-        "\u00a72"
+        "§2"
       ],
       "kind": "example",
       "description": "CLAUDE.md imports AGENTS.md after refresh.",
@@ -47,7 +51,7 @@
     {
       "id": "S04",
       "decision": [
-        "\u00a72"
+        "§2"
       ],
       "kind": "negative",
       "description": "A CLAUDE.md with no hexa section is never appended to",
@@ -58,7 +62,7 @@
     {
       "id": "S05",
       "decision": [
-        "\u00a73"
+        "§3"
       ],
       "kind": "example",
       "description": "refresh replaces only the managed section.",
@@ -69,7 +73,7 @@
     {
       "id": "S06",
       "decision": [
-        "\u00a73"
+        "§3"
       ],
       "kind": "negative",
       "description": "refresh refuses files with end marker before start marker.",
@@ -80,7 +84,7 @@
     {
       "id": "S07",
       "decision": [
-        "\u00a74"
+        "§4"
       ],
       "kind": "example",
       "description": "hexa init installs the lead role, builder role, and parallel-agents skill.",
@@ -91,7 +95,7 @@
     {
       "id": "S08",
       "decision": [
-        "\u00a74"
+        "§4"
       ],
       "kind": "negative",
       "description": "skill sync restores a deleted role and leaves an edited one alone",
@@ -102,7 +106,7 @@
     {
       "id": "S09",
       "decision": [
-        "\u00a75"
+        "§5"
       ],
       "kind": "example",
       "description": "init --scaffold writes module READMEs.",
@@ -113,7 +117,7 @@
     {
       "id": "S10",
       "decision": [
-        "\u00a75"
+        "§5"
       ],
       "kind": "negative",
       "description": "docs check flags a module without a README, and docs readmes writes it back",
@@ -124,7 +128,7 @@
     {
       "id": "S11",
       "decision": [
-        "\u00a76"
+        "§6"
       ],
       "kind": "example",
       "description": "doctor reports failing checks with fix commands.",
@@ -135,7 +139,7 @@
     {
       "id": "S12",
       "decision": [
-        "\u00a76"
+        "§6"
       ],
       "kind": "negative",
       "description": "finish lists failing orientation checks, only in an initialised project",
@@ -146,7 +150,7 @@
     {
       "id": "S13",
       "decision": [
-        "\u00a71"
+        "§1"
       ],
       "kind": "property",
       "description": "AGENTS.md's managed section is always wrapped in the correct markers.",
@@ -157,7 +161,7 @@
     {
       "id": "S14",
       "decision": [
-        "\u00a72"
+        "§2"
       ],
       "kind": "property",
       "description": "imports_agents_md returns true only for the exact import line.",
@@ -168,7 +172,7 @@
     {
       "id": "S15",
       "decision": [
-        "\u00a75"
+        "§5"
       ],
       "kind": "property",
       "description": "module_readme always includes the four headings.",
@@ -179,7 +183,7 @@
     {
       "id": "S16",
       "decision": [
-        "\u00a76"
+        "§6"
       ],
       "kind": "property",
       "description": "graph_state returns Fresh only for the exact 'fresh' state.",
@@ -190,7 +194,7 @@
     {
       "id": "S17",
       "decision": [
-        "\u00a73"
+        "§3"
       ],
       "kind": "property",
       "description": "replace_managed changes only the managed bytes and is idempotent",
@@ -201,7 +205,7 @@
     {
       "id": "S18",
       "decision": [
-        "\u00a74"
+        "§4"
       ],
       "kind": "property",
       "description": "Every shipped role and the skill are project-neutral",
