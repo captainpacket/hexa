@@ -4,7 +4,7 @@
   "description": "The code graph is always built and fresh, and hexa do gate runs where the tests run",
   "accepted": {
     "by": "gary (standing instruction: always accept the ADRs and specs; recorded by the implementing agent, builder B, 2026-11-22)",
-    "sha256": "7f14c4e6de4c0cba849f41e7f233d9dfd2bbda29662de640311ed52973195396"
+    "sha256": "89b516310876d82da426f115dbb61cb2f6de1d22c42afa871a43eca100a3997a"
   },
   "specs": [
     {
@@ -148,8 +148,7 @@
       "description": "With no graph, or for a file the graph does not hold, the edit hook prints no context and does not block",
       "given": "a hexa project with no graph; then the same project with a built graph and a new file `src/new.rs` the graph does not hold",
       "when": "`hexa hook pre-edit` runs for an edit to `src/a.rs` with no graph, then for `src/new.rs` and `src/b.rs` with the graph",
-      "then": "it exits 0 and prints no graph line with no graph and for `src/new.rs`; the control, `src/b.rs`, does get its context",
-      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s12_no_graph_means_no_context"
+      "then": "it exits 0 and prints no graph line with no graph and for `src/new.rs`; the control, `src/b.rs`, does get its context"
     },
     {
       "id": "S13",
@@ -196,8 +195,7 @@
       "description": "An unrecorded edit to a sealed test is still refused",
       "given": "the sealed test edited with no amendment recorded; then an amendment recorded for that content and the file edited again",
       "when": "`hexa do gate --local --files tests/t.sh <the spec record> -e 'bash tests/t.sh'` runs after each",
-      "then": "both runs exit non-zero naming the sealed file and commit nothing; the control, the file put back to the recorded content, passes",
-      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s16_an_unamended_sealed_test_is_refused"
+      "then": "both runs exit non-zero naming the sealed file and commit nothing; the control, the file put back to the recorded content, passes"
     },
     {
       "id": "S17",
@@ -220,8 +218,7 @@
       "description": "Without test.remote the refusal does not mention a remote runner",
       "given": "the same project without `test.remote`",
       "when": "`hexa hook pre-bash` sees `git commit -m x`",
-      "then": "it refuses naming `hexa do gate`, and says nothing of a remote runner; the control, the same project with `test.remote` set, does",
-      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s18_no_remote_no_remote_wording"
+      "then": "it refuses naming `hexa do gate`, and says nothing of a remote runner; the control, the same project with `test.remote` set, does"
     }
   ]
 }
