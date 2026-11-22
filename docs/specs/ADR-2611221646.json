@@ -15,7 +15,7 @@
   },
   "sealed": {
     "hexa-cli/tests/adr_2611221646_spec_2.rs": "d3d7fc624aa1b29aa7c06bb1005286703504386520d4dc9e143b7c3018f7af26",
-    "hexa-cli/tests/adr_2611221646_spec_3.rs": "f105418a60467e76dcaa8aebdb36bc27e1021dbef59a9201056f62b77327e249"
+    "hexa-cli/tests/adr_2611221646_spec_3.rs": "f26a1375222cd4d7049f0b6d901762eb910f96659eb59f8737d2aa7bf242f6fc"
   },
   "specs": [
     {
@@ -331,6 +331,17 @@
       "given": "any subagent type not in the fixed read-only list, launched without `isolation: \"worktree\"`, and any definition state: absent, no `tools` list, or any `tools` list",
       "when": "the pre-agent hook evaluates it",
       "then": "it is allowed as read-only if and only if the governing definition (the project's, else the home's) has a `tools` list every entry of which is one of Read, Grep, Glob, LS, NotebookRead, WebFetch or WebSearch; otherwise the hook blocks or warns exactly as it did before this ADR"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-22T20:33:47.205128284+00:00",
+      "base_commit": "7e997fd8738760ac4ac53c8c018a4c3471e0ea16",
+      "by": "Claude (agent, in craigjohnson's session; for review)",
+      "file": "hexa-cli/tests/adr_2611221646_spec_3.rs",
+      "from": "f105418a60467e76dcaa8aebdb36bc27e1021dbef59a9201056f62b77327e249",
+      "reason": "The fixture writer guessed the task field as prompt/description; hexa bench fixtures name it instruction (docs/benchmarks/fixtures/*.json: id, instruction, oracle, provenance, status, target_file, tier), so every fixture was skipped and S07/S09/S11 tested an empty corpus. The field is renamed; scenarios and assertions are unchanged.",
+      "to": "f26a1375222cd4d7049f0b6d901762eb910f96659eb59f8737d2aa7bf242f6fc"
     }
   ]
 }
