@@ -125,14 +125,13 @@ fn s02_an_alias_target_tries_the_same_extensions_and_index_files() {
     write(r, "tsconfig.json", r#"{"compilerOptions": {"paths": {"@/*": ["./src/*"]}}}"#);
     layers(r, r#"{"src/app": "domain", "src/lib": "adapters/secondary"}"#);
     write(r, "src/lib/http/index.ts", GET);
-    write(
-        r,
-        "src/app/main.ts",
-        "import { get } from \"@/lib/http\";\nimport { get as g2 } from \"../lib/http\";\nexport const a = () => get() + g2();\n",
-    );
+    write(r, "src/app/main.ts", "import { get } from \"@/lib/http\";\nexport const a = () => get();\n");
+    // The relative control is its own file: an edge joins two files, so one
+    // file importing the same module twice is one edge, not two.
+    write(r, "src/app/other.ts", "import { get } from \"../lib/http\";\nexport const b = () => get();\n");
     let (v, all) = analyze(r);
     let alias = the_edge(&v, "src/app/main.ts", "@/lib/http", &all);
-    let rel = the_edge(&v, "src/app/main.ts", "../lib/http", &all);
+    let rel = the_edge(&v, "src/app/other.ts", "../lib/http", &all);
     assert_eq!(to_file(&rel), "src/lib/http/index.ts", "the relative control:\n{all}");
     assert_eq!(to_file(&alias), "src/lib/http/index.ts", "{all}");
     assert_eq!(to_file(&alias), to_file(&rel), "{all}");

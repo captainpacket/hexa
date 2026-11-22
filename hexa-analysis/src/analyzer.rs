@@ -213,21 +213,12 @@ pub fn apply_rule_errors(result: &mut ArchAnalysisResult, rule_errors: usize) {
 }
 
 /// One edge per target a file reaches. A module both imported and named
-/// inline is one crossing, and each violation costs ten points.
-///
-/// A TypeScript file has no inline module paths, and each import statement
-/// that names a file is its own edge: an alias import and a relative import
-/// of the same file are reported side by side (ADR-2611221645 §1), each with
-/// the specifier the reader will find in the source.
+/// inline is one crossing, and each violation costs ten points: an import
+/// edge joins two files, so naming the same file twice, by alias and by
+/// relative path, is still one dependency.
 fn one_edge_per_target(edges: Vec<ImportEdge>) -> Vec<ImportEdge> {
     let mut seen = HashSet::new();
-    edges
-        .into_iter()
-        .filter(|e| {
-            let spelled = (Language::from_path(&e.from_file) == Language::TypeScript).then(|| e.import_path.clone());
-            seen.insert((e.to_file.clone(), spelled))
-        })
-        .collect()
+    edges.into_iter().filter(|e| seen.insert(e.to_file.clone())).collect()
 }
 
 /// The boundary violations in one file, by exactly the rules the grade
