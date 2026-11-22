@@ -698,13 +698,15 @@ pub fn without_tests(source: &str, names: &[String]) -> String {
 }
 
 /// `source` without the byte ranges `cut`. A range that starts before the
-/// previous one ended lies inside a range already cut, and is skipped.
+/// previous one ended overlaps a range already cut: the cut extends to
+/// whichever of the two ends later.
 fn splice_out(source: &str, mut cut: Vec<(usize, usize)>) -> String {
     cut.sort();
     let mut out = String::with_capacity(source.len());
     let mut at = 0;
     for (a, b) in cut {
         if a < at {
+            at = at.max(b);
             continue;
         }
         out.push_str(&source[at..a]);
@@ -739,6 +741,24 @@ mod tests {
     fn overlapping_cuts_are_skipped_not_a_panic() {
         assert_eq!(splice_out("abcdefgh", vec![(1, 5), (3, 4), (6, 7)]), "afh");
         assert_eq!(splice_out("abcdef", vec![(1, 3), (3, 5)]), "af");
+    }
+
+    /// Every byte inside any cut is removed: a cut that starts inside an
+    /// earlier one but ends past it removes the rest of its range too.
+    #[test]
+    fn a_cut_that_overruns_an_earlier_cut_removes_its_whole_range() {
+        assert_eq!(splice_out("abcdefgh", vec![(1, 4), (2, 6)]), "agh");
+        assert_eq!(splice_out("abcdefgh", vec![(2, 6), (1, 4)]), "agh");
+        assert_eq!(splice_out("abcdefghij", vec![(1, 3), (2, 5), (4, 8)]), "aij");
+        // Against the rule itself: keep exactly the bytes no range covers.
+        let src = "0123456789abcdef";
+        let cuts = vec![(0, 2), (1, 7), (5, 9), (11, 12), (11, 14), (13, 15)];
+        let expect: String = src
+            .char_indices()
+            .filter(|(i, _)| !cuts.iter().any(|&(a, b)| (a..b).contains(i)))
+            .map(|(_, c)| c)
+            .collect();
+        assert_eq!(splice_out(src, cuts), expect);
     }
 
     fn sc(id: &str, d: &[&str], kind: Kind) -> Scenario {
