@@ -13,7 +13,8 @@
     "sha256": "44cb8f55e1e96bddf1e01af94623229506980e8f9478f789c14ba9ef249eeb0d"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611221645_spec.rs": "1397c3d8530a7223d5687f147dc3d241997b344e41cf2160397c37d87da3ee35"
+    "hexa-cli/tests/adr_2611221645_spec.rs": "1397c3d8530a7223d5687f147dc3d241997b344e41cf2160397c37d87da3ee35",
+    "hexa-cli/tests/adr_2611221645_spec_2.rs": "615cce2c25a6115f1da9145c7f97e3ba6ff8e9006da0f4ee740d6137aff43aab"
   },
   "specs": [
     {
@@ -337,7 +338,9 @@
       "description": "A relative import of a .tsx file or a folder's index.ts resolves to that file.",
       "given": "A project with no compilerOptions.paths, whose analyze.layers map the path prefix src/domain to domain and src/ui to adapters/primary; src/ui/Button.tsx and src/ui/index.ts exist and src/ui/Button.ts does not; src/domain/a.ts imports \"../ui/Button\" and src/domain/b.ts imports \"../ui\"",
       "when": "hexa analyze runs on it",
-      "then": "The import from src/domain/a.ts has resolved_path src/ui/Button.tsx and the one from src/domain/b.ts has resolved_path src/ui/index.ts; both edges are domain to adapters/primary and both are violations"
+      "then": "The import from src/domain/a.ts has resolved_path src/ui/Button.tsx and the one from src/domain/b.ts has resolved_path src/ui/index.ts; both edges are domain to adapters/primary and both are violations",
+      "test": "hexa-cli/tests/adr_2611221645_spec_2.rs::s26_a_relative_import_of_a_tsx_file_or_a_folder_index_resolves_to_that_file",
+      "red": "b89d2c3"
     },
     {
       "id": "S27",
