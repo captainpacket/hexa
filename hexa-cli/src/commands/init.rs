@@ -240,6 +240,9 @@ pub async fn run(args: InitArgs) -> Result<()> {
         }
     }
 
+    // The code graph from the first session on (ADR-2611221610 §4).
+    crate::commands::graph::build_after_init(&target).await;
+
     println!();
     println!(
         "{} Project {} is now hexa-aware",
