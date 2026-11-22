@@ -335,7 +335,7 @@
       ],
       "kind": "example",
       "description": "A relative import of a .tsx file or a folder's index.ts resolves to that file.",
-      "given": "A project with no compilerOptions.paths, whose analyze.layers put src/domain/** in domain and src/ui/** in adapters/primary; src/ui/Button.tsx and src/ui/index.ts exist and src/ui/Button.ts does not; src/domain/a.ts imports \"../ui/Button\" and src/domain/b.ts imports \"../ui\"",
+      "given": "A project with no compilerOptions.paths, whose analyze.layers map the path prefix src/domain to domain and src/ui to adapters/primary; src/ui/Button.tsx and src/ui/index.ts exist and src/ui/Button.ts does not; src/domain/a.ts imports \"../ui/Button\" and src/domain/b.ts imports \"../ui\"",
       "when": "hexa analyze runs on it",
       "then": "The import from src/domain/a.ts has resolved_path src/ui/Button.tsx and the one from src/domain/b.ts has resolved_path src/ui/index.ts; both edges are domain to adapters/primary and both are violations"
     },
