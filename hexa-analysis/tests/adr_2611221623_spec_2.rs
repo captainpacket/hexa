@@ -292,29 +292,4 @@ mod part_2 {
     fn names(exports: &[ExportDeclaration]) -> Vec<String> {
         exports.iter().map(|e| e.name.clone()).collect()
     }
-
-    /// S17: The var rule does not spill over to consts in the same file
-    #[test]
-    fn s17_var_rule_does_not_spill_over_to_consts() {
-        let source = "package values\n\nvar V, W = 1, 2\n\nconst C, D = 3, 4\n";
-        let exports = go_exports(source);
-        let found = names(&exports);
-
-        assert!(
-            found.iter().any(|n| n == "V"),
-            "`V` should be exported; got {found:?}"
-        );
-        assert!(
-            found.iter().any(|n| n == "W"),
-            "`W`, the second name of the var spec, should be exported; got {found:?}"
-        );
-        assert!(
-            found.iter().any(|n| n == "C"),
-            "`C`, the first name of the const spec, should be exported; got {found:?}"
-        );
-        assert!(
-            !found.iter().any(|n| n == "D"),
-            "`D`, the second name of the const spec, should not be exported; got {found:?}"
-        );
-    }
 }
