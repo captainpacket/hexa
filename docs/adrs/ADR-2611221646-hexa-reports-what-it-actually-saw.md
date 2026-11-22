@@ -1,6 +1,7 @@
 # ADR-2611221646: hexa reports what it actually saw
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-22 Accepted: Accepted in craigjohnson's session: he accepted the spec, chose the fix under his rule (real bug fixes only; architectural correctness first), and its sealed tests, red before the code, pass on main
 **Date:** 2026-11-22
 **Drivers:** Five places where hexa printed something untrue or refused something harmless, found while using it on 2026-11-21 and 2026-11-22:
 - `hexa spec tests` failed with "claude-text exited with 1: " and nothing after the colon; the reason (an expired AWS SSO token) was in the CLI's output and hexa dropped it.
