@@ -1,7 +1,7 @@
 {
   "adr": "ADR-2611221623",
   "feature": "Go exports by Go's rule, every var name an export",
-  "description": "A Go name is exported when its first character is a Unicode upper-case letter; every name a var spec declares is its own Value export at the spec's line; a const spec still records only its first name.",
+  "description": "A Go name is exported when its first character is a Unicode upper-case letter, and every name a var spec declares is its own Value export at the spec's line. (Its decision on const specs is superseded by ADR-2611221643.)",
   "universal": [
     "§1",
     "§2",
