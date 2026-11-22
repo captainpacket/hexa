@@ -62,3 +62,21 @@ fn a_grouped_var_reaches_the_dead_export_finder() {
     assert!(dead.contains(&"UnusedFlag".to_string()), "an unused grouped var is dead: {dead:?}");
     assert!(!dead.contains(&"Shared".to_string()), "a grouped var another file names is not: {dead:?}");
 }
+
+/// A trailing comment ends the run even when it is not the line directly
+/// above: here a plain doc line sits between it and `B`.
+#[test]
+fn a_trailing_tag_one_line_further_up_does_not_mark_the_next_spec() {
+    let src = "package pkg\n\nconst (\n\tA = 1 // @hexa:public\n\t// doc\n\tB = 2\n)\n";
+    assert!(!public(src, "B"), "the tag is A's line comment; B's doc is only `// doc`");
+}
+
+/// The same rule in a var group, whose specs sit one level down, and for a
+/// top-level var followed by a function.
+#[test]
+fn a_trailing_tag_in_a_var_group_or_after_a_top_level_var_marks_nothing_below() {
+    let grouped = "package pkg\n\nvar (\n\tA = 1 // @hexa:public\n\tB = 2\n)\n";
+    assert!(!public(grouped, "B"), "in a var group: {grouped}");
+    let top = "package pkg\n\nvar X = 1 // @hexa:public\nfunc F() {}\n";
+    assert!(!public(top, "F"), "after a top-level var: {top}");
+}
