@@ -82,6 +82,8 @@ fn the_landing_hint_works_with_no_checkout_of_the_base() {
     git(&r.dir, &["commit", "-q", "-m", "x"]);
     let hint = hexa_cli::commands::finish::fast_forward(&r.dir, "feat/x", "main");
     assert!(hint.contains("fetch . feat/x:main"), "no checkout of main: {hint}");
+    // What is named as the command is the command: it pastes into a shell as it is.
+    assert!(hint.starts_with("git ") && !hint.contains('(') && !hint.contains(';'), "a bare command: {hint}");
 
     // Following the hint lands it, and keeps the branch's own commit.
     let tip = git(&r.dir, &["rev-parse", "feat/x"]);

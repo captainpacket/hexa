@@ -148,7 +148,17 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 pub fn fast_forward(dir: &Path, branch: &str, base: &str) -> String {
     match worktrees(dir).into_iter().find(|(_, b)| b.as_deref() == Some(base)) {
         Some((p, _)) => format!("git -C {} merge --ff-only {branch}", p.display()),
-        None => format!("git -C {} fetch . {branch}:{base} ({base} is checked out nowhere; this moves it only on a fast-forward)", dir.display()),
+        None => format!("git -C {} fetch . {branch}:{base}", dir.display()),
+    }
+}
+
+/// The words before [`fast_forward`]'s command: where it runs. Kept outside
+/// the command, so the command can be pasted as it is.
+fn fast_forward_lead(dir: &Path, base: &str) -> String {
+    if worktrees(dir).iter().any(|(_, b)| b.as_deref() == Some(base)) {
+        format!("from {base}'s checkout")
+    } else {
+        format!("({base} is checked out nowhere; this moves it only on a fast-forward)")
     }
 }
 
@@ -158,11 +168,12 @@ pub fn fast_forward(dir: &Path, branch: &str, base: &str) -> String {
 /// the branch, re-run the gate, then fast-forward.
 pub fn landing_hint(dir: &Path, branch: &str, base: &str, path: &Path) -> String {
     let ff = fast_forward(dir, branch, base);
+    let lead = fast_forward_lead(dir, base);
     if git(dir, &["merge-base", "--is-ancestor", base, branch]).is_some() {
-        format!("land it from {base}'s checkout: {ff}")
+        format!("land it {lead}: {ff}")
     } else {
         format!(
-            "{base} has moved: merge {base} into {branch} (git -C {} merge {base}), re-run the gate ({}), then fast-forward from {base}'s checkout: {ff}",
+            "{base} has moved: merge {base} into {branch} (git -C {} merge {base}), re-run the gate ({}), then fast-forward {lead}: {ff}",
             path.display(),
             gate_or_placeholder(dir)
         )

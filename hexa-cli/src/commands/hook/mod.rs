@@ -802,8 +802,9 @@ fn stop_until_finished(project_dir: &Path) -> Result<()> {
         let _ = std::fs::create_dir_all(project_dir.join(".hexa"));
         // the count is local state: keep it out of version control, even in a project that never re-ran init (§6)
         let _ = crate::commands::task_ledger::ensure_ignored(project_dir);
-        // Written whole, then renamed into place: two sessions stopping at once
-        // each see a complete file, never one torn mid-write that reads as empty.
+        // Written whole, then renamed into place: a reader never sees a file torn
+        // mid-write. Not locked: two sessions stopping at the same instant can
+        // still lose one count, which costs that session at most one extra block.
         let tmp = project_dir.join(".hexa").join(format!(".stop-blocks.json.{}.tmp", std::process::id()));
         if std::fs::write(&tmp, serde_json::to_string(m).unwrap_or_default()).is_ok() && std::fs::rename(&tmp, &counts).is_err() {
             let _ = std::fs::remove_file(&tmp);

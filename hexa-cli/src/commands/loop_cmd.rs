@@ -662,13 +662,12 @@ fn pending_task(e: &serde_json::Value) -> Option<Task> {
 /// its checklist and how to carry it over. Empty when there is none to show.
 /// For `hexa loop` and the session-start banner (ADR-2611160910 finding 2).
 pub fn previous_lines(dir: &Path) -> Vec<String> {
-    let Some((_, e)) = previous(dir) else { return Vec::new() };
+    let Some((id, e)) = previous(dir) else { return Vec::new() };
     let mut out = checklist(&e);
     // The reason the person reads at the next session start (ADR-2611220204,
-    // Consequences): a new session has a new id, so its own hold lines are empty.
-    if let Some(h) = entry_hold(&e) {
-        out.push(format!("the previous session's work was on hold: {} (since {})", h.reason, h.at));
-    }
+    // Consequences): a new session has a new id, so its own hold lines are
+    // empty. hold_lines marks a hold whose keys have all closed as stale.
+    out.extend(hold_lines(dir, &id).into_iter().map(|l| format!("previous session: {l}")));
     let next = match pending_task(&e) {
         Some(t) => format!("next: task {} {} — ", t.n, t.title),
         None => String::new(),
