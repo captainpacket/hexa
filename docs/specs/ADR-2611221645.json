@@ -13,7 +13,7 @@
     "sha256": "86c7d9bd685b77e4b597cd7d36e5fc83bf68468d21bcedc58b6e268c236386f0"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611221645_spec.rs": "ce8e6e0aedb502e2c877927a486e78b78e6a1f2b62b89c53fa88384f4cf0cd8f"
+    "hexa-cli/tests/adr_2611221645_spec.rs": "1397c3d8530a7223d5687f147dc3d241997b344e41cf2160397c37d87da3ee35"
   },
   "specs": [
     {
@@ -326,6 +326,17 @@
       "then": "For every import, the graph's target file equals the analyze edge's to_file, so consumers of a file are exactly the from_files of edges to it",
       "test": "hexa-cli/tests/adr_2611221645_spec.rs::s25_the_graph_and_analyze_agree_on_every_import_edge",
       "red": "d71d65b"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-22T19:30:05.406183867+00:00",
+      "base_commit": "d71d65b28ef5eaada1c44c24d2e90f6d3c2b8037",
+      "by": "Claude (agent, in craigjohnson's session; for review)",
+      "file": "hexa-cli/tests/adr_2611221645_spec.rs",
+      "from": "ce8e6e0aedb502e2c877927a486e78b78e6a1f2b62b89c53fa88384f4cf0cd8f",
+      "reason": "S02's fixture put an alias import and a relative import of the same module in one file and expected two edges; an import edge joins two files, and hexa keeps one edge per file pair (sealed ADR-2611211324 S05 relies on it), so the builder had changed that rule for TypeScript only. The relative control moves to its own file, src/app/other.ts; the scenario (the alias tries the same extensions and index files a relative import does) and every assertion are unchanged. Agreed with craigjohnson's rule that architectural correctness comes first.",
+      "to": "1397c3d8530a7223d5687f147dc3d241997b344e41cf2160397c37d87da3ee35"
     }
   ]
 }
