@@ -1,6 +1,7 @@
 # ADR-2611220204: A session can wait without being sent back
 
-**Status:** Completed
+**Status:** Rejected
+> 2026-11-22 Rejected: reverted from local main on craigjohnson's rule for this hexa work — no changes to hexa core behavior (the Stop hook, `hexa finish`, `hexa loop`, landing hints). It was built, reviewed and Completed (7e78510), then taken out whole: code, sealed tests and spec. Kept here as the record of the decision and of the bound defect it found (ADR-2611161800 §5 resets its count after a let-through, so the bound is three blocks, one pass, repeating).
 > 2026-11-22 Completed: landed on main at 0f2d8e9; gate `cargo test -p hexa-cli --test adr_2611220204_spec` passed (hexa loop stage done)
 > 2026-11-22 Accepted: Accepted by craigjohnson in session (he approved the decision, accepted its spec, chose the fixture amendments and the untracked-file rule, and chose to land it): 30 sealed scenarios red at 5a267c1 pass at fb703e0; three code reviews' findings fixed; hexa A+ 100/100.
 **Date:** 2026-11-22
