@@ -1,6 +1,7 @@
 # ADR-2611221553: Go reads the `@hexa:public` tag
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-22 Accepted: Accepted in craigjohnson's session: he accepted the spec, chose the fix under his rule (no hexa core behaviour change except real bug fixes and new languages; architectural correctness first), and its sealed tests, red before the code, pass on main.
 **Date:** 2026-11-22
 **Drivers:** a Go SDK, a published Go library being split into the hexagonal layout, has about 230 exports with no caller inside the module because they are its public API: about 219 domain builders, constants and helpers, and 12 use-case methods. The dead-export finder counts each one, the deduction caps at 20, and the grade cannot pass B (80). hexa's answer for a library's public API is the `@hexa:public` tag, and in Go it does nothing.
 **Supersedes:** none. A defect against ADR-2610092245, which builds on the tag as "a comment tag [that] works the same way in Rust, Go and TypeScript".
