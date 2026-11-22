@@ -27,7 +27,7 @@ A Go doc comment is the run of `//` lines directly above a declaration, with no 
 
 ## Implementation
 
-**Gate:** `cargo test -p hexa-analysis --test adr_2611221553_spec`
+**Gate:** `cargo test -p hexa-analysis --test adr_2611221553_spec_2` (the 15 scenarios that fail before the code; the 8 that already hold, S06, S08, S09, S15, S19, S20, S21, S23, are guards and stay pending)
 
 | Phase | Work | Decisions |
 |---|---|---|
