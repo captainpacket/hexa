@@ -1,0 +1,213 @@
+{
+  "adr": "ADR-2611221600",
+  "feature": "agent_orientation",
+  "description": "Every hexa project provides agent orientation via AGENTS.md, CLAUDE.md, roles, skills, and module READMEs.",
+  "universal": [
+    "\u00a71",
+    "\u00a72",
+    "\u00a73",
+    "\u00a74",
+    "\u00a75",
+    "\u00a76"
+  ],
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "\u00a71"
+      ],
+      "kind": "example",
+      "description": "hexa init writes AGENTS.md with the managed section.",
+      "given": "An empty directory.",
+      "when": "hexa init is run on it.",
+      "then": "AGENTS.md exists with the hexa-managed section between `<!-- hexa:agents-md:start -->` and `<!-- hexa:agents-md:end -->`, holding Start here, Where builds run, Find your place and the shipped guide (`hexa do gate`, `hexa graph context`)."
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "\u00a71"
+      ],
+      "kind": "negative",
+      "description": "An AGENTS.md without markers keeps its text and gets the section appended",
+      "given": "An initialised project whose AGENTS.md is hand-written text with no hexa markers.",
+      "when": "hexa refresh is run.",
+      "then": "The hand-written text is the unchanged prefix of the file, and the managed section follows it, once; a second refresh changes nothing."
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "\u00a72"
+      ],
+      "kind": "example",
+      "description": "CLAUDE.md imports AGENTS.md after refresh.",
+      "given": "An initialised project whose CLAUDE.md has the claude-md markers around an old body with no `@AGENTS.md`.",
+      "when": "hexa refresh is run.",
+      "then": "The managed section holds the line `@AGENTS.md` and the Claude-only parts (hooks, skills, `.claude/agents/`), and does not repeat AGENTS.md's verb table."
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "\u00a72"
+      ],
+      "kind": "negative",
+      "description": "A CLAUDE.md with no hexa section is never appended to",
+      "given": "An initialised project whose CLAUDE.md is hand-written with no markers and no legacy hexa heading.",
+      "when": "hexa refresh is run.",
+      "then": "CLAUDE.md is byte-for-byte unchanged, and refresh says it has no hexa-managed section."
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "\u00a73"
+      ],
+      "kind": "example",
+      "description": "refresh replaces only the managed section.",
+      "given": "An initialised project whose AGENTS.md and CLAUDE.md each have hand-written text above and below the markers, and a stale body between them.",
+      "when": "hexa refresh is run.",
+      "then": "Only the bytes between the markers are replaced, and hand-written text is unchanged."
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "\u00a73"
+      ],
+      "kind": "negative",
+      "description": "refresh refuses files with end marker before start marker.",
+      "given": "An initialised project whose AGENTS.md has the end marker before the start marker.",
+      "when": "hexa refresh is run.",
+      "then": "The command fails, names AGENTS.md, and the file is unchanged."
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "\u00a74"
+      ],
+      "kind": "example",
+      "description": "hexa init installs the lead role, builder role, and parallel-agents skill.",
+      "given": "An empty directory.",
+      "when": "hexa init is run.",
+      "then": "`.claude/agents/hexa-lead.md`, `.claude/agents/hexa-builder.md` and `.claude/skills/hexa-parallel-agents/SKILL.md` exist, and between them name: cargo fmt before push; wait on your own remote run and never end the turn mid-run; counts only from the remote run on the pushed head; one writer per branch; generated files only through their tool; never restart a CI runner with a job in flight; split by file; integrate, never trust."
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "\u00a74"
+      ],
+      "kind": "negative",
+      "description": "skill sync restores a deleted role and leaves an edited one alone",
+      "given": "An initialised project where `.claude/agents/hexa-lead.md` was deleted and `.claude/agents/hexa-builder.md` was edited.",
+      "when": "hexa skill sync is run.",
+      "then": "hexa-lead.md is written back with the shipped bytes; the edited hexa-builder.md is unchanged and named as differing."
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "\u00a75"
+      ],
+      "kind": "example",
+      "description": "init --scaffold writes module READMEs.",
+      "given": "An empty directory.",
+      "when": "hexa init --scaffold is run on it (rust).",
+      "then": "Each layer directory the scaffold wrote (`src/domain`, `src/ports`, `src/usecases`, `src/adapters`) holds a README.md with `## Owns`, `## May import`, `## Tests` and `## ADRs`, and its May import names that layer's rule."
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "\u00a75"
+      ],
+      "kind": "negative",
+      "description": "docs check flags a module without a README, and docs readmes writes it back",
+      "given": "A scaffolded project whose `src/ports/README.md` was removed.",
+      "when": "hexa docs check --json is run, then hexa docs readmes.",
+      "then": "docs check reports a `missing_module_readme` finding for `src/ports`; after docs readmes the file exists again and docs check reports none, and an existing README is not overwritten."
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "\u00a76"
+      ],
+      "kind": "example",
+      "description": "doctor reports failing checks with fix commands.",
+      "given": "An initialised project with AGENTS.md removed, a shipped skill removed, the hook commands removed from .claude/settings.json, and a module README removed.",
+      "when": "hexa doctor is run.",
+      "then": "It names each missing piece with its fix (`hexa refresh`, `hexa skill sync`, `hexa refresh`, `hexa docs readmes`), reports the graph as fresh, stale, missing or unknown (`hexa graph build` when stale or missing), and exits non-zero."
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "\u00a76"
+      ],
+      "kind": "negative",
+      "description": "finish lists failing orientation checks, only in an initialised project",
+      "given": "An initialised project with AGENTS.md removed; and a repository with `.hexa/` but no `.hexa/project.json`.",
+      "when": "hexa finish --json and hexa finish --exit-code are run in each.",
+      "then": "The first lists an `orientation` item naming AGENTS.md with fix `hexa refresh` and exits 1; the second lists no `orientation` item."
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "\u00a71"
+      ],
+      "kind": "property",
+      "description": "AGENTS.md's managed section is always wrapped in the correct markers.",
+      "given": "Any valid body text.",
+      "when": "wrap is called with AGENTS_MD markers.",
+      "then": "The result is the body text wrapped between the start and end markers, each on its own line."
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "\u00a72"
+      ],
+      "kind": "property",
+      "description": "imports_agents_md returns true only for the exact import line.",
+      "given": "Any CLAUDE.md text.",
+      "when": "imports_agents_md is called.",
+      "then": "It returns true if and only if the text contains a line that is exactly '@AGENTS.md' outside a code fence."
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "\u00a75"
+      ],
+      "kind": "property",
+      "description": "module_readme always includes the four headings.",
+      "given": "Any module name and layer.",
+      "when": "module_readme is called.",
+      "then": "The result is a string containing '## Owns', '## May import', '## Tests', and '## ADRs'."
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "\u00a76"
+      ],
+      "kind": "property",
+      "description": "graph_state returns Fresh only for the exact 'fresh' state.",
+      "given": "Any JSON string from hexa graph status --json.",
+      "when": "graph_state is called.",
+      "then": "It returns Fresh for state `fresh`, Stale for `stale`, Missing for `missing`, and Unknown for no output, invalid JSON, or any other state."
+    },
+    {
+      "id": "S17",
+      "decision": [
+        "\u00a73"
+      ],
+      "kind": "property",
+      "description": "replace_managed changes only the managed bytes and is idempotent",
+      "given": "Any prefix and suffix without markers, any old body and any new body.",
+      "when": "replace_managed is applied to prefix + wrapped(old) + suffix, then again to its result.",
+      "then": "The result starts with the prefix and ends with the suffix unchanged, its managed body is the new body, and the second application returns the same text; text with no markers returns None; end-before-start is an error."
+    },
+    {
+      "id": "S18",
+      "decision": [
+        "\u00a74"
+      ],
+      "kind": "property",
+      "description": "Every shipped role and the skill are project-neutral",
+      "given": "Each embedded file under `agents/` and `skills/hexa-parallel-agents/`.",
+      "when": "its text is read.",
+      "then": "It names no project-specific host, crate or script of the project it was derived from (datum, tt, max, bazzite, ci/remote-gate.sh, cargo xtask), and every `hexa` verb it names exists."
+    }
+  ]
+}
