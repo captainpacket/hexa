@@ -143,6 +143,11 @@ pub async fn build(
     let mut id_file: HashMap<String, String> = HashMap::new();
     // set of known relative file paths, for import resolution.
     let mut file_set: HashSet<String> = HashSet::new();
+    // Go file → its package clause, and the Go method entity ids: the
+    // same-package links are keyed by (directory, package) and never target
+    // a method.
+    let mut go_package: HashMap<String, String> = HashMap::new();
+    let mut go_method_ids: HashSet<String> = HashSet::new();
     // collected (file_rel, raw_path, names, kind) imports to resolve after all files seen.
     let mut pending_imports: Vec<(String, String, Vec<String>, ImportKind)> = Vec::new();
     // prose chunks for the deep semantic pass: (file_rel, prose).
@@ -243,6 +248,12 @@ pub async fn build(
                         .or_default()
                         .push(eid);
                 }
+            }
+            if let Some(pkg) = fx.go_package {
+                go_package.insert(rel_lossy.clone(), pkg);
+            }
+            for m in &fx.go_methods {
+                go_method_ids.insert(id_for(NodeKind::Function, &rel_lossy, m));
             }
             for imp in fx.imports {
                 pending_imports.push((rel_lossy.clone(), imp.raw_path, imp.names, imp.kind));
@@ -353,9 +364,11 @@ pub async fn build(
             }
             // A Go file names its package's entities without an import: link
             // each name to the entity of exactly that name another Go file of
-            // the same directory defines.
+            // the same directory and package clause defines. A method is not
+            // a target: a bare name never denotes one.
             ImportKind::SamePackage => {
                 let dir = std::path::Path::new(from_rel).parent();
+                let pkg = go_package.get(from_rel.as_str());
                 for name in names {
                     let Some(targets) = label_index.get(&name.to_ascii_lowercase()) else {
                         continue;
@@ -365,6 +378,8 @@ pub async fn build(
                         if f == from_rel
                             || !f.ends_with(".go")
                             || std::path::Path::new(f).parent() != dir
+                            || go_package.get(f.as_str()) != pkg
+                            || go_method_ids.contains(tid.as_str())
                             || id_label.get(tid.as_str()) != Some(name)
                         {
                             continue;

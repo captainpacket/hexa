@@ -31,11 +31,12 @@ pub enum ImportKind {
     /// (`crate::domain::util::half()`). It names an item without importing it,
     /// so it links only when the path resolves to a file that defines the item.
     PathExpr,
-    /// The identifiers a Go file names. Files of one directory are one Go
-    /// package and use each other's names without an import, so each links
-    /// to the entity of that exact name another Go file of the directory
-    /// defines (ADR-2611221643: `hexa graph consumers` sees a grouped var's
-    /// users).
+    /// The identifiers a Go file names. Files of one directory that declare
+    /// one package clause are one Go package and use each other's names
+    /// without an import, so each links to the entity of that exact name
+    /// another Go file of the same directory and package defines
+    /// (ADR-2611221643: `hexa graph consumers` sees a grouped var's users).
+    /// A method is never a target: a bare name does not denote one.
     SamePackage,
 }
 
@@ -55,4 +56,9 @@ pub struct RawImport {
 pub struct FileExtract {
     pub entities: Vec<Entity>,
     pub imports: Vec<RawImport>,
+    /// A Go file's package clause (`package p` → `p`).
+    pub go_package: Option<String>,
+    /// The methods a Go file declares and no function of the file shares a
+    /// name with. They are entities, but no same-package link targets one.
+    pub go_methods: Vec<String>,
 }

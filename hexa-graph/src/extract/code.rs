@@ -346,9 +346,22 @@ fn collect_ts_import(node: Node, source: &str, imports: &mut Vec<RawImport>) {
 fn extract_go(root: &Node, source: &str) -> FileExtract {
     let mut out = FileExtract::default();
     let mut cursor = root.walk();
+    let mut functions = Vec::new();
     for child in root.children(&mut cursor) {
         match child.kind() {
-            "function_declaration" | "method_declaration" => {
+            "package_clause" => {
+                let mut pc = child.walk();
+                out.go_package = child
+                    .children(&mut pc)
+                    .find(|c| c.kind() == "package_identifier")
+                    .map(|c| text(c, source).to_string());
+            }
+            "function_declaration" => {
+                functions.extend(name_field(child, source));
+                push_named(&mut out.entities, child, source, NodeKind::Function)
+            }
+            "method_declaration" => {
+                out.go_methods.extend(name_field(child, source));
                 push_named(&mut out.entities, child, source, NodeKind::Function)
             }
             "type_declaration" => collect_go_types(child, source, &mut out.entities),
@@ -359,6 +372,9 @@ fn extract_go(root: &Node, source: &str) -> FileExtract {
             _ => {}
         }
     }
+    // A function and a method of one name share an entity id; the function
+    // is a real target, so that name stays linkable.
+    out.go_methods.retain(|m| !functions.contains(m));
     let mut names = std::collections::BTreeSet::new();
     collect_go_identifiers(*root, source, &mut names);
     if !names.is_empty() {
@@ -372,18 +388,87 @@ fn extract_go(root: &Node, source: &str) -> FileExtract {
     out
 }
 
-/// Every identifier a Go file writes, for its same-package references.
-fn collect_go_identifiers(node: Node, source: &str, names: &mut std::collections::BTreeSet<String>) {
-    if node.kind() == "identifier" || node.kind() == "type_identifier" {
-        let t = text(node, source);
-        if !t.is_empty() {
-            names.insert(t.to_string());
+type GoNames = std::collections::BTreeSet<String>;
+
+/// Every identifier a Go file writes that can name a package-level entity of
+/// its own package, for its same-package references. A type qualified by
+/// another package (`http.Handler`) and a struct literal's field key
+/// (`T{Name: 1}`) are not such names. A local that shadows a package-level
+/// name is still collected: over-reporting keeps the deletion oracle
+/// conservative.
+fn collect_go_identifiers(node: Node, source: &str, names: &mut GoNames) {
+    match node.kind() {
+        "identifier" | "type_identifier" => {
+            let t = text(node, source);
+            if !t.is_empty() {
+                names.insert(t.to_string());
+            }
+            return;
         }
-        return;
+        "qualified_type" => return,
+        "composite_literal" => {
+            let ty = node.child_by_field_name("type");
+            if let Some(t) = ty {
+                collect_go_identifiers(t, source, names);
+            }
+            if let Some(body) = node.child_by_field_name("body") {
+                collect_go_literal(body, ty, source, names);
+            }
+            return;
+        }
+        _ => {}
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         collect_go_identifiers(child, source, names);
+    }
+}
+
+/// A composite literal's body, of type `ty` (`None` when elided from an
+/// unknown outer type). A bare-identifier key is a field name unless the type
+/// is a map, slice or array, whose keys are expressions.
+fn collect_go_literal(body: Node, ty: Option<Node>, source: &str, names: &mut GoNames) {
+    let keys_are_fields = !matches!(
+        ty.map(|t| t.kind()),
+        Some("map_type" | "slice_type" | "array_type" | "implicit_length_array_type")
+    );
+    // The type an elided inner literal (`[]T{{...}}`) has.
+    let elem = ty.and_then(|t| match t.kind() {
+        "map_type" => t.child_by_field_name("value"),
+        "slice_type" | "array_type" | "implicit_length_array_type" => {
+            t.child_by_field_name("element")
+        }
+        _ => None,
+    });
+    let element = |el: Node, names: &mut GoNames| {
+        let mut c = el.walk();
+        for inner in el.children(&mut c) {
+            if inner.kind() == "literal_value" {
+                collect_go_literal(inner, elem, source, names);
+            } else {
+                collect_go_identifiers(inner, source, names);
+            }
+        }
+    };
+    let mut cursor = body.walk();
+    for child in body.children(&mut cursor) {
+        match child.kind() {
+            "keyed_element" => {
+                if let Some(key) = child.child_by_field_name("key") {
+                    let field_key = keys_are_fields
+                        && key.named_child_count() == 1
+                        && key.named_child(0).map(|k| k.kind()) == Some("identifier");
+                    if !field_key {
+                        element(key, names);
+                    }
+                }
+                if let Some(value) = child.child_by_field_name("value") {
+                    element(value, names);
+                }
+            }
+            "literal_element" => element(child, names),
+            _ => collect_go_identifiers(child, source, names),
+        }
     }
 }
 
