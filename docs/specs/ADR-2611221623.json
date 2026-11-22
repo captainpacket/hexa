@@ -1,0 +1,211 @@
+{
+  "adr": "ADR-2611221623",
+  "feature": "Go exports by Go's rule, every var name an export",
+  "description": "A Go name is exported when its first character is a Unicode upper-case letter; every name a var spec declares is its own Value export at the spec's line; a const spec still records only its first name.",
+  "universal": [
+    "§1",
+    "§2",
+    "§3"
+  ],
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "A function whose name starts with a non-ASCII capital is an export",
+      "given": "a Go file `p.go` containing `package p` on line 1 and `func Äpfel() {}` on line 3",
+      "when": "extract_exports is called on it with Language::Go",
+      "then": "the result contains an ExportDeclaration with file `p.go`, name `Äpfel`, line 3 and kind Function"
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "The Unicode rule covers types, methods, consts and vars",
+      "given": "a Go file `p.go` declaring `type Ωmega struct{}`, `func (o Ωmega) Ärger() {}`, `const Ñame = 1` and `var Øre = 2`, each on its own line",
+      "when": "extract_exports is called on it with Language::Go",
+      "then": "the result contains `Ωmega` with kind Type, `Ärger` with kind Method, and `Ñame` and `Øre` each with kind Value, each at the line where it is declared"
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "ASCII capitals are still exports",
+      "given": "a Go file declaring `func Run() {}` and `var Count = 1`",
+      "when": "extract_exports is called on it with Language::Go",
+      "then": "the result contains `Run` with kind Function and `Count` with kind Value"
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "A name whose first character is a non-ASCII lower-case letter is not an export",
+      "given": "a Go file declaring `func äpfel() {}`, `type ωmega struct{}`, `const ärger = 1` and `var øre = 2`",
+      "when": "extract_exports is called on it with Language::Go",
+      "then": "the result contains no ExportDeclaration named `äpfel`, `ωmega`, `ärger` or `øre`"
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "A name starting with an underscore or with a lower-case ASCII letter followed by capitals is not an export",
+      "given": "a Go file declaring `func _Hidden() {}` and `var aPFEL = 1`",
+      "when": "extract_exports is called on it with Language::Go",
+      "then": "the result contains no ExportDeclaration named `_Hidden` or `aPFEL`"
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§1"
+      ],
+      "kind": "property",
+      "description": "Exported exactly when the first character is a Unicode upper-case letter",
+      "given": "any valid Go identifier `N` that is not the blank identifier, declared as `func N() {}` in a Go file",
+      "when": "extract_exports is called on it with Language::Go",
+      "then": "an ExportDeclaration named `N` is present if and only if the first character of `N` is an upper-case letter under Unicode (Rust `char::is_uppercase`), regardless of whether that character is ASCII"
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "An ungrouped var spec with two names exports both",
+      "given": "a Go file `p.go` with `package p` on line 1 and `var A, B = 1, 2` on line 3",
+      "when": "extract_exports is called on it with Language::Go",
+      "then": "the result contains an ExportDeclaration named `A` and one named `B`, both with file `p.go`, line 3 and kind Value"
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "A var spec inside a group with several names exports each at the spec's line",
+      "given": "a Go file with `package p` on line 1, `var (` on line 3, `C, D = 2, 3` on line 4 and `)` on line 5",
+      "when": "extract_exports is called on it with Language::Go",
+      "then": "the result contains `C` and `D`, each with line 4 and kind Value"
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "A typed multi-name var spec with no initialiser exports every name",
+      "given": "a Go file declaring `var X, Y, Z int` on one line",
+      "when": "extract_exports is called on it with Language::Go",
+      "then": "the result contains `X`, `Y` and `Z`, each at that line with kind Value"
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "A second name of a var spec can be a dead export",
+      "given": "a Go project where one file declares `var A, B = 1, 2` and another file in the project names `A` but no file other than the declaring one names `B`",
+      "when": "the project is analysed for dead exports",
+      "then": "`B` is reported as a dead export at the spec's line and `A` is not"
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "A var spec is not reduced to its first name",
+      "given": "a Go file declaring `var A, B = 1, 2`",
+      "when": "extract_exports is called on it with Language::Go",
+      "then": "the result is not only `A`: exactly one ExportDeclaration named `B` is present, and no name of the spec is recorded twice"
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§2",
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "An unexported name in a var spec is not recorded",
+      "given": "a Go file declaring `var A, b, _ = 1, 2, 3`",
+      "when": "extract_exports is called on it with Language::Go",
+      "then": "the result contains `A` with kind Value and contains no ExportDeclaration named `b` or `_`"
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "Names of a var spec are not given another kind or another line",
+      "given": "a Go file with `var A, B = 1, 2` on line 3",
+      "when": "extract_exports is called on it with Language::Go",
+      "then": "neither `A` nor `B` has a kind other than Value, and neither has a line other than 3"
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§2"
+      ],
+      "kind": "property",
+      "description": "Every exported name of any var spec is its own Value export at the spec's line",
+      "given": "any Go var spec, grouped or ungrouped, at line L declaring names N1..Nk (k ≥ 1), with or without a type and initialiser",
+      "when": "extract_exports is called on the file with Language::Go",
+      "then": "for each Ni whose first character is a Unicode upper-case letter there is exactly one ExportDeclaration named Ni with line L and kind Value, and no ExportDeclaration is produced for any Ni that is not exported"
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "A multi-name const spec still records its first name",
+      "given": "a Go file with `const A, B = 1, 2` on line 3",
+      "when": "extract_exports is called on it with Language::Go",
+      "then": "the result contains an ExportDeclaration named `A` at line 3 with kind Value"
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "The later names of a const spec are not recorded",
+      "given": "a Go file declaring `const A, B = 1, 2`",
+      "when": "extract_exports is called on it with Language::Go",
+      "then": "the result contains no ExportDeclaration named `B`"
+    },
+    {
+      "id": "S17",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "The var rule does not spill over to consts in the same file",
+      "given": "a Go file declaring `var V, W = 1, 2` and `const C, D = 3, 4`",
+      "when": "extract_exports is called on it with Language::Go",
+      "then": "`V`, `W` and `C` are present and `D` is absent"
+    },
+    {
+      "id": "S18",
+      "decision": [
+        "§3"
+      ],
+      "kind": "property",
+      "description": "A const spec contributes at most its first name",
+      "given": "any Go const spec declaring names N1..Nk (k ≥ 1)",
+      "when": "extract_exports is called on the file with Language::Go",
+      "then": "no ExportDeclaration is produced for N2..Nk, and one is produced for N1 exactly when N1's first character is a Unicode upper-case letter"
+    }
+  ]
+}
