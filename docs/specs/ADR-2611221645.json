@@ -10,7 +10,7 @@
   ],
   "accepted": {
     "by": "craigjohnson",
-    "sha256": "86c7d9bd685b77e4b597cd7d36e5fc83bf68468d21bcedc58b6e268c236386f0"
+    "sha256": "cf48dcf285b88f0f3706e8b2ad5273fe8d49ade46dae4e6bda2601a5780bec29"
   },
   "sealed": {
     "hexa-cli/tests/adr_2611221645_spec.rs": "1397c3d8530a7223d5687f147dc3d241997b344e41cf2160397c37d87da3ee35"
