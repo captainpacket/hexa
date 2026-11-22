@@ -4,7 +4,7 @@
 > 2026-11-22 Accepted: the owner asked for it (gary, 2026-11-22: "how do we make sure that the agents know how to use hexa effectively for every project?"); the workplan draft `draft-2611221546-every-hexa-project-gets-agent-0669d0` items (2) and (5). Accepted under his standing instruction to accept the ADRs and specs and land the work, recorded by the implementing agent (builder B) on his behalf
 **Date:** 2026-11-22
 **Drivers:** datum, 2026-11-22. A sibling ADR (builder A) decides the rest of that draft: AGENTS.md, roles, skills, module READMEs and `hexa doctor`. `hexa doctor` reads `hexa graph status --json`, which this ADR decides.
-**Supersedes:** none. Amends ADR-2611191120 §6 (`hexa do gate` under `test.remote`) and ADR-2610221540 §6 as `hexa do gate` reads it (an amendment `hexa spec amend` recorded is not a broken seal).
+**Supersedes:** none. Amends ADR-2611191120 §6 (`hexa do gate` under `test.remote` now runs remotely for a branch that tracks a remote branch, and refuses only one that does not) and ADR-2610221540 §6 as `hexa do gate` reads it (an amendment `hexa spec amend` recorded is not a broken seal).
 
 ## Context
 
@@ -28,9 +28,10 @@
 
 7. **Under `test.remote`, `hexa do gate` runs the gate remotely, and commits only what passed there.** Without `--local`:
    - It checks the named files as it does locally (in the repository, not credentials, changed, seals intact under §8).
+   - The branch must track a remote branch. One that does not is refused: the refusal names `git push -u origin <branch>` and `--local`, and nothing runs. So ADR-2611191120 §6's refusal still holds for a branch that was never pushed.
    - It builds the candidate commit without moving the branch: HEAD's tree with the named files as they are in the working tree, HEAD as its parent, and the given message plus `Gate: <cmd> (remote: test.remote …)`.
-   - It pushes the candidate to `refs/heads/hexa-gate/<first 12 of its id>` on the branch's remote (its upstream's, else `origin`), and runs the gate through `test.remote` for that commit (ADR-2611191120 §3, §5). The output must name the full commit id, or the run is a runner failure.
-   - On a pass, read by the evidence reader as for a local gate, the branch moves to the candidate itself, the commit that was tested. The move is a compare-and-swap against the HEAD the candidate was built on. The index of the named files is synced, and the branch is pushed to its remote (never forced). The remote output's last 30 lines are the evidence: printed, recorded in the run log, and attached to the commit as a git note under `refs/notes/hexa-gate`. Landing then proceeds as for a local gate.
+   - It pushes the candidate to `refs/heads/hexa-gate/<first 12 of its id>` on the remote of the branch's upstream, and runs the gate through `test.remote` for that commit (ADR-2611191120 §3, §5). The output must name the full commit id, or the run is a runner failure.
+   - On a pass, read by the evidence reader as for a local gate, the branch moves to the candidate itself, the commit that was tested. The move is a compare-and-swap against the HEAD the candidate was built on. The index of the named files is synced, and the branch is pushed to its upstream (never forced). The remote output's last 30 lines are the evidence: printed, recorded in the run log, and attached to the commit as a git note under `refs/notes/hexa-gate`. Landing then proceeds as for a local gate.
    - On a failure, a vacuous run or a runner failure, nothing is committed, the branch does not move, and the change stays in the tree. The output's tail is printed.
    - The temporary ref is deleted in every case.
 
