@@ -13,7 +13,7 @@
     "sha256": "11149e7b168f67694250f9511076896a8cbf3a37d5eef7a15d7be64284e536d5"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611220204_spec.rs": "b1c44529ed1fda1dd6cbeec2ba9bea68d94689da02d8b569ebd91b8c6d6ffc9c"
+    "hexa-cli/tests/adr_2611220204_spec.rs": "a28675b59be2d1a4e3ef06ae21b86b2aef2a0e388bb3e80d9509f3c7113fafee"
   },
   "red": "5a267c1",
   "specs": [
@@ -376,6 +376,17 @@
       "when": "`hexa init` runs again and the Stop hook writes a count",
       "then": "`stop-blocks.json` appears exactly once and the ledger's entries are all still present",
       "test": "hexa-cli/tests/adr_2611220204_spec.rs::part_3::s30_ignore_does_not_duplicate_or_drop_entries"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-22T14:12:20.229200600+00:00",
+      "base_commit": "5a267c1a9711389f4162c4613bc5668f98150c55",
+      "by": "Claude (agent, in craigjohnson's session; for review)",
+      "file": "hexa-cli/tests/adr_2611220204_spec.rs",
+      "from": "b1c44529ed1fda1dd6cbeec2ba9bea68d94689da02d8b569ebd91b8c6d6ffc9c",
+      "reason": "Four fixtures set up a state their scenario does not describe; the scenarios and every assertion are unchanged. S02 read open_work in the test process, which is not the session that recorded the ADR, so the adr key could never appear: it now reads hexa finish --json in that session. S11 added a plain task titled Land on main, which no rule refuses: it now records an ADR with loop adr, which appends the real close-out steps. S12's session A never ended (no HEXA_SESSION_PID=0, as every other resume test sets), so loop resume correctly refused: it now ends. S30 re-ran hexa init on an initialised project, which an existing test (claude_mods_setup.rs) requires to refuse: the scenario's init runs again, so it is init --force. Each amended test fails at 46f0809 (0 passed, 4 failed) and passes on the build (30 passed). Agreed with craigjohnson in session; for his review.",
+      "to": "a28675b59be2d1a4e3ef06ae21b86b2aef2a0e388bb3e80d9509f3c7113fafee"
     }
   ]
 }
