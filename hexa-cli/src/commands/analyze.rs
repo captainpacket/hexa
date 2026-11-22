@@ -185,15 +185,14 @@ pub async fn run(
 
             // The tally counts the files the grade reads (ADR-2611221646 §3):
             // a file `analyze.exclude` or a built-in pattern leaves out is in
-            // no layer.
-            let exclusions = hexa_analysis::analyzer::GradeExclusions::for_project(&root);
-            for file in collect_source_files(&scan_dir) {
-                let rel = file
-                    .strip_prefix(&root)
-                    .unwrap_or(&file)
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                if exclusions.excludes(&rel) {
+            // no layer. The list is the grade's own, so its extensions (`.tsx`
+            // in, `.js` out) and its skipped directories are the grade's too.
+            let scan_prefix = scan_dir
+                .strip_prefix(&root)
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            for rel in hexa_analysis::analyzer::graded_files_sync(&root) {
+                if !scan_prefix.is_empty() && !rel.starts_with(&format!("{scan_prefix}/")) {
                     continue;
                 }
                 // The patterns are `/adapters/secondary/`; a path relative to
