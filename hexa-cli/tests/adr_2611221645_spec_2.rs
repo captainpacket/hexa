@@ -155,7 +155,7 @@ fn s26_a_relative_import_of_a_tsx_file_or_a_folder_index_resolves_to_that_file()
     let d = tempfile::tempdir().unwrap();
     let r = d.path();
     write(r, "tsconfig.json", r#"{"compilerOptions": {"jsx": "react-jsx"}}"#);
-    layers(r, r#"{"src/domain/**": "domain", "src/ui/**": "adapters/primary"}"#);
+    layers(r, r#"{"src/domain": "domain", "src/ui": "adapters/primary"}"#);
     write(r, "src/ui/Button.tsx", "export const Button = () => null;\n");
     write(r, "src/ui/index.ts", "export const ui = 1;\n");
     write(r, "src/domain/a.ts", "import { Button } from \"../ui/Button\";\nexport const a = () => Button;\n");
