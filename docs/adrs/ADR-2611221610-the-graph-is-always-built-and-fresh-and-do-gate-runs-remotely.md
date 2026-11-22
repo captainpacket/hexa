@@ -3,7 +3,7 @@
 **Status:** Accepted
 > 2026-11-22 Accepted: the owner asked for it (gary, 2026-11-22: "how do we make sure that the agents know how to use hexa effectively for every project?"); the workplan draft `draft-2611221546-every-hexa-project-gets-agent-0669d0` items (2) and (5). Accepted under his standing instruction to accept the ADRs and specs and land the work, recorded by the implementing agent (builder B) on his behalf
 **Date:** 2026-11-22
-**Drivers:** datum, 2026-11-22. A sibling ADR (builder A) decides the rest of that draft: AGENTS.md, roles, skills, module READMEs and `hexa doctor`. `hexa doctor` reads `hexa graph status --json`, which this ADR decides.
+**Drivers:** datum, 2026-11-22. The umbrella decision is builder A's "Every hexa project gets agent orientation" (id 2611221600, on branch `t3/agent-orientation-init`; named without its prefix here until both land, so the citation checker does not look for a file this branch lacks). It decides the rest of that draft: AGENTS.md, roles, skills, module READMEs and `hexa doctor`, and it says items (2) and (5) are decided here. `hexa doctor` reads the `state` field of `hexa graph status --json`, which this ADR decides.
 **Supersedes:** none. Amends ADR-2611191120 §6 (`hexa do gate` under `test.remote` now runs remotely for a branch that tracks a remote branch, and refuses only one that does not) and ADR-2610221540 §6 as `hexa do gate` reads it (an amendment `hexa spec amend` recorded is not a broken seal).
 
 ## Context
