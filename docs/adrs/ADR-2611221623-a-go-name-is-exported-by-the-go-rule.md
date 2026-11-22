@@ -5,7 +5,7 @@
 > 2026-11-22 Accepted: Accepted in craigjohnson's session: he accepted the spec, chose the fix under his rule (no hexa core behaviour change except real bug fixes and new languages; architectural correctness first), and its sealed tests, red before the code, pass on main.
 **Date:** 2026-11-22
 **Drivers:** Building ADR-2611221609 (Go's grouped vars are exports) fixed two more defects in how `hexa analyze` reads Go exports. A property scenario of that ADR drew the name `Ä` and found hexa does not treat it as exported, and a scenario with `var C, D = 2, 3` found hexa records `C` and not `D`. Both were fixed, but ADR-2611221609 decides only grouped vars, and says an ungrouped var is "read as before". This ADR records the two fixes as decisions, so the code and the record agree.
-**Supersedes:** none. Amends what ADR-2611221609 §2 and ADR-2611221553 §3 say does not change.
+**Supersedes:** none. Its decision 3 is superseded by ADR-2611221643 §1. Amends what ADR-2611221609 §2 and ADR-2611221553 §3 say does not change.
 
 ## Context
 
@@ -17,7 +17,7 @@ A var spec may declare several names: `var A, B = 1, 2`. hexa took the first. `B
 
 1. **A Go name is exported when its first character is a Unicode upper-case letter**, as the Go specification says, not only an ASCII one. This applies to every Go export hexa reads: functions, methods, types, consts and vars.
 2. **Every name a var spec declares is an export of its own**, each at the spec's line and of kind `Value`, grouped or not. `var A, B = 1, 2` exports `A` and `B`.
-3. **A const spec still records its first name.** `const A, B = 1, 2` exports `A`, as before. This is a decision to leave consts unchanged here, not a claim that it is right for Go: exporting a const spec's later names needs a superseding ADR (recorded as gap:go-multi-name-specs).
+**Superseded (was decision 3), by ADR-2611221643 §1:** a const spec recorded only its first name (`const A, B = 1, 2` exported `A`). ADR-2611221643 makes every name of a const spec an export, as for a var spec; this decision and its scenarios (S15-S18) were retired from the spec.
 
 ## Consequences
 

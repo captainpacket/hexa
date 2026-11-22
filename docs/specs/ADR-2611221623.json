@@ -189,52 +189,6 @@
       "then": "for each Ni whose first character is a Unicode upper-case letter there is exactly one ExportDeclaration named Ni with line L and kind Value, and no ExportDeclaration is produced for any Ni that is not exported",
       "test": "hexa-analysis/tests/adr_2611221623_spec_2.rs::part_1::s14_every_exported_var_spec_name_is_own_value_export",
       "red": "9bec090"
-    },
-    {
-      "id": "S15",
-      "decision": [
-        "§3"
-      ],
-      "kind": "example",
-      "description": "A multi-name const spec still records its first name",
-      "given": "a Go file with `const A, B = 1, 2` on line 3",
-      "when": "extract_exports is called on it with Language::Go",
-      "then": "the result contains an ExportDeclaration named `A` at line 3 with kind Value"
-    },
-    {
-      "id": "S16",
-      "decision": [
-        "§3"
-      ],
-      "kind": "negative",
-      "description": "The later names of a const spec are not recorded",
-      "given": "a Go file declaring `const A, B = 1, 2`",
-      "when": "extract_exports is called on it with Language::Go",
-      "then": "the result contains no ExportDeclaration named `B`"
-    },
-    {
-      "id": "S17",
-      "decision": [
-        "§3"
-      ],
-      "kind": "negative",
-      "description": "The var rule does not spill over to consts in the same file",
-      "given": "a Go file declaring `var V, W = 1, 2` and `const C, D = 3, 4`",
-      "when": "extract_exports is called on it with Language::Go",
-      "then": "`V`, `W` and `C` are present and `D` is absent",
-      "test": "hexa-analysis/tests/adr_2611221623_spec_2.rs::part_2::s17_var_rule_does_not_spill_over_to_consts",
-      "red": "9bec090"
-    },
-    {
-      "id": "S18",
-      "decision": [
-        "§3"
-      ],
-      "kind": "property",
-      "description": "A const spec contributes at most its first name",
-      "given": "any Go const spec declaring names N1..Nk (k ≥ 1)",
-      "when": "extract_exports is called on the file with Language::Go",
-      "then": "no ExportDeclaration is produced for N2..Nk, and one is produced for N1 exactly when N1's first character is a Unicode upper-case letter"
     }
   ]
 }
