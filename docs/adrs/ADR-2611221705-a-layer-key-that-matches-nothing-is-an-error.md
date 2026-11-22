@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-11-22
-**Drivers:** Writing ADR-2611221645 S26, a fixture declared `analyze.layers` keys `src/domain/**` and `src/ui/**`. hexa reads a key as a path prefix, so neither matched a file: both files went unclassified and the edge between them, a real violation, was not reported. Nothing said so: `config_errors` was empty and the grade held. a TypeScript user, which declares its portal's layers by path, asked for such a key to be reported; a declaration that silently matches nothing is a check that passes over an empty scope. CLAUDE.md: "A gate that degrades silently is worse than no gate."
+**Drivers:** Writing ADR-2611221645 S26, a fixture declared `analyze.layers` keys `src/domain/**` and `src/ui/**`. hexa reads a key as a path prefix, so neither matched a file: `src/ui/Button.tsx` went unclassified (only `src/domain/` has a built-in layer by its folder name), and the edge from the domain to it, a real violation, was not reported. Nothing said so: `config_errors` was empty and the grade held. a TypeScript user, which declares its portal's layers by path, asked for such a key to be reported; a declaration that silently matches nothing is a check that passes over an empty scope. CLAUDE.md: "A gate that degrades silently is worse than no gate."
 **Supersedes:** none. A defect in how `hexa analyze` reads `analyze.layers`.
 
 ## Context

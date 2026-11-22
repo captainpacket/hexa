@@ -191,7 +191,7 @@
       "description": "The S26 fixture: the keys are still read as prefixes, and the gap is now reported",
       "given": "Graded files are src/domain/order.ts and src/ui/view.ts, where view.ts imports order.ts. The keys are \"src/domain/**\" (domain) and \"src/ui/**\" (adapters/primary).",
       "when": "The project is analyzed",
-      "then": "Both files remain unclassified in coverage, as before. config_errors holds two entries, one for each key, and each carries the glob hint (\"src/domain\" and \"src/ui\"). The health_score is 20 lower than with no analyze.layers.",
+      "then": "Coverage is what it is with no analyze.layers: src/domain/order.ts takes the domain layer from the built-in folder convention and src/ui/view.ts is unclassified; neither key classifies anything. config_errors holds two entries, one for each key, and each carries the glob hint (\"src/domain\" and \"src/ui\"). The health_score is no higher than with no analyze.layers: one file in two has a layer, so the coverage ceiling (50) caps both scores here; S02 shows the 20 points the two errors cost when no ceiling hides them.",
       "test": "hexa-analysis/tests/adr_2611221705_spec.rs::part_2::s15_s26_fixture_reports_both_glob_keys"
     },
     {
