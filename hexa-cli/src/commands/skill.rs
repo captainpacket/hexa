@@ -8,8 +8,10 @@
 //! were already right here.
 //!
 //! `sync` now means what an operator expects it to mean: write the embedded
-//! skills into `.claude/skills/` so this project has them. Existing files are
-//! never overwritten.
+//! skills into `.claude/skills/`, and the lead and builder roles into
+//! `.claude/agents/` (ADR-2611221600 §4), so this project has them. Existing
+//! files are never overwritten: a copy that differs is the project's own, and
+//! only `--update` replaces it.
 
 use std::path::{Path, PathBuf};
 
@@ -22,8 +24,9 @@ use crate::assets::Assets;
 pub enum SkillAction {
     /// List available skills — embedded and project-local
     List,
-    /// Write the embedded skills into .claude/skills/. Never overwrites; names a skill whose copy differs
-    /// from this binary's, and `--update` replaces those (a project's own skills are never touched)
+    /// Write the embedded skills into .claude/skills/ and the agent roles into .claude/agents/. Never
+    /// overwrites; names a file whose copy differs from this binary's, and `--update` replaces those (a
+    /// project's own skills and agents are never touched)
     Sync {
         /// Replace the embedded skills whose copy here differs from this binary's
         #[arg(long)]
@@ -176,7 +179,8 @@ pub(crate) fn remove_legacy_flat_skills(skills_dir: &Path) -> std::io::Result<Ve
 }
 
 fn sync_skills(update: bool) -> anyhow::Result<()> {
-    let target = project_root().join(".claude").join("skills");
+    let root = project_root().join(".claude");
+    let target = root.join("skills");
     let (written, stale) = sync_into(&target, update)?;
     let legacy = remove_legacy_flat_skills(&target)?;
     if !legacy.is_empty() {
@@ -188,37 +192,49 @@ fn sync_skills(update: bool) -> anyhow::Result<()> {
             legacy.join(", ")
         );
     }
-    if written.is_empty() && stale.is_empty() && legacy.is_empty() {
-        println!("{} Skills already present and current in {}", "\u{2713}".green(), target.display());
+    let agents = root.join("agents");
+    let (a_written, a_stale) = sync_prefix("agents/", &agents, update)?;
+    if written.is_empty() && stale.is_empty() && legacy.is_empty() && a_written.is_empty() && a_stale.is_empty() {
+        println!("{} Skills and agents already present and current in {}", "\u{2713}".green(), root.display());
     }
+    report("skill", &target, &written, &stale, update);
+    report("agent", &agents, &a_written, &a_stale, update);
+    Ok(())
+}
+
+fn report(kind: &str, target: &Path, written: &[String], stale: &[String], update: bool) {
     if !written.is_empty() {
         let what = if update { "written or updated" } else { "written" };
-        println!("{} {} skill files {} in {}", "\u{2713}".green(), written.len(), what, target.display());
+        println!("{} {} {kind} files {} in {}", "\u{2713}".green(), written.len(), what, target.display());
     }
     if !stale.is_empty() {
         println!(
-            "{} {} skill file{} differ from this binary's (not changed): {}",
+            "{} {} {kind} file{} differ from this binary's (not changed): {}",
             "!".yellow(),
             stale.len(),
             if stale.len() == 1 { "" } else { "s" },
             stale.join(", ")
         );
-        println!("  `hexa skill sync --update` replaces them; a skill you edited by hand is replaced too.");
+        println!("  `hexa skill sync --update` replaces them; a {kind} you edited by hand is replaced too.");
     }
-    Ok(())
 }
 
 /// Write the embedded skills into `target`. Without `update` an existing file is never overwritten and the
 /// ones whose bytes differ are returned as stale; with it they are replaced (only files this binary
 /// carries: a project's own skills are left alone). Returns (written, stale).
 fn sync_into(target: &Path, update: bool) -> std::io::Result<(Vec<String>, Vec<String>)> {
+    sync_prefix("skills/", target, update)
+}
+
+/// [`sync_into`] for any embedded prefix (`skills/`, `agents/`).
+pub(crate) fn sync_prefix(prefix: &str, target: &Path, update: bool) -> std::io::Result<(Vec<String>, Vec<String>)> {
     if update {
-        return Ok((Assets::extract_owned("skills/", target)?, Vec::new()));
+        return Ok((Assets::extract_owned(prefix, target)?, Vec::new()));
     }
-    let written = Assets::extract_to("skills/", target)?;
+    let written = Assets::extract_to(prefix, target)?;
     let mut stale = Vec::new();
     for path in Assets::iter() {
-        let Some(rel) = path.strip_prefix("skills/") else { continue };
+        let Some(rel) = path.strip_prefix(prefix) else { continue };
         let rel = rel.strip_suffix(".tmpl").unwrap_or(rel);
         if written.iter().any(|w| w == rel) {
             continue;
