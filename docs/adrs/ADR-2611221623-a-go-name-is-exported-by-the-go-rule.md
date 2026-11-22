@@ -24,7 +24,7 @@ A var spec may declare several names: `var A, B = 1, 2`. hexa took the first. `B
 
 ## Implementation
 
-**Gate:** `cargo test -p hexa-analysis --test adr_2611221623_spec`
+**Gate:** `cargo test -p hexa-analysis --test adr_2611221623_spec_2` (11 scenarios, red at 9bec090, a commit off 4a958b8 before the fix; S03, S04, S05, S12, S15, S16 and S18 already held and stay pending as guards)
 
 The code is in the tree (commit feedc03); its tests are proved red at the commit before it.
 
