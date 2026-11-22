@@ -178,6 +178,62 @@ fn is_read_only_agent(kind: &str) -> bool {
     READ_ONLY_AGENTS.iter().any(|t| kind.eq_ignore_ascii_case(t))
 }
 
+/// Tools that write: a definition granting any of them is not read-only.
+const WRITING_TOOLS: &[&str] = &["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"];
+
+/// Whether a subagent type is read-only: a fixed read-only type, or one whose
+/// definition (`.claude/agents/<type>.md` in the project, else in the user's
+/// home) lists `tools` and none of them writes (ADR-2611221646 §5).
+fn agent_is_read_only(kind: &str, project_dir: &Path) -> bool {
+    if is_read_only_agent(kind) {
+        return true;
+    }
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    definition_grants_only_reads(kind, project_dir, home.as_deref())
+}
+
+fn definition_grants_only_reads(kind: &str, project_dir: &Path, home: Option<&Path>) -> bool {
+    if kind.is_empty() || kind.contains('/') || kind.contains('\\') || kind.starts_with('.') {
+        return false;
+    }
+    let file = format!("{kind}.md");
+    let project_def = project_dir.join(".claude/agents").join(&file);
+    let def = if project_def.is_file() {
+        project_def
+    } else {
+        match home.map(|h| h.join(".claude/agents").join(&file)) {
+            Some(p) if p.is_file() => p,
+            _ => return false,
+        }
+    };
+    let Ok(text) = std::fs::read_to_string(&def) else { return false };
+    match definition_tools(&text) {
+        Some(tools) => !tools.iter().any(|t| {
+            let name = t.split('(').next().unwrap_or("").trim();
+            WRITING_TOOLS.contains(&name)
+        }),
+        None => false,
+    }
+}
+
+/// The `tools` list in a definition's YAML frontmatter: `None` when there is
+/// no frontmatter or no (non-empty) `tools` entry.
+fn definition_tools(text: &str) -> Option<Vec<String>> {
+    let mut lines = text.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    let front: Vec<&str> = lines.take_while(|l| l.trim() != "---").collect();
+    let yaml: serde_yaml::Value = serde_yaml::from_str(&front.join("\n")).ok()?;
+    let tools: Vec<String> = match yaml.get("tools")? {
+        serde_yaml::Value::String(s) => s.split(',').map(|t| t.trim().to_string()).collect(),
+        serde_yaml::Value::Sequence(seq) => seq.iter().filter_map(|v| v.as_str().map(|s| s.trim().to_string())).collect(),
+        _ => return None,
+    };
+    let tools: Vec<String> = tools.into_iter().filter(|t| !t.is_empty()).collect();
+    (!tools.is_empty()).then_some(tools)
+}
+
 /// A git worktree has a `.git` file; the main checkout has a `.git` directory.
 fn in_worktree(dir: &Path) -> bool {
     dir.join(".git").is_file()
@@ -310,6 +366,11 @@ async fn session_start(project_dir: &Path) -> Result<()> {
             "{} Not a hexa project (no .hexa/project.json). Run `hexa init`.",
             "\u{26a0}".yellow()
         );
+        // What the root's manifest says, so the session is not left to guess
+        // (ADR-2611221646 §4). Nothing is said when no manifest names one.
+        if let Some(language) = manifest_language(project_dir) {
+            println!("Language: {language}");
+        }
         return Ok(());
     }
 
@@ -378,6 +439,23 @@ fn minimal_fingerprint_block(project_dir: &Path, project_name: &str) -> String {
     minimal_fingerprint_block_inner(project_dir, project_name)
 }
 
+/// The language the root's manifest names: `Cargo.toml`, `go.mod`,
+/// `package.json`, then a Python manifest (`pyproject.toml`, `setup.py`,
+/// `setup.cfg`) when none of the others is there (ADR-2611221646 §4).
+fn manifest_language(project_dir: &Path) -> Option<&'static str> {
+    if project_dir.join("Cargo.toml").exists() {
+        Some("rust")
+    } else if project_dir.join("go.mod").exists() {
+        Some("go")
+    } else if project_dir.join("package.json").exists() {
+        Some("typescript")
+    } else if ["pyproject.toml", "setup.py", "setup.cfg"].iter().any(|m| project_dir.join(m).exists()) {
+        Some("python")
+    } else {
+        None
+    }
+}
+
 fn minimal_fingerprint_block_inner(project_dir: &Path, project_name: &str) -> String {
     let mut language = "unknown".to_string();
     let mut framework = "unknown".to_string();
@@ -417,6 +495,9 @@ fn minimal_fingerprint_block_inner(project_dir: &Path, project_name: &str) -> St
             else if pj.contains("\"next\"") { framework = "next.js".to_string(); output_type = "web-app".to_string(); }
             else if pj.contains("\"axum\"") { framework = "axum".to_string(); }
         }
+    } else if let Some(python) = manifest_language(project_dir) {
+        // ADR-2611221646 §4: a Python manifest, and none of the others.
+        language = python.to_string();
     }
 
     // Extract objective from most recent workplan
@@ -517,7 +598,8 @@ async fn subagent_start() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let isolated = in_worktree(&cwd);
-    if !isolated && !agent_type.is_empty() && !is_read_only_agent(&agent_type) {
+    let project_dir = std::env::var("CLAUDE_PROJECT_DIR").map(PathBuf::from).unwrap_or_else(|_| cwd.clone());
+    if !isolated && !agent_type.is_empty() && !agent_is_read_only(&agent_type, &project_dir) {
         eprintln!(
             "[hexa hook] subagent {} ({}) is running in the main checkout, not a worktree; its edits land on this branch",
             agent_id, agent_type
@@ -910,16 +992,16 @@ async fn pre_agent() -> Result<()> {
         Err(_) => return Ok(()), // Can't parse — allow (fail-open)
     };
     let subagent_type = input["subagent_type"].as_str().unwrap_or("");
-    if is_read_only_agent(subagent_type) {
+    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
+    if agent_is_read_only(subagent_type, &project_dir) {
         return Ok(());
     }
     let isolated = input["isolation"].as_str() == Some("worktree");
     if isolated {
         return Ok(());
     }
-    let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
     let who = if subagent_type.is_empty() { "subagent".to_string() } else { format!("{subagent_type} subagent") };
     if enforcement_mode(&project_dir) == "mandatory" {
         eprintln!(

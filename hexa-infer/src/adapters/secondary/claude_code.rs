@@ -349,15 +349,29 @@ impl ClaudeCodeInferenceAdapter {
         if result.exit_code != 0 {
             return Err(InferenceError::ApiError {
                 status: http_like_status(result.exit_code),
-                body: format!(
-                    "claude-text exited with {}: {}",
-                    result.exit_code,
-                    String::from_utf8_lossy(&result.stderr)
-                ),
+                body: failure_body(result.exit_code, &result.stdout, &result.stderr),
             });
         }
         Ok(TextReply::read(&String::from_utf8_lossy(&result.stdout)))
     }
+}
+
+/// The error body of a failed `claude-text` call (ADR-2611221646 §1): the
+/// reason the CLI wrote into its stdout JSON (`result`, else
+/// `terminal_reason`) and whatever it wrote to stderr.
+fn failure_body(exit_code: i32, stdout: &[u8], stderr: &[u8]) -> String {
+    let reason = serde_json::from_slice::<serde_json::Value>(stdout).ok().and_then(|v| {
+        ["result", "terminal_reason"].iter().find_map(|k| {
+            v.get(*k).and_then(|x| x.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
+        })
+    });
+    let stderr = String::from_utf8_lossy(stderr).trim().to_string();
+    let detail = match (reason, stderr.is_empty()) {
+        (Some(r), true) => r,
+        (Some(r), false) => format!("{r}; stderr: {stderr}"),
+        (None, _) => stderr,
+    };
+    format!("claude-text exited with {exit_code}: {detail}")
 }
 
 impl ClaudeCodeInferenceAdapter {

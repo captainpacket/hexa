@@ -408,6 +408,28 @@ async fn detect_go_module_prefix(root: &Path) -> Option<String> {
     None
 }
 
+/// What the grade leaves out of one project: the built-in patterns, the
+/// project's `analyze.exclude`, and Python test files — the same rules as the
+/// grade's own walk. A report that counts files (the "Hex layers" tally) asks
+/// this, so it counts what the grade reads (ADR-2611221646 §3).
+pub struct GradeExclusions {
+    project: Vec<String>,
+}
+
+impl GradeExclusions {
+    /// The exclusions for the project at `root`.
+    pub fn for_project(root: &Path) -> Self {
+        Self { project: project_excludes(root) }
+    }
+
+    /// Whether the grade leaves out `rel`, a project-relative path.
+    pub fn excludes(&self, rel: &str) -> bool {
+        let rel = rel.replace('\\', "/");
+        let project: Vec<&str> = self.project.iter().map(String::as_str).collect();
+        is_python_test(&rel) || excluded_by_default(&rel) || matches_exclude(&rel, &project)
+    }
+}
+
 /// The files `hexa analyze` grades, listed synchronously for the display
 /// detectors. Same rules as the async walk: `EXCLUDE_PATTERNS`, the
 /// project's `analyze.exclude`, test files out. Paths are project-relative

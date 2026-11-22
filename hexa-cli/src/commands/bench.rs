@@ -55,8 +55,11 @@ pub enum BenchAction {
 #[derive(Debug, Deserialize)]
 struct Fixture {
     id: String,
+    #[serde(default)]
     tier: String,
+    #[serde(alias = "task")]
     instruction: String,
+    #[serde(default)]
     target_file: String,
     oracle: Oracle,
     #[serde(default)]
@@ -106,6 +109,10 @@ async fn agentic(
     if fixtures.is_empty() {
         println!("{} no fixtures matched in {}", "⬡ bench:".yellow(), corpus);
         return Ok(());
+    }
+    // ADR-2611221646 §2: every evidence program must resolve before anything runs.
+    if let Some(refusal) = missing_evidence_programs(&fixtures) {
+        anyhow::bail!("{refusal}");
     }
 
     println!(
@@ -302,6 +309,49 @@ fn print_vector(results: &[ArmResult]) {
     }
 }
 
+/// The program an evidence command starts with: its first word after any
+/// leading `NAME=value` assignments.
+fn evidence_program(command: &str) -> Option<&str> {
+    command
+        .split_whitespace()
+        .find(|w| !(w.contains('=') && !w.starts_with('=') && !w.contains('/')))
+}
+
+/// Whether `program` can be run: a path that exists, or a name found on `PATH`.
+fn program_resolves(program: &str) -> bool {
+    if program.contains('/') {
+        return Path::new(program).is_file();
+    }
+    std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).any(|d| d.join(program).is_file()))
+        .unwrap_or(false)
+}
+
+/// The refusal when a selected fixture's evidence program is not on `PATH`
+/// (ADR-2611221646 §2): each missing program with the fixtures that need it.
+fn missing_evidence_programs(fixtures: &[Fixture]) -> Option<String> {
+    let mut missing: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    for fx in fixtures {
+        let Some(program) = evidence_program(&fx.oracle.command) else {
+            continue;
+        };
+        if !program_resolves(program) {
+            missing.entry(program.to_string()).or_default().push(&fx.id);
+        }
+    }
+    if missing.is_empty() {
+        return None;
+    }
+    let lines: Vec<String> = missing
+        .iter()
+        .map(|(program, ids)| format!("  {program} (needed by {})", ids.join(", ")))
+        .collect();
+    Some(format!(
+        "bench refused: evidence program(s) not found on PATH, so no fixture was run:\n{}",
+        lines.join("\n")
+    ))
+}
+
 fn load_fixtures(dir: &str, filter: Option<&str>, include_draft: bool) -> anyhow::Result<Vec<Fixture>> {
     let path = Path::new(dir);
     if !path.is_dir() {
@@ -310,13 +360,18 @@ fn load_fixtures(dir: &str, filter: Option<&str>, include_draft: bool) -> anyhow
     let mut entries: Vec<_> = std::fs::read_dir(path)?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.extension().map(|x| x == "json").unwrap_or(false))
+        .filter(|p| p.extension().map(|x| x == "json" || x == "yaml" || x == "yml").unwrap_or(false))
         .collect();
     entries.sort();
     let mut out = Vec::new();
     for p in entries {
         let raw = std::fs::read_to_string(&p)?;
-        let fx: Fixture = match serde_json::from_str(&raw) {
+        let parsed: Result<Fixture, String> = if p.extension().map(|x| x == "json").unwrap_or(false) {
+            serde_json::from_str(&raw).map_err(|e| e.to_string())
+        } else {
+            serde_yaml::from_str(&raw).map_err(|e| e.to_string())
+        };
+        let fx: Fixture = match parsed {
             Ok(f) => f,
             Err(e) => {
                 eprintln!("{} skipping {}: {}", "⚠".yellow(), p.display(), e);

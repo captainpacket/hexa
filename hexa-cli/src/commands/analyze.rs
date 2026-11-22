@@ -183,12 +183,19 @@ pub async fn run(
             println!();
             println!("  {}", "Hex layers:".bold());
 
+            // The tally counts the files the grade reads (ADR-2611221646 §3):
+            // a file `analyze.exclude` or a built-in pattern leaves out is in
+            // no layer.
+            let exclusions = hexa_analysis::analyzer::GradeExclusions::for_project(&root);
             for file in collect_source_files(&scan_dir) {
                 let rel = file
                     .strip_prefix(&root)
                     .unwrap_or(&file)
                     .to_string_lossy()
                     .replace('\\', "/");
+                if exclusions.excludes(&rel) {
+                    continue;
+                }
                 // The patterns are `/adapters/secondary/`; a path relative to
                 // the module root, `adapters/secondary/memory.go`, has no
                 // leading slash and matched nothing.

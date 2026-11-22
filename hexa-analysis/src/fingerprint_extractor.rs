@@ -156,6 +156,13 @@ async fn detect_language_framework(root: &Path) -> (String, String) {
         return ("typescript".to_string(), framework);
     }
 
+    // Python: a Python manifest and none of the others (ADR-2611221646 §4).
+    for manifest in ["pyproject.toml", "setup.py", "setup.cfg"] {
+        if fs::metadata(root.join(manifest)).await.is_ok() {
+            return ("python".to_string(), "none".to_string());
+        }
+    }
+
     ("unknown".to_string(), "none".to_string())
 }
 
