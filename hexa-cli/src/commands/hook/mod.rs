@@ -184,8 +184,9 @@ fn is_read_only_agent(kind: &str) -> bool {
 const READ_TOOLS: &[&str] = &["Read", "Grep", "Glob", "LS", "NotebookRead", "WebFetch", "WebSearch"];
 
 /// Whether a subagent type is read-only: a fixed read-only type, or one whose
-/// definition (`.claude/agents/<type>.md` in the project, else in the user's
-/// home) lists `tools` and every one of them only reads (ADR-2611221646 §5).
+/// definition lists `tools` and every one of them only reads
+/// (ADR-2611221646 §5). The definition is found as Claude Code finds it, by
+/// its frontmatter `name:` (see [`find_definition`]).
 fn agent_is_read_only(kind: &str, project_dir: &Path) -> bool {
     if is_read_only_agent(kind) {
         return true;
@@ -194,36 +195,95 @@ fn agent_is_read_only(kind: &str, project_dir: &Path) -> bool {
     definition_grants_only_reads(kind, project_dir, home.as_deref())
 }
 
+/// What one agents folder holds for a subagent type.
+enum Definition {
+    /// No file in the folder has that `name:`.
+    Absent,
+    /// Exactly one file does: its parsed frontmatter.
+    One(serde_yaml::Value),
+    /// More than one file claims the name: no definition hexa can trust.
+    Ambiguous,
+}
+
+/// The `*.md` file in `dir` whose frontmatter `name:` is `kind`. Claude Code
+/// names an agent by that field, not by the file's name, so a file without a
+/// `name:` matches nothing.
+fn find_definition(dir: &Path, kind: &str) -> Definition {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Definition::Absent };
+    let mut found = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("md") || !path.is_file() {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        let Some(front) = frontmatter(&text) else { continue };
+        if front.get("name").and_then(|n| n.as_str()).map(str::trim) == Some(kind) {
+            found.push(front);
+        }
+    }
+    match found.len() {
+        0 => Definition::Absent,
+        1 => found.pop().map_or(Definition::Absent, Definition::One),
+        _ => Definition::Ambiguous,
+    }
+}
+
+/// A project definition is final: the home folder is read only when no
+/// project file claims the name. An ambiguous name is no definition.
 fn definition_grants_only_reads(kind: &str, project_dir: &Path, home: Option<&Path>) -> bool {
-    if kind.is_empty() || kind.contains('/') || kind.contains('\\') || kind.starts_with('.') {
+    if kind.trim().is_empty() {
         return false;
     }
-    let file = format!("{kind}.md");
-    let project_def = project_dir.join(".claude/agents").join(&file);
-    let def = if project_def.is_file() {
-        project_def
-    } else {
-        match home.map(|h| h.join(".claude/agents").join(&file)) {
-            Some(p) if p.is_file() => p,
+    let front = match find_definition(&project_dir.join(".claude/agents"), kind) {
+        Definition::One(f) => f,
+        Definition::Ambiguous => return false,
+        Definition::Absent => match home.map(|h| find_definition(&h.join(".claude/agents"), kind)) {
+            Some(Definition::One(f)) => f,
             _ => return false,
-        }
+        },
     };
-    let Ok(text) = std::fs::read_to_string(&def) else { return false };
-    match definition_tools(&text, kind) {
+    match definition_tools(&front) {
         Some(tools) => tools.iter().all(|t| is_read_tool(t)),
         None => false,
     }
 }
 
 /// Whether one `tools` entry, such as `Read` or `WebFetch(domain:x.com)`,
-/// names a tool that only reads. Case does not matter; `*` anywhere is
-/// every tool, so never read-only.
+/// names a tool that only reads. The name matches exactly (`read` is not
+/// `Read`), and a specifier's brackets must balance and close at the end of
+/// the entry. `*` anywhere is every tool. Anything else is unknown, and an
+/// unknown tool writes.
 fn is_read_tool(entry: &str) -> bool {
     if entry.contains('*') {
         return false;
     }
-    let name = entry.split('(').next().unwrap_or("").trim();
-    READ_TOOLS.iter().any(|t| name.eq_ignore_ascii_case(t))
+    let name = match entry.find('(') {
+        None if entry.contains(')') => return false,
+        None => entry,
+        Some(open) if closes_at_end(&entry[open..]) => &entry[..open],
+        Some(_) => return false,
+    };
+    READ_TOOLS.contains(&name)
+}
+
+/// Whether the bracket that opens `s` closes at its last character, so the
+/// brackets balance and nothing follows them.
+fn closes_at_end(s: &str) -> bool {
+    let mut depth = 0usize;
+    for (i, c) in s.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + c.len_utf8() == s.len();
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 /// Split a `tools` string on commas and whitespace outside parentheses:
@@ -253,22 +313,20 @@ fn split_tools(s: &str) -> Vec<String> {
     out.into_iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect()
 }
 
-/// The `tools` list in a definition's YAML frontmatter. `None` — a
-/// definition hexa cannot read, treated as none — when there is no
-/// frontmatter, no (non-empty) `tools` entry, a list item that is not a
-/// string, or a `name:` other than the requested subagent type.
-fn definition_tools(text: &str, kind: &str) -> Option<Vec<String>> {
+/// A definition's YAML frontmatter, or `None` when it has none hexa can read.
+fn frontmatter(text: &str) -> Option<serde_yaml::Value> {
     let mut lines = text.lines();
     if lines.next()?.trim() != "---" {
         return None;
     }
     let front: Vec<&str> = lines.take_while(|l| l.trim() != "---").collect();
-    let yaml: serde_yaml::Value = serde_yaml::from_str(&front.join("\n")).ok()?;
-    if let Some(name) = yaml.get("name") {
-        if name.as_str().map(str::trim) != Some(kind) {
-            return None;
-        }
-    }
+    serde_yaml::from_str(&front.join("\n")).ok()
+}
+
+/// The `tools` list in a definition's frontmatter. `None` — treated as no
+/// definition — when there is no (non-empty) `tools` entry, or a list item
+/// that is not a string.
+fn definition_tools(yaml: &serde_yaml::Value) -> Option<Vec<String>> {
     let tools: Vec<String> = match yaml.get("tools")? {
         serde_yaml::Value::String(s) => split_tools(s),
         serde_yaml::Value::Sequence(seq) => {

@@ -87,7 +87,7 @@ fn only_read_tools_run_in_place() {
     let fx = Fx::new();
     let allowed = [
         ("a1", "tools: Read, Grep, Glob, LS, NotebookRead, WebFetch, WebSearch"),
-        ("a2", "tools: read, grep"),
+        ("a2", "tools: Read,Grep"),
         ("a3", "tools: Read Grep Glob"),
         ("a4", "tools:\n  - Read\n  - Grep"),
         ("a5", "tools: WebFetch(domain:example.com), Read"),
@@ -113,6 +113,7 @@ fn any_other_tool_is_assumed_to_write() {
         ("r9", "tools:\n  - Read\n  - [Write]"),
         ("r10", "tools: Read, Task"),
         ("r11", "tools:\n  - Read Write"),
+        ("r12", "tools: read, grep"),
     ];
     for (name, fm) in refused {
         fx.define(name, &format!("name: {name}\n{fm}"));
@@ -128,5 +129,5 @@ fn a_definition_named_for_another_agent_does_not_count() {
     fx.define("honest", "name: honest\ntools: Read, Grep");
     assert!(!fx.blocked("honest"));
     fx.define("nameless", "tools: Read, Grep");
-    assert!(!fx.blocked("nameless"), "a definition with no name: is named by its file");
+    assert!(fx.blocked("nameless"), "a definition with no name: matches no agent, whatever its file is called");
 }
