@@ -10,6 +10,9 @@
     "by": "craigjohnson",
     "sha256": "d6a65c4dd82b25d85e60b899bcf6814751ebff818a0c6671f15fe9def620ddfd"
   },
+  "sealed": {
+    "hexa-analysis/tests/adr_2611221609_spec_2.rs": "a45f145b942bf70b02639757d67caddb31b1f6b98c0373979bd2d5b3ecbdd5ce"
+  },
   "specs": [
     {
       "id": "S01",
@@ -20,7 +23,9 @@
       "description": "An exported var inside a var group is an export of kind Value at its spec's line",
       "given": "A Go file `pkg/config.go` whose line 1 is `package pkg`, line 3 is `var (`, line 4 is `\tTimeout = 30`, and line 5 is `)`",
       "when": "extract_exports is called on it with Language::Go",
-      "then": "The result contains exactly one ExportDeclaration named `Timeout`, with file `pkg/config.go`, line 4, kind ExportKind::Value and hexa_public false"
+      "then": "The result contains exactly one ExportDeclaration named `Timeout`, with file `pkg/config.go`, line 4, kind ExportKind::Value and hexa_public false",
+      "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s01_grouped_exported_var_is_value_export_at_spec_line",
+      "red": "37d5f79"
     },
     {
       "id": "S02",
@@ -31,7 +36,9 @@
       "description": "Every exported spec in a var group is recorded, each at its own line",
       "given": "A Go file with `var (` on line 3, `\tA = 1` on line 4, `\tB string` on line 5, `\tC, D = 2, 3` on line 6, and `)` on line 7",
       "when": "extract_exports is called on it with Language::Go",
-      "then": "The exports include `A` at line 4, `B` at line 5, and `C` and `D` both at line 6, all of kind Value"
+      "then": "The exports include `A` at line 4, `B` at line 5, and `C` and `D` both at line 6, all of kind Value",
+      "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s02_every_exported_spec_in_var_group_recorded_at_own_line",
+      "red": "37d5f79"
     },
     {
       "id": "S03",
@@ -42,7 +49,9 @@
       "description": "A grouped var and a grouped const with the same shape produce the same export record",
       "given": "Two Go files that differ only in the keyword: one has `var (` on line 3 and `\tLimit = 5` on line 4, the other has `const (` on line 3 and `\tLimit = 5` on line 4",
       "when": "extract_exports is called on each with Language::Go",
-      "then": "Each yields an export named `Limit` at line 4 of kind Value with hexa_public false; the two records agree in name, line, kind and hexa_public"
+      "then": "Each yields an export named `Limit` at line 4 of kind Value with hexa_public false; the two records agree in name, line, kind and hexa_public",
+      "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s03_grouped_var_and_grouped_const_agree",
+      "red": "37d5f79"
     },
     {
       "id": "S04",
@@ -53,7 +62,9 @@
       "description": "A grouped exported var that nothing uses is reported as a dead export",
       "given": "A Go project in which `internal/domain/vars.go` declares `var (\\n\\tUnusedFlag = true\\n)` and no other file in the project names `UnusedFlag`",
       "when": "The project is analyzed for dead exports",
-      "then": "The dead exports include one entry with file `internal/domain/vars.go`, export_name `UnusedFlag` and the line of its spec"
+      "then": "The dead exports include one entry with file `internal/domain/vars.go`, export_name `UnusedFlag` and the line of its spec",
+      "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s04_unused_grouped_var_is_dead_export",
+      "red": "37d5f79"
     },
     {
       "id": "S05",
@@ -75,7 +86,9 @@
       "description": "A grouped var must not be left out of the exports",
       "given": "A Go file whose only declaration is `var (\\n\\tTimeout = 30\\n)`",
       "when": "extract_exports is called on it with Language::Go",
-      "then": "The result is not empty and contains an export named `Timeout`"
+      "then": "The result is not empty and contains an export named `Timeout`",
+      "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s06_grouped_var_not_left_out",
+      "red": "37d5f79"
     },
     {
       "id": "S07",
@@ -86,7 +99,9 @@
       "description": "A grouped var must not be recorded with a kind other than Value or at a line other than its spec's",
       "given": "A Go file with `var (` on line 3 and `\\tTimeout = 30` on line 4",
       "when": "extract_exports is called on it with Language::Go",
-      "then": "The `Timeout` export has kind Value, not Function, Type, Method, Impl or Default, and its line is 4, not 3 (the line of the `var` keyword)"
+      "then": "The `Timeout` export has kind Value, not Function, Type, Method, Impl or Default, and its line is 4, not 3 (the line of the `var` keyword)",
+      "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s07_grouped_var_kind_and_line",
+      "red": "37d5f79"
     },
     {
       "id": "S08",
@@ -97,7 +112,9 @@
       "description": "Grouping an exported var does not change its export record",
       "given": "Any upper-case identifier N and any valid Go initializer, written once ungrouped as `var N = <init>` with the spec on line L, and once grouped as `var (` followed by `N = <init>` with the spec on line L",
       "when": "extract_exports is called on each with Language::Go",
-      "then": "Both yield exactly one export named N, at line L, of kind Value, with the same hexa_public value"
+      "then": "Both yield exactly one export named N, at line L, of kind Value, with the same hexa_public value",
+      "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s08_grouping_does_not_change_record",
+      "red": "37d5f79"
     },
     {
       "id": "S09",
@@ -108,7 +125,9 @@
       "description": "Exactly the upper-case names in a var group are recorded, with no duplicates",
       "given": "Any Go file whose only declaration is a `var ( … )` group with any mix of specs, each declaring one or more names that start with an upper-case or lower-case letter",
       "when": "extract_exports is called on it with Language::Go",
-      "then": "The set of export names equals the set of declared names starting with an upper-case letter; each appears once, of kind Value, at the line of the spec that declares it"
+      "then": "The set of export names equals the set of declared names starting with an upper-case letter; each appears once, of kind Value, at the line of the spec that declares it",
+      "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s09_exactly_upper_case_names_recorded_once",
+      "red": "37d5f79"
     },
     {
       "id": "S10",
@@ -130,7 +149,9 @@
       "description": "Only the export kind and record of the grouped var are new: a mixed file gains exactly the grouped vars",
       "given": "A Go file containing `var Single = 1`, `func Run() {}`, and `var (\\n\\tGrouped = 2\\n)`",
       "when": "extract_exports is called on it with Language::Go",
-      "then": "The exports are exactly `Single`, `Run` and `Grouped`, with no other entries"
+      "then": "The exports are exactly `Single`, `Run` and `Grouped`, with no other entries",
+      "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s11_mixed_file_gains_exactly_grouped_var",
+      "red": "37d5f79"
     },
     {
       "id": "S12",
