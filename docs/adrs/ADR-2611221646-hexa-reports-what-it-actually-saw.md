@@ -1,6 +1,7 @@
 # ADR-2611221646: hexa reports what it actually saw
 
-**Status:** Accepted
+**Status:** Completed
+> 2026-11-22 Completed: landed on main at 9e913fb; gate `cargo test -p hexa-cli --test adr_2611221646_spec_2 --test adr_2611221646_spec_3` passed (hexa loop stage done)
 > 2026-11-22 Accepted: Accepted in craigjohnson's session: he accepted the spec, chose the fix under his rule (real bug fixes only; architectural correctness first), and its sealed tests, red before the code, pass on main
 **Date:** 2026-11-22
 **Drivers:** Five places where hexa printed something untrue or refused something harmless, found while using it on 2026-11-21 and 2026-11-22:
