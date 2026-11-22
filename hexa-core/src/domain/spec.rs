@@ -631,10 +631,6 @@ pub fn rebind(previous: &Spec, accepted: &Spec) -> Spec {
     out
 }
 
-/// `source` without the `#[test]` functions named, each with its doc
-/// comments and attributes (§2).
-/// The names of the `#[test]` functions in `source`, read as code: text in
-/// a string or a comment is not a test.
 /// Every item in `from..to`, and in the body of every inline `mod` among
 /// them, at any depth: a generation batched into `mod part_N { … }` puts its
 /// tests one module down.
@@ -651,6 +647,8 @@ fn items_deep(src: &str, mask: &[bool], from: usize, to: usize) -> Vec<Item> {
     out
 }
 
+/// The names of the `#[test]` functions in `source`, read as code: text in
+/// a string or a comment is not a test.
 pub fn test_fns(source: &str) -> Vec<String> {
     let mask = code_mask(source);
     let mut found: Vec<(usize, Item)> = items_deep(source, &mask, 0, source.len()).into_iter().map(|it| (it.span.0, it)).collect();
@@ -672,6 +670,8 @@ pub fn test_fns(source: &str) -> Vec<String> {
         .collect()
 }
 
+/// `source` without the `#[test]` functions named, each with its doc
+/// comments and attributes (§2).
 pub fn without_tests(source: &str, names: &[String]) -> String {
     if names.is_empty() {
         return source.to_string();
@@ -694,10 +694,19 @@ pub fn without_tests(source: &str, names: &[String]) -> String {
             cut.push((it.span.0, end));
         }
     }
+    splice_out(source, cut)
+}
+
+/// `source` without the byte ranges `cut`. A range that starts before the
+/// previous one ended lies inside a range already cut, and is skipped.
+fn splice_out(source: &str, mut cut: Vec<(usize, usize)>) -> String {
     cut.sort();
     let mut out = String::with_capacity(source.len());
     let mut at = 0;
     for (a, b) in cut {
+        if a < at {
+            continue;
+        }
         out.push_str(&source[at..a]);
         at = b;
     }
@@ -722,6 +731,14 @@ mod tests {
         assert!(!kept.contains("fn s02_green("), "the named test inside part_1 is cut: {kept}");
         assert!(kept.contains("fn s01_red(") && kept.contains("fn s03_red("), "the others stay: {kept}");
         assert!(kept.contains("mod part_1 {") && kept.contains("mod part_2 {"), "the modules stay: {kept}");
+    }
+
+    /// Overlapping cuts must not panic: one that starts inside a cut already
+    /// made is part of it.
+    #[test]
+    fn overlapping_cuts_are_skipped_not_a_panic() {
+        assert_eq!(splice_out("abcdefgh", vec![(1, 5), (3, 4), (6, 7)]), "afh");
+        assert_eq!(splice_out("abcdef", vec![(1, 3), (3, 5)]), "af");
     }
 
     fn sc(id: &str, d: &[&str], kind: Kind) -> Scenario {
