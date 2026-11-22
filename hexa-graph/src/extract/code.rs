@@ -359,7 +359,32 @@ fn extract_go(root: &Node, source: &str) -> FileExtract {
             _ => {}
         }
     }
+    let mut names = std::collections::BTreeSet::new();
+    collect_go_identifiers(*root, source, &mut names);
+    if !names.is_empty() {
+        out.imports.push(RawImport {
+            raw_path: ".".to_string(),
+            names: names.into_iter().collect(),
+            line: 1,
+            kind: ImportKind::SamePackage,
+        });
+    }
     out
+}
+
+/// Every identifier a Go file writes, for its same-package references.
+fn collect_go_identifiers(node: Node, source: &str, names: &mut std::collections::BTreeSet<String>) {
+    if node.kind() == "identifier" || node.kind() == "type_identifier" {
+        let t = text(node, source);
+        if !t.is_empty() {
+            names.insert(t.to_string());
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_go_identifiers(child, source, names);
+    }
 }
 
 fn collect_go_types(node: Node, source: &str, entities: &mut Vec<Entity>) {
@@ -385,16 +410,27 @@ fn collect_go_types(node: Node, source: &str, entities: &mut Vec<Entity>) {
 }
 
 fn collect_go_consts(node: Node, source: &str, entities: &mut Vec<Entity>) {
+    // A const group's specs are direct children; a var group's sit in a
+    // `var_spec_list`. Every identifier a spec names is an entity
+    // (ADR-2611221643 §3).
     let mut cursor = node.walk();
-    for spec in node.children(&mut cursor) {
-        if spec.kind() == "const_spec" || spec.kind() == "var_spec" {
-            if let Some(name) = name_field(spec, source) {
-                entities.push(Entity {
-                    name,
-                    kind: NodeKind::Const,
-                    line: line_of(spec),
-                });
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "var_spec_list" => collect_go_consts(child, source, entities),
+            "const_spec" | "var_spec" => {
+                let mut nc = child.walk();
+                for n in child.children_by_field_name("name", &mut nc) {
+                    if n.kind() != "identifier" {
+                        continue;
+                    }
+                    let name = text(n, source).to_string();
+                    if name.is_empty() {
+                        continue;
+                    }
+                    entities.push(Entity { name, kind: NodeKind::Const, line: line_of(child) });
+                }
             }
+            _ => {}
         }
     }
 }

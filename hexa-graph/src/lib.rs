@@ -283,6 +283,8 @@ pub async fn build(
 
     // ── Resolve import + reference edges (now that all files/entities are known).
     let crate_roots = crate_roots(root, &file_set);
+    let id_label: HashMap<String, String> =
+        graph.nodes.iter().map(|n| (n.id.clone(), n.label.clone())).collect();
     for (from_rel, raw_path, names, kind) in &pending_imports {
         let from_file_id = id_for(NodeKind::File, from_rel, from_rel);
         // A Python `from` import can reach one file per name it takes
@@ -346,6 +348,36 @@ pub async fn build(
                         tid,
                         Confidence::Extracted,
                     );
+                }
+                continue;
+            }
+            // A Go file names its package's entities without an import: link
+            // each name to the entity of exactly that name another Go file of
+            // the same directory defines.
+            ImportKind::SamePackage => {
+                let dir = std::path::Path::new(from_rel).parent();
+                for name in names {
+                    let Some(targets) = label_index.get(&name.to_ascii_lowercase()) else {
+                        continue;
+                    };
+                    for tid in targets {
+                        let Some(f) = id_file.get(tid.as_str()) else { continue };
+                        if f == from_rel
+                            || !f.ends_with(".go")
+                            || std::path::Path::new(f).parent() != dir
+                            || id_label.get(tid.as_str()) != Some(name)
+                        {
+                            continue;
+                        }
+                        add_edge(
+                            &mut graph,
+                            &mut edge_ids,
+                            EdgeKind::References,
+                            &from_file_id,
+                            tid,
+                            Confidence::Extracted,
+                        );
+                    }
                 }
                 continue;
             }

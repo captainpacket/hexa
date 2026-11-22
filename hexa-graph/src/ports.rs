@@ -31,6 +31,12 @@ pub enum ImportKind {
     /// (`crate::domain::util::half()`). It names an item without importing it,
     /// so it links only when the path resolves to a file that defines the item.
     PathExpr,
+    /// The identifiers a Go file names. Files of one directory are one Go
+    /// package and use each other's names without an import, so each links
+    /// to the entity of that exact name another Go file of the directory
+    /// defines (ADR-2611221643: `hexa graph consumers` sees a grouped var's
+    /// users).
+    SamePackage,
 }
 
 /// A raw import statement (paths not yet resolved to files).

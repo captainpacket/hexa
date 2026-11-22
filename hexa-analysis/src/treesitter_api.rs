@@ -490,7 +490,7 @@ impl<'s> Extractor<'s> {
                         continue;
                     }
                     for fname in names {
-                        if !fname.starts_with(|ch: char| ch.is_ascii_uppercase()) {
+                        if !fname.starts_with(|ch: char| ch.is_uppercase()) {
                             continue;
                         }
                         let (wire, omitempty) = match go_json_tag(tag) {

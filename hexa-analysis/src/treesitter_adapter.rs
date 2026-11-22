@@ -1184,13 +1184,14 @@ fn extract_go_exports(
                     }
                 }
                 for spec in specs {
-                    // Every name a var spec declares (`var A, B = 1, 2`); a const
-                    // spec, its first, as before (ADR-2611221609 §2).
-                    let names: Vec<String> = if spec.kind() == "var_spec" {
+                    // Every name a const or var spec declares (`const A, B = 1, 2`):
+                    // the identifiers only, not the commas (ADR-2611221643 §1).
+                    let names: Vec<String> = {
                         let mut nc = spec.walk();
-                        spec.children_by_field_name("name", &mut nc).map(|n| node_text(n, source)).collect()
-                    } else {
-                        spec.child_by_field_name("name").map(|n| node_text(n, source)).into_iter().collect()
+                        spec.children_by_field_name("name", &mut nc)
+                            .filter(|n| n.kind() == "identifier")
+                            .map(|n| node_text(n, source))
+                            .collect()
                     };
                     let tagged = group || go_doc_tagged(&spec, source);
                     for name in names.into_iter().filter(|n| is_go_exported(n)) {
