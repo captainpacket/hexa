@@ -342,6 +342,15 @@
       "from": "f105418a60467e76dcaa8aebdb36bc27e1021dbef59a9201056f62b77327e249",
       "reason": "The fixture writer guessed the task field as prompt/description; hexa bench fixtures name it instruction (docs/benchmarks/fixtures/*.json: id, instruction, oracle, provenance, status, target_file, tier), so every fixture was skipped and S07/S09/S11 tested an empty corpus. The field is renamed; scenarios and assertions are unchanged.",
       "to": "f26a1375222cd4d7049f0b6d901762eb910f96659eb59f8737d2aa7bf242f6fc"
+    },
+    {
+      "at": "2026-11-22T20:47:29.550915545+00:00",
+      "base_commit": "f1b4ae3203357b2c8aa8314f7cc262ff99c31f1f",
+      "by": "Claude (agent, in craigjohnson's session; for review)",
+      "file": "hexa-cli/tests/adr_2611221646_spec_2.rs",
+      "from": "b6f7739dc968338b19b5bbd786d6c7cad874be7600f5a544528f00bb28fc23d9",
+      "reason": "S07, S09 and S11 moved to hexa-cli/tests/adr_2611221646_spec_3.rs, re-proved against the JSON fixtures hexa bench reads (hexa spec tests --only --red-at f1b4ae3 --because, red at 64aa6f3): their tests here invented a YAML fixture format. Only those three tests leave this file; the scenarios and every other test are unchanged. The re-prove resealed the file without recording this amendment (gap:reaccept-reseal-amend-catch22).",
+      "to": "d3d7fc624aa1b29aa7c06bb1005286703504386520d4dc9e143b7c3018f7af26"
     }
   ]
 }
