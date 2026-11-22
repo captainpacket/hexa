@@ -1124,7 +1124,7 @@ fn extract_go_exports(
                             file: file.to_string(),
                             name,
                             line: child.start_position().row + 1,
-                            hexa_public: false,
+                            hexa_public: go_doc_tagged(&child, source),
                             kind: ExportKind::Function,
                         });
                     }
@@ -1138,7 +1138,7 @@ fn extract_go_exports(
                             file: file.to_string(),
                             name,
                             line: child.start_position().row + 1,
-                            hexa_public: false,
+                            hexa_public: go_doc_tagged(&child, source),
                             kind: ExportKind::Method,
                         });
                     }
@@ -1149,6 +1149,8 @@ fn extract_go_exports(
                 // `type Count = domain.Count` is a `type_alias`, not a
                 // `type_spec`; it is an exported type all the same, and the
                 // ports layer re-exports domain types exactly this way.
+                // A group's doc comment covers every spec in it (ADR-2611221553 §2).
+                let group = go_doc_tagged(&child, source);
                 let mut tc = child.walk();
                 for spec in child.children(&mut tc) {
                     if spec.kind() == "type_spec" || spec.kind() == "type_alias" {
@@ -1159,7 +1161,7 @@ fn extract_go_exports(
                                     file: file.to_string(),
                                     name,
                                     line: spec.start_position().row + 1,
-                                    hexa_public: false,
+                                    hexa_public: group || go_doc_tagged(&spec, source),
                                     kind: ExportKind::Type,
                                 });
                             }
@@ -1168,6 +1170,7 @@ fn extract_go_exports(
                 }
             }
             "const_declaration" | "var_declaration" => {
+                let group = go_doc_tagged(&child, source);
                 let mut tc = child.walk();
                 for spec in child.children(&mut tc) {
                     if spec.kind() == "const_spec" || spec.kind() == "var_spec" {
@@ -1178,7 +1181,7 @@ fn extract_go_exports(
                                     file: file.to_string(),
                                     name,
                                     line: spec.start_position().row + 1,
-                                    hexa_public: false,
+                                    hexa_public: group || go_doc_tagged(&spec, source),
                                     kind: ExportKind::Value,
                                 });
                             }
@@ -1191,6 +1194,26 @@ fn extract_go_exports(
     }
 
     Ok(exports)
+}
+
+/// Whether the Go doc comment of `node` carries `@hexa:public` (ADR-2611221553
+/// §1): the run of comment lines directly above it, each on the line just
+/// above the next, so a blank line or any other node ends the run. A Go doc
+/// comment is several `//` lines, each its own node, and the tag may be on any.
+fn go_doc_tagged(node: &tree_sitter::Node, source: &str) -> bool {
+    let mut next_row = node.start_position().row;
+    let mut prev = node.prev_sibling();
+    while let Some(p) = prev {
+        if p.kind() != "comment" || p.end_position().row + 1 != next_row {
+            return false;
+        }
+        if node_text(p, source).contains("@hexa:public") {
+            return true;
+        }
+        next_row = p.start_position().row;
+        prev = p.prev_sibling();
+    }
+    false
 }
 
 /// Go exports are identified by capitalized names.
