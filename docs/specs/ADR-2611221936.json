@@ -10,6 +10,10 @@
     "by": "craigjohnson",
     "sha256": "486ad2343a600902bd496bf5332980594e5debe0cfe27df012cc20a2e0b07479"
   },
+  "sealed": {
+    "hexa-cli/tests/adr_2611221936_spec.rs": "1ef90472c7d4500c3a84cff56d970ab4767db08d1705923483d74412770a8483"
+  },
+  "red": "9c68afb",
   "specs": [
     {
       "id": "S01",
@@ -20,7 +24,8 @@
       "description": "hexa init in a fresh project ignores the Stop hook's counter",
       "given": "an empty directory with no .hexa directory",
       "when": "hexa init runs",
-      "then": ".hexa/.gitignore contains a line exactly `stop-blocks.json`, alongside `tasks.json`, `tasks.lock` and `.tasks.json.*.tmp`"
+      "then": ".hexa/.gitignore contains a line exactly `stop-blocks.json`, alongside `tasks.json`, `tasks.lock` and `.tasks.json.*.tmp`",
+      "test": "hexa-cli/tests/adr_2611221936_spec.rs::s01_init_in_fresh_project_ignores_stop_counter"
     },
     {
       "id": "S02",
@@ -31,7 +36,8 @@
       "description": "A task ledger write in an existing project adds the missing line",
       "given": "an existing project whose .hexa/.gitignore holds only `tasks.json`, `tasks.lock` and `.tasks.json.*.tmp`",
       "when": "the task ledger writes (for example, a task is added)",
-      "then": ".hexa/.gitignore also contains `stop-blocks.json`, and the three earlier lines are still present"
+      "then": ".hexa/.gitignore also contains `stop-blocks.json`, and the three earlier lines are still present",
+      "test": "hexa-cli/tests/adr_2611221936_spec.rs::s02_ledger_write_in_existing_project_adds_missing_line"
     },
     {
       "id": "S03",
@@ -42,7 +48,8 @@
       "description": "After init the counter file does not show in git status",
       "given": "a git repository initialised by hexa init, where the Stop hook has since written .hexa/stop-blocks.json",
       "when": "`git status --porcelain --untracked-files=all` runs",
-      "then": "no line names .hexa/stop-blocks.json, and `git check-ignore .hexa/stop-blocks.json` reports it as ignored"
+      "then": "no line names .hexa/stop-blocks.json, and `git check-ignore .hexa/stop-blocks.json` reports it as ignored",
+      "test": "hexa-cli/tests/adr_2611221936_spec.rs::s03_counter_file_not_in_git_status_after_init"
     },
     {
       "id": "S04",
@@ -75,7 +82,8 @@
       "description": "For any starting content, ensure_ignored leaves every required line present exactly once and is idempotent",
       "given": "any starting .hexa/.gitignore content, including absent, empty, or any subset or ordering of the required lines plus arbitrary other lines",
       "when": "ensure_ignored runs once, and then runs a second time",
-      "then": "after the first run each of `tasks.json`, `tasks.lock`, `.tasks.json.*.tmp` and `stop-blocks.json` occurs exactly once, every other line that was there before is kept, and the second run changes nothing"
+      "then": "after the first run each of `tasks.json`, `tasks.lock`, `.tasks.json.*.tmp` and `stop-blocks.json` occurs exactly once, every other line that was there before is kept, and the second run changes nothing",
+      "test": "hexa-cli/tests/adr_2611221936_spec.rs::s06_ensure_ignored_property_over_starting_contents"
     },
     {
       "id": "S07",
@@ -86,7 +94,8 @@
       "description": "The task ledger's existing ignore lines are still written",
       "given": "an empty directory",
       "when": "hexa init runs",
-      "then": ".hexa/.gitignore contains `tasks.json`, `tasks.lock` and `.tasks.json.*.tmp`, as it did before this ADR"
+      "then": ".hexa/.gitignore contains `tasks.json`, `tasks.lock` and `.tasks.json.*.tmp`, as it did before this ADR",
+      "test": "hexa-cli/tests/adr_2611221936_spec.rs::s07_init_still_writes_ledger_lines"
     },
     {
       "id": "S08",
@@ -97,7 +106,8 @@
       "description": "The root .gitignore is not changed by this decision",
       "given": "an empty directory",
       "when": "hexa init runs",
-      "then": "the root .gitignore equals what merged_gitignore produces for the project floor's lines, and it does not contain `stop-blocks.json` or `.hexa/stop-blocks.json`"
+      "then": "the root .gitignore equals what merged_gitignore produces for the project floor's lines, and it does not contain `stop-blocks.json` or `.hexa/stop-blocks.json`",
+      "test": "hexa-cli/tests/adr_2611221936_spec.rs::s08_root_gitignore_unchanged"
     },
     {
       "id": "S09",
@@ -108,7 +118,8 @@
       "description": "What the Stop hook records is unchanged",
       "given": "a project after hexa init, and a session id for which the Stop hook blocks a stop twice in a row",
       "when": "the Stop hook runs",
-      "then": "it still writes .hexa/stop-blocks.json with a consecutive-block count of 2 for that session id; the file is not moved, renamed or left unwritten"
+      "then": "it still writes .hexa/stop-blocks.json with a consecutive-block count of 2 for that session id; the file is not moved, renamed or left unwritten",
+      "test": "hexa-cli/tests/adr_2611221936_spec.rs::s09_stop_hook_still_records_counter"
     },
     {
       "id": "S10",

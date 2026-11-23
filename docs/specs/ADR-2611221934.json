@@ -11,6 +11,10 @@
     "by": "craigjohnson",
     "sha256": "8ea0be0bafaabcca01df7b0b1bb8feb7f4388ed0bf5d88885648b78d48c1b66a"
   },
+  "sealed": {
+    "hexa-analysis/tests/adr_2611221934_spec.rs": "c572d2eddf702392bcf675f9c8de9ee0e613502428b7f148fccfe004285faef2"
+  },
+  "red": "e970262",
   "specs": [
     {
       "id": "S01",
@@ -21,7 +25,8 @@
       "description": "A tag in the second of two comments after code does not tag the next spec",
       "given": "A Go file holding `const (`, then `A = 1 /* x */ // @hexa:public`, then `B = 2`, then `)`, with no other comments",
       "when": "extract_exports is called on it with Language::Go",
-      "then": "the ExportDeclaration named `B` has hexa_public false"
+      "then": "the ExportDeclaration named `B` has hexa_public false",
+      "test": "hexa-analysis/tests/adr_2611221934_spec.rs::part_1::s01_tag_in_second_of_two_trailing_comments_does_not_tag_next_spec"
     },
     {
       "id": "S02",
@@ -32,7 +37,8 @@
       "description": "Three comments after code all belong to that code's line",
       "given": "A Go file whose line 3 is `var A = 1 /* x */ /* y */ // @hexa:public` and whose line 4 is `func F() {}`, with no other comments",
       "when": "extract_exports is called on it with Language::Go",
-      "then": "the ExportDeclaration named `F` has hexa_public false"
+      "then": "the ExportDeclaration named `F` has hexa_public false",
+      "test": "hexa-analysis/tests/adr_2611221934_spec.rs::part_1::s02_three_trailing_comments_belong_to_code_line"
     },
     {
       "id": "S03",
@@ -76,7 +82,8 @@
       "description": "Comments after code on a line never tag the declaration on the next line, whatever their number or kind",
       "given": "Any Go file where line L holds code followed by n ≥ 1 comments, each `/* … */` or a final `// …`, at least one containing `@hexa:public`, line L+1 declares an exported name D, and D has no other comments above it",
       "when": "extract_exports is called on it with Language::Go",
-      "then": "the ExportDeclaration named D has hexa_public false"
+      "then": "the ExportDeclaration named D has hexa_public false",
+      "test": "hexa-analysis/tests/adr_2611221934_spec.rs::part_1::s06_trailing_comments_never_tag_next_declaration"
     },
     {
       "id": "S07",
@@ -87,7 +94,8 @@
       "description": "A comment-only line of two comments, tag in the first, tags the function below",
       "given": "A Go file whose line 3 is `/* @hexa:public */ // note` and whose line 4 is `func F() {}`",
       "when": "extract_exports is called on it with Language::Go",
-      "then": "the ExportDeclaration named `F` has hexa_public true"
+      "then": "the ExportDeclaration named `F` has hexa_public true",
+      "test": "hexa-analysis/tests/adr_2611221934_spec.rs::part_1::s07_comment_only_line_tag_in_first_tags_function"
     },
     {
       "id": "S08",
@@ -109,7 +117,8 @@
       "description": "A line of two comments counts as one line, so the run continues to the line above it",
       "given": "A Go file whose line 2 is `// @hexa:public`, line 3 is `/* a */ /* b */`, and line 4 is `func F() {}`",
       "when": "extract_exports is called on it with Language::Go",
-      "then": "the ExportDeclaration named `F` has hexa_public true"
+      "then": "the ExportDeclaration named `F` has hexa_public true",
+      "test": "hexa-analysis/tests/adr_2611221934_spec.rs::part_1::s09_two_comment_line_counts_once_run_continues"
     },
     {
       "id": "S10",
@@ -153,7 +162,8 @@
       "description": "On a comment-only line directly above a declaration, the tag is read whatever the position and number of the comments",
       "given": "Any Go file where line L holds only k ≥ 1 comments, each `/* … */` or a final `// …`, line L+1 is `func F() {}`, and there are no other comments in the file",
       "when": "extract_exports is called on it with Language::Go",
-      "then": "the ExportDeclaration named `F` has hexa_public true exactly when at least one of the k comments contains `@hexa:public`"
+      "then": "the ExportDeclaration named `F` has hexa_public true exactly when at least one of the k comments contains `@hexa:public`",
+      "test": "hexa-analysis/tests/adr_2611221934_spec.rs::part_2::s13_tag_read_from_any_comment_on_comment_only_line"
     },
     {
       "id": "S14",
