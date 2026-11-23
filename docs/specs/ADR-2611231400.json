@@ -1,0 +1,197 @@
+{
+  "adr": "ADR-2611231400",
+  "feature": "remote-gate-red-dry-run-result",
+  "description": "A remote gate commits red or green, tries itself first, and says what it did in one object",
+  "specs": [
+    {
+      "id": "S01",
+      "decision": ["§1"],
+      "kind": "example",
+      "description": "A remote pass ends with one result object naming the commit, the remote head and the counts",
+      "given": "a project whose `test.remote` runs the gate in a clone of the pushed commit, on branch `feat` tracking origin, with a change to `src/a.rs`",
+      "when": "`hexa do gate --files src/a.rs -e 'bash ci/green.sh' -m fix --no-land` runs, where `ci/green.sh` prints a cargo summary of 2 passed",
+      "then": "it exits 0; the last line of stdout is one JSON object with `ok: true`, `mode: remote`, `expect: green`, `commit` equal to the new HEAD, `remote_head` equal to it, and `tests` `{passed: 2, failed: 0}`",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s01_a_remote_pass_ends_with_one_result_object"
+    },
+    {
+      "id": "S02",
+      "decision": ["§1"],
+      "kind": "negative",
+      "description": "A failing remote gate's result object carries code, hint, field, retryable and the first failure",
+      "given": "the same project",
+      "when": "`hexa do gate --files src/a.rs -e 'bash ci/red.sh' -m fix` runs, where `ci/red.sh` prints `test b ... FAILED` and a cargo summary of 1 passed, 1 failed, and exits 101",
+      "then": "it exits non-zero; the last stdout line is a JSON object with `ok: false`, `code: remote-gate-failed`, a non-empty `hint`, `field: --evidence`, `retryable: false`, `tests` `{passed: 1, failed: 1}` and `first_failure` containing `test b ... FAILED`; HEAD has not moved and `src/a.rs` is still uncommitted",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s02_a_failing_remote_gate_says_why_in_its_object"
+    },
+    {
+      "id": "S03",
+      "decision": ["§1"],
+      "kind": "example",
+      "description": "An uncounted remote pass says uncounted in its object",
+      "given": "the same project",
+      "when": "`hexa do gate --files src/a.rs -e 'test -f src/a.rs' -m fix --uncounted --no-land` runs",
+      "then": "it exits 0; the result object has `ok: true` and `tests` `{uncounted: true}`",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s03_an_uncounted_pass_says_so"
+    },
+    {
+      "id": "S04",
+      "decision": ["§1"],
+      "kind": "negative",
+      "description": "A remote gate that ran zero tests is vacuous, and commits nothing",
+      "given": "the same project",
+      "when": "`hexa do gate --files src/a.rs -e 'bash ci/zero.sh' -m fix` runs, where `ci/zero.sh` prints `running 0 tests` and a cargo summary of 0 passed and exits 0",
+      "then": "it exits non-zero; the result object has `code: vacuous-gate` and `field: --evidence`; HEAD has not moved",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s04_zero_tests_is_vacuous"
+    },
+    {
+      "id": "S05",
+      "decision": ["§2"],
+      "kind": "example",
+      "description": "The runner is sent the commit on the scratch ref, and the scratch ref is gone after a pass",
+      "given": "the same project",
+      "when": "a remote `do gate` with `ci/green.sh` passes",
+      "then": "the runner's log names the result's `commit`; `git ls-remote origin 'refs/heads/hexa-gate/*'` is empty afterwards",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s05_the_scratch_ref_carries_the_candidate_and_is_deleted"
+    },
+    {
+      "id": "S06",
+      "decision": ["§2", "§1"],
+      "kind": "negative",
+      "description": "A runner whose output does not name the commit is refused, and the scratch ref is gone",
+      "given": "a project whose `test.remote` runs the command in the current checkout and prints a commit id that is not the candidate",
+      "when": "`hexa do gate --files src/a.rs -e 'bash ci/green.sh' -m fix` runs",
+      "then": "it exits non-zero; the result object has `code: remote-runner-wrong-commit` and `retryable: true`; HEAD has not moved; no `hexa-gate/` ref is on origin",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s06_a_runner_that_does_not_name_the_commit_is_refused"
+    },
+    {
+      "id": "S07",
+      "decision": ["§3"],
+      "kind": "example",
+      "description": "A remote pass reads the branch's head back from the remote",
+      "given": "the same project as S01",
+      "when": "a remote `do gate` with `ci/green.sh` passes",
+      "then": "`git ls-remote origin refs/heads/feat` names the result's `commit`, and the result's `remote_head` equals it",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s07_a_pass_reads_the_remote_head_back"
+    },
+    {
+      "id": "S08",
+      "decision": ["§3"],
+      "kind": "negative",
+      "description": "A refused branch push fails the verb with push-refused",
+      "given": "the same project, whose origin refuses any push to `refs/heads/feat` and accepts `refs/heads/hexa-gate/*`",
+      "when": "a remote `do gate` with `ci/green.sh` runs",
+      "then": "it exits non-zero; the result object has `code: push-refused` and `retryable: true`; origin's `feat` is unchanged; no `hexa-gate/` ref is left",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s08_a_refused_branch_push_is_named"
+    },
+    {
+      "id": "S09",
+      "decision": ["§3"],
+      "kind": "negative",
+      "description": "A refused scratch push commits nothing",
+      "given": "the same project, whose origin refuses every push",
+      "when": "a remote `do gate` with `ci/green.sh` runs",
+      "then": "it exits non-zero; the result object has `code: push-refused`; HEAD has not moved; the runner was never invoked",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s09_a_refused_scratch_push_commits_nothing"
+    },
+    {
+      "id": "S10",
+      "decision": ["§4"],
+      "kind": "example",
+      "description": "--expect-red commits tests that fail on assertions",
+      "given": "the same project, with a new test file `tests/t.rs`",
+      "when": "`hexa do gate --files tests/t.rs -e 'bash ci/red.sh' -m 'test: first' --expect-red` runs",
+      "then": "it exits 0; HEAD is one new commit holding `tests/t.rs`; origin's `feat` names it; the result object has `ok: true`, `expect: red`, `tests` `{passed: 1, failed: 1}`; `main` is unchanged (a red commit never lands)",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s10_expect_red_commits_assertion_failures"
+    },
+    {
+      "id": "S11",
+      "decision": ["§4"],
+      "kind": "negative",
+      "description": "--expect-red refuses a compile error",
+      "given": "the same project, with a new test file `tests/t.rs`",
+      "when": "`hexa do gate --files tests/t.rs -e 'bash ci/compile.sh' -m 'test: first' --expect-red` runs, where `ci/compile.sh` prints `error[E0425]: cannot find function` and `error: could not compile` and exits 101",
+      "then": "it exits non-zero; the result object has `code: red-not-a-test-failure`; HEAD has not moved; `tests/t.rs` is still untracked",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s11_expect_red_refuses_a_compile_error"
+    },
+    {
+      "id": "S12",
+      "decision": ["§4"],
+      "kind": "negative",
+      "description": "--expect-red refuses a gate that passes, and one that ran zero tests",
+      "given": "the same project, with a new test file `tests/t.rs`",
+      "when": "`--expect-red` runs once with `ci/green.sh` and once with `ci/zero.sh`",
+      "then": "both exit non-zero, with `code: not-red` and `code: vacuous-gate` respectively; HEAD has not moved",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s12_expect_red_refuses_green_and_zero"
+    },
+    {
+      "id": "S13",
+      "decision": ["§4"],
+      "kind": "negative",
+      "description": "--expect-red cannot be combined with --uncounted",
+      "given": "the same project",
+      "when": "`hexa do gate --files tests/t.rs -e 'bash ci/red.sh' -m x --expect-red --uncounted` runs",
+      "then": "it exits non-zero before anything runs; the runner was never invoked",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s13_expect_red_and_uncounted_conflict"
+    },
+    {
+      "id": "S14",
+      "decision": ["§5"],
+      "kind": "example",
+      "description": "A red commit names `hexa spec red` as its next step",
+      "given": "the same project",
+      "when": "an `--expect-red` gate commits",
+      "then": "the result object's `next` is `hexa spec red <ADR> <commit>` with the full commit id",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s14_a_red_commit_names_spec_red_next"
+    },
+    {
+      "id": "S15",
+      "decision": ["§5"],
+      "kind": "negative",
+      "description": "A red commit writes no spec record",
+      "given": "the same project, with a spec record `docs/specs/<id>.json` committed",
+      "when": "an `--expect-red` gate commits",
+      "then": "the spec record is byte-identical to before, and the tree has no other change",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s15_a_red_commit_writes_no_spec"
+    },
+    {
+      "id": "S16",
+      "decision": ["§6"],
+      "kind": "example",
+      "description": "--dry-run says what it would do and does none of it",
+      "given": "the same project as S01",
+      "when": "`hexa do gate --files src/a.rs -e 'bash ci/green.sh' -m fix --dry-run` runs",
+      "then": "it exits 0; the result object has `mode: dry-run`, `ok: true` and a `would` object whose `parent` is HEAD and whose `run` names the `test.remote` command; HEAD has not moved; origin's refs are unchanged; the runner was never invoked; `src/a.rs` is still uncommitted",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s16_dry_run_does_nothing"
+    },
+    {
+      "id": "S17",
+      "decision": ["§6"],
+      "kind": "negative",
+      "description": "A dry run still refuses what the gate would refuse",
+      "given": "the same project, with `src/b.rs` unchanged",
+      "when": "`hexa do gate --files src/b.rs -e 'bash ci/green.sh' -m fix --dry-run` runs",
+      "then": "it exits non-zero; the result object has `code: nothing-to-commit` and `field: --files`",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s17_a_dry_run_refuses_what_the_gate_would"
+    },
+    {
+      "id": "S18",
+      "decision": ["§7"],
+      "kind": "example",
+      "description": "The commit hook names --expect-red",
+      "given": "a project with `src/a.rs` staged, with and without `test.remote`",
+      "when": "the pre-bash hook sees `git commit -m x`",
+      "then": "the refusal names `hexa do gate` and `--expect-red` in both cases",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s18_the_hook_names_expect_red"
+    },
+    {
+      "id": "S19",
+      "decision": ["§7"],
+      "kind": "negative",
+      "description": "A prose-only commit is not refused and names nothing",
+      "given": "a project under `test.remote` with only `docs/x.md` staged",
+      "when": "the pre-bash hook sees `git commit -m x`",
+      "then": "it exits 0 and its output does not name `--expect-red`",
+      "test": "hexa-cli/tests/adr_2611231400_spec.rs::s19_a_prose_commit_names_nothing"
+    }
+  ]
+}
