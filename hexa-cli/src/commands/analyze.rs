@@ -1717,14 +1717,25 @@ fn evaluate_import_policies(
     // clean domain because it never looked at one.
     let mut files = collect_source_files(root);
     files.sort();
+    // A policy whose `layer` names a layer also covers the files an explicit
+    // `analyze.layers` key declares in it (ADR-2611230900 §1, §2).
+    let declared = hexa_analysis::layer_classifier::LayerMap::from_project(root).unwrap_or_default();
     let mut reported_findings: std::collections::HashSet<(String, usize, String, String)> =
         std::collections::HashSet::new();
 
     for path in &files {
         let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/");
         let rel_slashed = format!("/{}", rel.trim_start_matches('/'));
-        let matching: Vec<&ImportPolicyConfig> =
-            policies.iter().filter(|p| layer_matches(&rel_slashed, &p.layer)).collect();
+        let declared_layer = declared.declared(&rel);
+        let matching: Vec<&ImportPolicyConfig> = policies
+            .iter()
+            .filter(|p| {
+                layer_matches(&rel_slashed, &p.layer)
+                    || (declared_layer.is_some()
+                        && declared_layer == hexa_analysis::layer_classifier::layer_named(&p.layer)
+                        && !out_of_policy_scope(&rel_slashed))
+            })
+            .collect();
         if matching.is_empty() {
             continue;
         }
@@ -1917,6 +1928,15 @@ fn unchecked_file(
 /// project keeps its tests and examples in are out of scope: a fixture that
 /// imports a database driver on purpose is not a domain violation.
 /// (ADR-2609221430 §7.)
+/// A top-level `tests/`, `benches/` or `examples/` file, which no policy
+/// judges (ADR-2609221430 §7; ADR-2611230900 §3).
+fn out_of_policy_scope(rel_slashed: &str) -> bool {
+    rel_slashed
+        .split('/')
+        .find(|s| !s.is_empty())
+        .is_some_and(|s| matches!(s, "tests" | "benches" | "examples"))
+}
+
 fn layer_matches(rel_slashed: &str, layer: &str) -> bool {
     let segments: Vec<&str> = rel_slashed.split('/').filter(|s| !s.is_empty()).collect();
     if segments.first().is_some_and(|s| matches!(*s, "tests" | "benches" | "examples")) {

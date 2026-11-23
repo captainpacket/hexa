@@ -41,12 +41,14 @@ mod part_1 {
         let mut s = String::new();
         for (layer, deny) in policies {
             s.push_str("[[import_policy]]\n");
+            // The fields a policy requires besides its layer and lists.
+            s.push_str("adr = \"ADR-2609211430\"\nid = \"fixture-policy\"\nmessage = \"fixture policy\"\n");
             s.push_str(&format!("layer = {:?}\n", layer));
             let list: Vec<String> = deny.iter().map(|d| format!("{:?}", d)).collect();
             s.push_str(&format!("deny = [{}]\n", list.join(", ")));
             s.push_str("severity = \"error\"\n\n");
         }
-        write(root, ".hexa/rules.toml", &s);
+        write(root, ".hexa/ADR-rules.toml", &s);
     }
 
     fn go_mod(root: &Path) {
@@ -625,6 +627,8 @@ mod part_2 {
         let mut out = String::new();
         for p in policies {
             out.push_str("[[import_policy]]\n");
+            // The fields a policy requires besides its layer and lists.
+            out.push_str("adr = \"ADR-2609211430\"\nid = \"fixture-policy\"\nmessage = \"fixture policy\"\n");
             out.push_str(&format!("layer = \"{}\"\n", p.layer));
             if let Some(a) = p.allow {
                 out.push_str(&format!("allow = {}\n", toml_list(a)));
@@ -634,7 +638,7 @@ mod part_2 {
             }
             out.push_str(&format!("severity = \"{}\"\n\n", p.severity));
         }
-        write(root, ".hexa/rules.toml", &out);
+        write(root, ".hexa/ADR-rules.toml", &out);
     }
 
     /// Run `hexa analyze <root> --json` and parse its output.
@@ -848,7 +852,7 @@ mod part_2 {
         write(
             root,
             "pkg/model/a.go",
-            "package model\n\nimport (\n\t_ \"fmt\"\n\t_ \"net\"\n)\n",
+            "package model\n\nimport (\n\t_ \"fmt\"\n\t_ \"example.com/ext\"\n)\n",
         );
         let report = analyze(root);
 
@@ -860,14 +864,14 @@ mod part_2 {
         let baseline = analyze(base);
 
         assert_eq!(
-            findings_except(&report, "pkg/model/a.go", "fmt", "net"),
+            findings_except(&report, "pkg/model/a.go", "fmt", "example.com/ext"),
             0,
             "fmt is allowed: {report}"
         );
         assert_eq!(
-            findings(&report, "pkg/model/a.go", "net"),
+            findings(&report, "pkg/model/a.go", "example.com/ext"),
             1,
-            "one warning for net: {report}"
+            "one warning for example.com/ext (an external import the allow list omits; the standard library is permitted unless denied): {report}"
         );
         assert_eq!(
             score(&report),

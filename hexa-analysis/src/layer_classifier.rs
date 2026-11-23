@@ -318,6 +318,13 @@ impl LayerMap {
         classify_layer(path)
     }
 
+    /// The layer an explicit `analyze.layers` key assigns `path`, if any: the
+    /// declaration alone, without the built-in folder classification
+    /// (ADR-2611230900 §2).
+    pub fn declared(&self, path: &str) -> Option<HexLayer> {
+        self.entries.iter().find(|(prefix, _)| key_covers(prefix, path)).map(|(_, l)| *l)
+    }
+
     /// One error per declared key under which none of `graded` falls, by the
     /// rule [`Self::classify`] applies (ADR-2611221705 §1). A key holding a
     /// glob character is told keys are prefixes, and offered the prefix before
@@ -363,6 +370,12 @@ const LAYER_NAMES: &[(&str, HexLayer)] = &[
     ("composition-root", HexLayer::CompositionRoot),
     ("entry-point", HexLayer::EntryPoint),
 ];
+
+/// The layer a name denotes (`domain`, `adapters/primary`, …), written with
+/// or without surrounding `/`; `None` for a path that names no layer.
+pub fn layer_named(name: &str) -> Option<HexLayer> {
+    parse_layer(name.trim_matches('/'))
+}
 
 fn parse_layer(name: &str) -> Option<HexLayer> {
     LAYER_NAMES.iter().find(|(n, _)| *n == name).map(|(_, l)| *l)
