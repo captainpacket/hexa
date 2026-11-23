@@ -6,6 +6,10 @@
     "§8",
     "§9"
   ],
+  "accepted": {
+    "by": "gary (in conversation, 2026-11-23: \"accept the specs\"; recorded by the implementing agent)",
+    "sha256": "54250b3e8292686de6f2ba636bd5712036d5fda1466f9751b348cfe51de75b5f"
+  },
   "specs": [
     {
       "id": "S01",
