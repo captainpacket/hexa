@@ -1,6 +1,7 @@
 # ADR-2611230831: hexa says what is true (II)
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-23 Accepted: Accepted in craigjohnson's session: a bug fix under his rule (no architectural change); he accepted the spec, and its sealed tests pass on main
 **Date:** 2026-11-23
 **Drivers:** Four more places, found by projects adopting hexa, where hexa printed something untrue or crashed on a harmless use. ADR-2611221646 fixed five of the same kind. CLAUDE.md: "A gate that degrades silently is worse than no gate."
 - `hexa doctor` warned ".claude/worktrees exists and is not in .gitignore" in a repository that ignores it through `.git/info/exclude`; `git check-ignore .claude/worktrees` says it is ignored.
