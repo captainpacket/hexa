@@ -1,6 +1,7 @@
 # ADR-2611221705: A layer key that matches no graded file is an error
 
-**Status:** Accepted
+**Status:** Completed
+> 2026-11-22 Completed: landed on main at 687bc6a; gate `cargo test -p hexa-analysis --test adr_2611221705_spec` passed (hexa loop stage done)
 > 2026-11-22 Accepted: Accepted in craigjohnson's session: a bug fix under his rule (no new or changed functionality), reported by a TypeScript user; he accepted the spec (re-accepted after corrections), and its sealed tests pass on main
 **Date:** 2026-11-22
 **Drivers:** Writing ADR-2611221645 S26, a fixture declared `analyze.layers` keys `src/domain/**` and `src/ui/**`. hexa reads a key as a path prefix, so neither matched a file: `src/ui/Button.tsx` went unclassified (only `src/domain/` has a built-in layer by its folder name), and the edge from the domain to it, a real violation, was not reported. Nothing said so: `config_errors` was empty and the grade held. a TypeScript user, which declares its portal's layers by path, asked for such a key to be reported; a declaration that silently matches nothing is a check that passes over an empty scope. CLAUDE.md: "A gate that degrades silently is worse than no gate."
