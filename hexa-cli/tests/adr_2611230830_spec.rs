@@ -260,6 +260,9 @@ mod part_1 {
             p.set_mode(0o755);
             std::fs::set_permissions(&script, p).unwrap();
         }
+        // `spec accept` needs a test home (ADR-2611191120 §9); a manifest
+        // gives one, and the .sh test keeps its built-in bash runner.
+        std::fs::write(d.join("pyproject.toml"), "[project]\nname = \"fixture\"\n").unwrap();
         let red = commit_all(d, "test");
         std::fs::create_dir_all(d.join("docs/specs")).unwrap();
         let spec = serde_json::json!({
@@ -528,7 +531,15 @@ mod part_2 {
         write_spec(
             d,
             ADR_ID,
-            vec![scenario("S1", Some("tests/ok.sh"))],
+            // A complete spec: §1 needs a negative scenario as well as an
+            // example, or verify rejects the spec before running it.
+            vec![
+                scenario("S1", Some("tests/ok.sh")),
+                hexa_core::domain::spec::Scenario {
+                    kind: hexa_core::domain::spec::Kind::Negative,
+                    ..scenario("S2", Some("tests/ok.sh"))
+                },
+            ],
             Some(red),
         );
         git(d, &["add", "-A"]);
@@ -553,8 +564,8 @@ mod part_2 {
             "verify --ci with a passing scenario exits 0: {vout}"
         );
         assert!(
-            vout.contains("1 passed · 0 failed"),
-            "same summary as before: {vout}"
+            vout.contains("2 passed · 0 failed"),
+            "same summary as before (both scenarios of the complete spec): {vout}"
         );
         assert!(!says_nothing_checked(&vout), "{vout}");
     }

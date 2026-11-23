@@ -1177,6 +1177,12 @@ pub async fn verify(adr: Option<&str>, ci: bool, prove: bool, verbose: bool, loc
     }
     println!("\n  {passed} passed · {failed} failed · {unproven} not proven here · {pending} pending");
     let unproven_fails = if ci { unproven } else { 0 };
+    // A whole-repository --ci run that found no scenario checked nothing, and
+    // a vacuous gate is a failed gate (ADR-2611230830 §2). Said first, so the
+    // reason is the one a reader needs.
+    if ci && adr.is_none() && passed + failed + pending + unproven == 0 {
+        anyhow::bail!("`hexa spec verify --ci`: no spec holds a scenario, so nothing was checked");
+    }
     if failed + fatal + unproven_fails > 0 {
         anyhow::bail!("spec verification failed");
     }
