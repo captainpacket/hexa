@@ -110,6 +110,14 @@ The commit holding them is recorded as `red` and the files are sealed. No
 change to a sealed test is accepted afterwards; a requirement changes through
 the ADR, then the spec, then a new acceptance.
 
+When the scenarios are unchanged and only a sealed test's setup must change
+(a fixture, never an assertion), record it with `hexa spec amend ADR-<id> --file
+<test> --reason "<why>"`, which shows the diff, then again with `--confirm
+<sha256>`. Commit it in two steps, in this order: the spec record alone first
+(`git commit docs/specs/ADR-<id>.json`), then the test through `hexa do gate
+--files <test> -e '<cmd>'`. `do gate` refuses while a spec record differs from
+HEAD, and accepts the sealed file once the recorded amendment matches it.
+
 `hexa spec tests` writes Rust. A scenario tested in vitest or by a bash gate
 script is bound to a test you write first, after hexa watches it fail at its
 commit (ADR-2611191120). The ref names its runner by extension:
