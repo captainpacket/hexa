@@ -275,7 +275,11 @@ pub fn judge(
     if origin == Origin::Internal {
         return Verdict::OutOfScope;
     }
-    if deny.iter().any(|d| covers(raw, d, lang)) {
+    // A Go import path names one package, and Go packages do not nest:
+    // `net` is not `net/netip`. A Go `deny` entry denies the package it names
+    // and no other (ADR-2611221933 §1); every other match is by prefix.
+    let denies = |d: &String| if lang == Language::Go { raw == d } else { covers(raw, d, lang) };
+    if deny.iter().any(denies) {
         return Verdict::DeniedByDeny;
     }
     if origin == Origin::StandardLibrary {

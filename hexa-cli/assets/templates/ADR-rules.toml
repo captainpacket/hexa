@@ -149,7 +149,13 @@ deny = [
   "fs", "child_process",
   # Go (and the bare Node spellings it shares). `plugin` loads code at run
   # time, which is infrastructure by definition (ADR-2609211600 §6).
-  "os", "net", "http", "net/http", "database/sql", "os/exec", "io/ioutil",
+  # A Go entry denies the one package it names (ADR-2611221933), so the I/O
+  # packages below `os` and `net` are named here; `net/netip`, `net/url`,
+  # `net/mail` and `net/textproto` do no I/O and are not.
+  "os", "os/exec", "os/signal", "os/user",
+  "net", "http", "net/http", "net/http/httptest", "net/http/httputil", "net/http/pprof",
+  "net/rpc", "net/rpc/jsonrpc", "net/smtp",
+  "database/sql", "io/ioutil",
   "plugin",
 ]
 message = "The domain imported something from outside the project that it is not allowed to know about. Put the capability behind a port, or add it to `allow` in .hexa/ADR-rules.toml deliberately and say why in an ADR."
