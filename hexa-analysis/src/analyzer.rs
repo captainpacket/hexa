@@ -45,6 +45,10 @@ const EXCLUDE_PATTERNS: &[&str] = &[
     ".config.cjs",
     ".test.ts",
     ".spec.ts",
+    // A React test beside its component is a test as a `.ts` one is
+    // (ADR-2611221706 §1).
+    ".test.tsx",
+    ".spec.tsx",
     "_test.go",
     ".test.rs",
     "/tests/",
@@ -532,7 +536,7 @@ fn walk_graded_files(root: &Path) -> std::io::Result<Vec<String>> {
 }
 
 /// Test file patterns — files matching these are collected as additional consumers.
-const TEST_PATTERNS: &[&str] = &[".test.ts", ".spec.ts", "_test.go", ".test.rs"];
+const TEST_PATTERNS: &[&str] = &[".test.ts", ".spec.ts", ".test.tsx", ".spec.tsx", "_test.go", ".test.rs"];
 
 /// A Python test module by its name: `test_*.py` or `*_test.py` (pytest's
 /// discovery rule; ADR-2611211324 §4).

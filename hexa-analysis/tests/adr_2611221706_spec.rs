@@ -738,15 +738,21 @@ mod part_2 {
             "export function helper() {\n  return 1;\n}\n",
         )]);
         let r = analyze(dir.path());
+        // The grade reads no .jsx file, before this ADR and after it.
         assert_eq!(
-            r.coverage.total, 1,
-            "Widget.test.jsx is graded as before: {:?}",
+            r.coverage.total, 0,
+            "Widget.test.jsx is read as before (not at all): {:?}",
             r.coverage
         );
         assert!(
-            is_dead(&r, "src/ui/Widget.test.jsx", "helper"),
-            "its unused helper is dead: {:?}",
+            !is_dead(&r, "src/ui/Widget.test.jsx", "helper"),
+            "it appears in no finding: {:?}",
             r.dead_exports
+        );
+        assert!(
+            !unclassified(&r).contains("src/ui/Widget.test.jsx"),
+            "it appears in no finding: {:?}",
+            r.coverage
         );
     }
 
