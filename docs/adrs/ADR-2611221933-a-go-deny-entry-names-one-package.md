@@ -1,6 +1,7 @@
 # ADR-2611221933: A Go `deny` entry names one package
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-23 Accepted: Accepted in craigjohnson's session: a bug fix under his rule (no new or changed functionality); he accepted the spec, and its sealed tests pass on main
 **Date:** 2026-11-22
 **Drivers:** a Go SDK's domain parses IP addresses with `net/netip` (`ParseAddr`, `ParsePrefix`), which does no I/O. The scaffolded domain policy denies `net`, and `covers` (`hexa-analysis/src/import_policy.rs`) matches an import below a prefix, so `net/netip` and `net/url` are denied as if they were `net`. A deny beats an allow (ADR-2609211430), so the policy's own advice, "add it to `allow` … deliberately", cannot work; the project lost 20 points for two pure imports. ADR-2609211430 §3 makes the default deny "the standard library's I/O surface", and lists `net` and `net/http` as separate entries, as Go names them.
 **Supersedes:** none. A defect in how ADR-2609211430's Go `deny` entries are matched.
