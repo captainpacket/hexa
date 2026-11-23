@@ -1059,6 +1059,9 @@ pub async fn verify(adr: Option<&str>, ci: bool, prove: bool, verbose: bool, loc
     // Each tested scenario: (ADR, scenario, ref, its plan or why it cannot run).
     let mut jobs: Vec<(String, String, String, Result<Planned, TestRun>)> = Vec::new();
     let mut to_prove: Vec<(Adr, Spec)> = Vec::new();
+    // Scenarios found, whatever became of them: the empty-run check is about
+    // finding none (ADR-2611230830 §2), not about how many ran.
+    let mut scenarios_found = 0usize;
     for a in &adrs {
         // The seals are judged from the raw record, so a spec this cannot
         // otherwise parse still guards its tests (ADR-2611081151 §1).
@@ -1080,6 +1083,7 @@ pub async fn verify(adr: Option<&str>, ci: bool, prove: bool, verbose: bool, loc
                 continue;
             }
         };
+        scenarios_found += spec.specs.len();
         let alt = is_alt(&text);
         if !print_coverage(a, &spec, alt) {
             fatal += 1;
@@ -1185,7 +1189,7 @@ pub async fn verify(adr: Option<&str>, ci: bool, prove: bool, verbose: bool, loc
     // A whole-repository --ci run that found no scenario checked nothing, and
     // a vacuous gate is a failed gate (ADR-2611230830 §2). Said first, so the
     // reason is the one a reader needs.
-    if ci && adr.is_none() && passed + failed + pending + unproven == 0 {
+    if ci && adr.is_none() && scenarios_found == 0 {
         anyhow::bail!("`hexa spec verify --ci`: no spec holds a scenario, so nothing was checked");
     }
     if failed + fatal + unproven_fails > 0 {
