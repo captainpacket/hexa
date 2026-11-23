@@ -401,7 +401,7 @@ fn gate_failed(mut base: serde_json::Value, f: hexa_exec::direct_exec::GateFailu
         base["commit"] = json!(c);
     }
     if f.tests.is_some() || (uncounted && f.output.is_some()) {
-        base["tests"] = tests_json(f.tests, uncounted, false);
+        base["tests"] = tests_json(f.tests, uncounted);
     }
     if let Some(first) = &f.first_failure {
         base["first_failure"] = json!(first);

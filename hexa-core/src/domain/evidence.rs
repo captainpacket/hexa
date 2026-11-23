@@ -172,6 +172,13 @@ struct Tally {
     recognised: bool,
     passed: u64,
     failed: u64,
+    /// Per-test failure lines (`test x ... FAILED`, `--- FAIL`): the count
+    /// only when no summary counted failures, so one failure is not two
+    /// (ADR-2611231400 §1).
+    failed_lines: u64,
+    /// Package-level failure markers (`FAIL\tpkg`, a bare `FAIL`): one
+    /// failure when nothing else counted any.
+    fail_marks: u64,
 }
 
 impl Tally {
@@ -235,7 +242,8 @@ fn tally(output: &str) -> Tally {
             continue;
         }
         if line.starts_with("test ") && line.ends_with("... FAILED") {
-            t.saw(0, 1);
+            t.recognised = true;
+            t.failed_lines += 1;
             continue;
         }
         // cargo: "running 5 tests" names the runner but counts nothing itself.
@@ -264,8 +272,14 @@ fn tally(output: &str) -> Tally {
             t.saw(1, 0);
             continue;
         }
-        if line.starts_with("--- FAIL") || line == "FAIL" || line.starts_with("FAIL\t") {
-            t.saw(0, 1);
+        if line.starts_with("--- FAIL") {
+            t.recognised = true;
+            t.failed_lines += 1;
+            continue;
+        }
+        if line == "FAIL" || line.starts_with("FAIL\t") {
+            t.recognised = true;
+            t.fail_marks += 1;
             continue;
         }
         if line.contains("[no test files]") || line.contains("[no tests to run]") {
@@ -293,6 +307,9 @@ fn tally(output: &str) -> Tally {
             let failed = count_before(line, "failed").unwrap_or(0);
             t.saw(passed, failed);
         }
+    }
+    if t.failed == 0 {
+        t.failed = if t.failed_lines > 0 { t.failed_lines } else { t.fail_marks.min(1) };
     }
     t
 }
