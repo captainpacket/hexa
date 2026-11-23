@@ -260,7 +260,26 @@ pub fn plan_test(root: &Path, r: &str, cfg: &TestConfig, prefix: &str) -> Result
             let dir = dir.unwrap_or_else(|| root.to_path_buf());
             let cd = if dir == root { String::new() } else { format!("cd {} && ", shell_quote(&rel(root, &dir))) };
             let target = format!("{}::{name}", rel(&dir, &abs));
-            Ok(Planned { cmd: format!("{prefix}{cd}python3 -m pytest {} -q", shell_quote(&target)), judge: Judge::Pytest })
+            // The project's own Python, as vitest is the package's own
+            // (ADR-2611230832): uv when a uv.lock is at or above the pytest
+            // directory, else a virtualenv's interpreter there, else python3.
+            // Searched from the pytest directory up to the repository root.
+            let from = dir.join("_");
+            let python = if nearest(root, &from, "uv.lock").is_some() {
+                "uv run python".to_string()
+            } else if let Some(v) = [".venv/bin/python", "venv/bin/python"]
+                .iter()
+                .filter_map(|m| nearest(root, &from, m).map(|d| d.join(m)))
+                .max_by_key(|p| p.components().count())
+            {
+                // Quoted only when the shell needs it, so a plain path reads
+                // as the command a person would type.
+                let v = v.to_string_lossy().to_string();
+                if v.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c)) { v } else { shell_quote(&v) }
+            } else {
+                "python3".to_string()
+            };
+            Ok(Planned { cmd: format!("{prefix}{cd}{python} -m pytest {} -q", shell_quote(&target)), judge: Judge::Pytest })
         }
         Runner::Configured(template) => {
             let cmd = fill(&template, &[("file", &t.file), ("name", &name)]);
