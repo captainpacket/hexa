@@ -11,6 +11,9 @@
     "by": "craigjohnson",
     "sha256": "9b4a7b39ec2143e40e59857db9d4db7782dfcf20ddb7b65c96b6069d648ef526"
   },
+  "sealed": {
+    "hexa-analysis/tests/adr_2611221705_spec.rs": "afe775641f1756c2db23dea33e499553eec1d25493b150413ee16c9daa875536"
+  },
   "red": "bb13809",
   "specs": [
     {
@@ -240,6 +243,17 @@
       "then": "P' has the same violations, coverage, dead_exports, circular_deps, orphan_files, unused_ports, file_count and edge_count as P. Its config_errors equals P's plus one entry for each added key. Its health_score is P's score minus 10 for each added key, saturating at 0.",
       "test": "hexa-analysis/tests/adr_2611221705_spec.rs::part_2::s18_unmatched_keys_change_only_config_errors_and_score",
       "red": "bb13809"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-23T00:35:04.629583610+00:00",
+      "base_commit": "bb1380947c8e32581a87f1c0517d249f77e4056e",
+      "by": "Claude Code agent (spec re-accepted by craigjohnson)",
+      "file": "hexa-analysis/tests/adr_2611221705_spec.rs",
+      "from": "1749b62fbd2dee158323077e304a7e345567e058738d7b6ceddb462e4f5960af",
+      "reason": "part_2 ran the analyzer with a hand-rolled block_on and no tokio runtime, so every part_2 test panicked before any assertion; it now uses a tokio runtime as part_1 does. S15 follows the re-accepted spec: src/domain is classified by its folder, and the coverage ceiling caps both scores (S15's score check is weaker, as the spec now says; S02 keeps the cost)",
+      "to": "afe775641f1756c2db23dea33e499553eec1d25493b150413ee16c9daa875536"
     }
   ]
 }
