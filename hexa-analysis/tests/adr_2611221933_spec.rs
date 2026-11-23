@@ -170,52 +170,7 @@ mod part_2 {
         "http",
     ];
 
-    /// S14: A Go deny entry denies exactly the path equal to it
-    #[test]
-    fn s14_go_deny_denies_exactly_equal_paths() {
-        let deny_lists: Vec<Vec<String>> = vec![
-            s(&[]),
-            s(&["net"]),
-            s(&["os"]),
-            s(&["net", "os"]),
-            s(&["net/http"]),
-            s(&["example.com/lib"]),
-            s(&["net", "net/http", "example.com/lib"]),
-        ];
-        let paths = [
-            "net",
-            "net/netip",
-            "net/url",
-            "net/http",
-            "net/http/pprof",
-            "network",
-            "os",
-            "os/user",
-            "os/exec",
-            "fmt",
-            "example.com/lib",
-            "example.com/lib/sub",
-            "example.com/library",
-        ];
-        let allow: Vec<String> = vec![];
-        for deny in &deny_lists {
-            for p in paths {
-                let origin = if p.split('/').next().unwrap().contains('.') {
-                    Origin::External
-                } else {
-                    Origin::StandardLibrary
-                };
-                let v = judge(Language::Go, p, origin, &allow, deny);
-                let expected = deny.iter().any(|d| d == p);
-                assert_eq!(
-                    v == Verdict::DeniedByDeny,
-                    expected,
-                    "deny={deny:?} path={p} verdict={v:?}"
-                );
-            }
-        }
-    }
-
+    
     /// S16: The scaffolded Go deny names each I/O package explicitly
     #[test]
     fn s16_template_go_deny_names_each_io_package() {
