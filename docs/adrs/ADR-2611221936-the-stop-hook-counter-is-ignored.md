@@ -1,6 +1,7 @@
 # ADR-2611221936: The Stop hook's counter is session state, kept out of git
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-22 Accepted: Accepted in craigjohnson's session: a bug fix under his rule (no new or changed functionality); he accepted the spec, and its sealed tests pass on main
 **Date:** 2026-11-22
 **Drivers:** a Python SDK found `.hexa/stop-blocks.json` untracked after `hexa init`: the Stop hook writes it, and neither `.hexa/.gitignore` nor the root `.gitignore` that `hexa init` writes names it, so it shows in every `git status` and can be committed. hexa's own repository ignores it by hand. ADR-2610281552 §3: a new project's first commit holds its source, "not its build output, one checkout's session state, or a secret".
 **Supersedes:** none. A defect in what `hexa init` ignores.
