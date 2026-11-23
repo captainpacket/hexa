@@ -5,6 +5,10 @@
   "universal": [
     "§1"
   ],
+  "accepted": {
+    "by": "craigjohnson",
+    "sha256": "25b96b57e2ad33ed2f81a8554dbfe5522d27293b15c56060d2d2486c3b567a6b"
+  },
   "specs": [
     {
       "id": "S01",
