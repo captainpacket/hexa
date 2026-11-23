@@ -2,10 +2,16 @@
   "adr": "ADR-2611231400",
   "feature": "remote-gate-red-dry-run-result",
   "description": "A remote gate commits red or green, tries itself first, and says what it did in one object",
+  "accepted": {
+    "by": "gary (standing instruction: always accept the ADRs and specs; recorded by the implementing agent, 2026-11-23)",
+    "sha256": "dc8182468959d2ab5b9c33e7142355297dac51a1c273f305312a99e1450d8dab"
+  },
   "specs": [
     {
       "id": "S01",
-      "decision": ["§1"],
+      "decision": [
+        "§1"
+      ],
       "kind": "example",
       "description": "A remote pass ends with one result object naming the commit, the remote head and the counts",
       "given": "a project whose `test.remote` runs the gate in a clone of the pushed commit, on branch `feat` tracking origin, with a change to `src/a.rs`",
@@ -15,7 +21,9 @@
     },
     {
       "id": "S02",
-      "decision": ["§1"],
+      "decision": [
+        "§1"
+      ],
       "kind": "negative",
       "description": "A failing remote gate's result object carries code, hint, field, retryable and the first failure",
       "given": "the same project",
@@ -25,7 +33,9 @@
     },
     {
       "id": "S03",
-      "decision": ["§1"],
+      "decision": [
+        "§1"
+      ],
       "kind": "example",
       "description": "An uncounted remote pass says uncounted in its object",
       "given": "the same project",
@@ -35,7 +45,9 @@
     },
     {
       "id": "S04",
-      "decision": ["§1"],
+      "decision": [
+        "§1"
+      ],
       "kind": "negative",
       "description": "A remote gate that ran zero tests is vacuous, and commits nothing",
       "given": "the same project",
@@ -45,7 +57,9 @@
     },
     {
       "id": "S05",
-      "decision": ["§2"],
+      "decision": [
+        "§2"
+      ],
       "kind": "example",
       "description": "The runner is sent the commit on the scratch ref, and the scratch ref is gone after a pass",
       "given": "the same project",
@@ -55,7 +69,10 @@
     },
     {
       "id": "S06",
-      "decision": ["§2", "§1"],
+      "decision": [
+        "§2",
+        "§1"
+      ],
       "kind": "negative",
       "description": "A runner whose output does not name the commit is refused, and the scratch ref is gone",
       "given": "a project whose `test.remote` runs the command in the current checkout and prints a commit id that is not the candidate",
@@ -65,7 +82,9 @@
     },
     {
       "id": "S07",
-      "decision": ["§3"],
+      "decision": [
+        "§3"
+      ],
       "kind": "example",
       "description": "A remote pass reads the branch's head back from the remote",
       "given": "the same project as S01",
@@ -75,7 +94,9 @@
     },
     {
       "id": "S08",
-      "decision": ["§3"],
+      "decision": [
+        "§3"
+      ],
       "kind": "negative",
       "description": "A refused branch push fails the verb with push-refused",
       "given": "the same project, whose origin refuses any push to `refs/heads/feat` and accepts `refs/heads/hexa-gate/*`",
@@ -85,7 +106,9 @@
     },
     {
       "id": "S09",
-      "decision": ["§3"],
+      "decision": [
+        "§3"
+      ],
       "kind": "negative",
       "description": "A refused scratch push commits nothing",
       "given": "the same project, whose origin refuses every push",
@@ -95,7 +118,9 @@
     },
     {
       "id": "S10",
-      "decision": ["§4"],
+      "decision": [
+        "§4"
+      ],
       "kind": "example",
       "description": "--expect-red commits tests that fail on assertions",
       "given": "the same project, with a new test file `tests/t.rs`",
@@ -105,7 +130,9 @@
     },
     {
       "id": "S11",
-      "decision": ["§4"],
+      "decision": [
+        "§4"
+      ],
       "kind": "negative",
       "description": "--expect-red refuses a compile error",
       "given": "the same project, with a new test file `tests/t.rs`",
@@ -115,7 +142,9 @@
     },
     {
       "id": "S12",
-      "decision": ["§4"],
+      "decision": [
+        "§4"
+      ],
       "kind": "negative",
       "description": "--expect-red refuses a gate that passes, and one that ran zero tests",
       "given": "the same project, with a new test file `tests/t.rs`",
@@ -125,7 +154,9 @@
     },
     {
       "id": "S13",
-      "decision": ["§4"],
+      "decision": [
+        "§4"
+      ],
       "kind": "negative",
       "description": "--expect-red cannot be combined with --uncounted",
       "given": "the same project",
@@ -135,7 +166,9 @@
     },
     {
       "id": "S14",
-      "decision": ["§5"],
+      "decision": [
+        "§5"
+      ],
       "kind": "example",
       "description": "A red commit names `hexa spec red` as its next step",
       "given": "the same project",
@@ -145,7 +178,9 @@
     },
     {
       "id": "S15",
-      "decision": ["§5"],
+      "decision": [
+        "§5"
+      ],
       "kind": "negative",
       "description": "A red commit writes no spec record",
       "given": "the same project, with a spec record `docs/specs/<id>.json` committed",
@@ -155,7 +190,9 @@
     },
     {
       "id": "S16",
-      "decision": ["§6"],
+      "decision": [
+        "§6"
+      ],
       "kind": "example",
       "description": "--dry-run says what it would do and does none of it",
       "given": "the same project as S01",
@@ -165,7 +202,9 @@
     },
     {
       "id": "S17",
-      "decision": ["§6"],
+      "decision": [
+        "§6"
+      ],
       "kind": "negative",
       "description": "A dry run still refuses what the gate would refuse",
       "given": "the same project, with `src/b.rs` unchanged",
@@ -175,7 +214,9 @@
     },
     {
       "id": "S18",
-      "decision": ["§7"],
+      "decision": [
+        "§7"
+      ],
       "kind": "example",
       "description": "The commit hook names --expect-red",
       "given": "a project with `src/a.rs` staged, with and without `test.remote`",
@@ -185,7 +226,9 @@
     },
     {
       "id": "S19",
-      "decision": ["§7"],
+      "decision": [
+        "§7"
+      ],
       "kind": "negative",
       "description": "A prose-only commit is not refused and names nothing",
       "given": "a project under `test.remote` with only `docs/x.md` staged",
