@@ -1,6 +1,7 @@
 # ADR-2611230811: The default domain policy denies Python's I/O, as it does the others'
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-23 Accepted: Accepted in craigjohnson's session: Python brought up to what the other languages have, under his rule; he accepted the spec, and its sealed tests pass on main
 **Date:** 2026-11-23
 **Drivers:** A Python project adopting hexa found that the domain import policy `hexa init` writes denies nothing Python-specific: a domain module may import `subprocess`, `socket` or `sqlite3` and the grade holds. ADR-2609211430 §3 makes the scaffolded default deny "the standard library's I/O surface" of each language; it lists Rust's, TypeScript's and Go's. ADR-2611211324 added Python and did not extend the list.
 **Supersedes:** none. Completes ADR-2609211430 §3 for the language ADR-2611211324 added.
