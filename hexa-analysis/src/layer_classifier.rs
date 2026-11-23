@@ -69,7 +69,9 @@ fn match_filename(path: &str) -> Option<FilenameMatch> {
     if basename == "lib.rs" {
         return Some(FilenameMatch::CompositionRoot);
     }
-    if basename == "main.rs" || basename == "main.go" || basename == "main.ts" {
+    // Python's program entry is `__main__.py` (`python -m pkg`), or `main.py`
+    // by the convention `main.ts` follows (ADR-2611230810 §2).
+    if basename == "main.rs" || basename == "main.go" || basename == "main.ts" || basename == "main.py" || basename == "__main__.py" {
         return Some(FilenameMatch::EntryPoint);
     }
     if basename == "embed.rs" || basename == "daemon.rs" {
@@ -343,7 +345,7 @@ fn key_covers(prefix: &str, path: &str) -> bool {
     let under = |p: &str, key: &str| {
         p == key || p.strip_prefix(key).is_some_and(|rest| rest.starts_with('/'))
     };
-    let module = [".rs", ".ts", ".tsx", ".go"]
+    let module = [".rs", ".ts", ".tsx", ".go", ".py"]
         .iter()
         .find_map(|ext| prefix.strip_suffix(ext));
     under(path, prefix) || module.is_some_and(|m| under(path, m))

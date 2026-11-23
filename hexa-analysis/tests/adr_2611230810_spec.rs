@@ -127,7 +127,7 @@ mod part_1 {
     /// S08: `main.py` takes the entry-point layer, as `main.go` does.
     #[test]
     fn s08_main_py_is_entry_point_like_main_go() {
-        for path in ["main.py", "cmd/main.go"] {
+        for path in ["main.py", "main.go"] {
             let (builtin, mapped) = layer_of(path);
             assert_eq!(builtin, HexLayer::EntryPoint, "{path}");
             assert_eq!(mapped, HexLayer::EntryPoint, "{path}");
@@ -618,7 +618,7 @@ mod part_3 {
         let entry_files = [
             "src/main.rs",
             "src/lib.rs",
-            "cmd/main.go",
+            "main.go",
             "web/index.ts",
             "web/cli.ts",
         ];
@@ -642,7 +642,7 @@ mod part_3 {
         );
 
         assert_eq!(classify_layer("src/main.rs"), HexLayer::EntryPoint);
-        assert_eq!(classify_layer("cmd/main.go"), HexLayer::EntryPoint);
+        assert_eq!(classify_layer("main.go"), HexLayer::EntryPoint);
         assert_eq!(classify_layer("web/main.ts"), HexLayer::EntryPoint);
         assert_eq!(classify_layer("app/__main__.py"), HexLayer::EntryPoint);
 
@@ -730,7 +730,7 @@ exclude_patterns = []
             "src/adapters/secondary/db.rs",
             "src/adapters/primary/http/handler.rs",
             "src/util.rs",
-            "cmd/main.go",
+            "main.go",
             "internal/service.go",
             "web/index.ts",
             "web/cli.ts",

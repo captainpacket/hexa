@@ -34,6 +34,13 @@ const ENTRY_POINT_SUFFIXES: &[&str] = &[
     "/main.go",
     "/main.rs",
     "/lib.rs",
+    // Python's, by the same roles (ADR-2611230810 §1): the program entry, a
+    // CLI module, and the composition root. Not `__init__.py`, a package's
+    // own module.
+    "/__main__.py",
+    "/main.py",
+    "/cli.py",
+    "/composition_root.py",
 ];
 
 /// Check whether a file is an entry point.

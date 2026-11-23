@@ -46,7 +46,7 @@ adr = "ADR-2609121400"
 id = "no-hardcoded-absolute-path"
 message = "Hardcoded absolute path. A path that names one machine writes outside the repository on every other machine, and no test notices. Resolve it from the working directory or an environment variable."
 severity = "error"
-file_patterns = [".rs", ".go", ".ts", ".tsx"]
+file_patterns = [".rs", ".go", ".ts", ".tsx", ".py"]
 exclude_patterns = ["test", "_test.", ".test.", "example"]
 violation_patterns = ["\"/home/", "\"/Users/", "\"C:\\\\Users"]
 
@@ -55,7 +55,7 @@ adr = "ADR-2609121400"
 id = "no-hardcoded-host-port"
 message = "Hardcoded host:port. A literal address is a daemon dependency the code never decided to have, and removing the daemon later means touching every caller. Put the address in configuration."
 severity = "warning"
-file_patterns = [".rs", ".go", ".ts", ".tsx"]
+file_patterns = [".rs", ".go", ".ts", ".tsx", ".py"]
 exclude_patterns = ["test", "_test.", ".test.", "config", "example", "infer"]
 violation_patterns = ["127.0.0.1:", "localhost:", "0.0.0.0:"]
 
@@ -64,7 +64,7 @@ adr = "ADR-2609121400"
 id = "no-model-name-outside-inference"
 message = "A model or provider name outside the inference boundary. A caller that names a model cannot be re-pointed by editing configuration, which is exactly the property model-independence means. Read the tier from config instead."
 severity = "error"
-file_patterns = [".rs", ".go", ".ts", ".tsx"]
+file_patterns = [".rs", ".go", ".ts", ".tsx", ".py"]
 exclude_patterns = ["infer", "inference", "test", "_test.", ".test.", "config"]
 violation_patterns = ["gpt-4", "gpt-5", "claude-3", "claude-4", "qwen", "llama-3", "mistral", "ollama"]
 

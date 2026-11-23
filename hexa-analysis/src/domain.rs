@@ -774,7 +774,7 @@ pub struct AdapterMap {
 fn under_key(path: &str, key: &str) -> bool {
     let under = |k: &str| path == k || path.strip_prefix(k).is_some_and(|rest| rest.starts_with('/'));
     under(key)
-        || [".rs", ".ts", ".tsx", ".go"]
+        || [".rs", ".ts", ".tsx", ".go", ".py"]
             .iter()
             .find_map(|ext| key.strip_suffix(ext))
             .is_some_and(under)
@@ -849,7 +849,7 @@ impl AdapterMap {
             if let Some(i) = at {
                 let base = i + side.len();
                 let first = path[base..].split('/').next().unwrap_or("");
-                let first = [".rs", ".ts", ".tsx", ".go"]
+                let first = [".rs", ".ts", ".tsx", ".go", ".py"]
                     .iter()
                     .find_map(|ext| first.strip_suffix(ext))
                     .unwrap_or(first);
