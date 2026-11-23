@@ -1,6 +1,7 @@
 # ADR-2611221706: A `.test.tsx` file is a test, as a `.test.ts` file is
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-22 Accepted: Accepted in craigjohnson's session: a bug fix under his rule (no new or changed functionality), reported by a TypeScript user; he accepted the spec (re-accepted after corrections), and its sealed tests pass on main
 **Date:** 2026-11-22
 **Drivers:** a TypeScript user, specifying its React portal's zero dead exports, found on a planted copy that an export used only by `Button.test.tsx` counts as dead, while the same export used only by `Button.test.ts`, or by a `.test.tsx` under `__tests__/`, does not. Nothing decides that `.tsx` tests differ; the two lists that name test files were written before the grade read `.tsx`, and name only the `.ts` forms.
 **Supersedes:** none. A defect in how `hexa analyze` recognises TypeScript test files.
