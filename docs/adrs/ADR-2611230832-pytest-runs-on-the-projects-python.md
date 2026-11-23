@@ -1,6 +1,7 @@
 # ADR-2611230832: The built-in pytest runner uses the project's Python, as vitest uses the project's vitest
 
-**Status:** Accepted
+**Status:** Completed
+> 2026-11-23 Completed: landed on main at becd759; gate `cargo test -p hexa-exec --test adr_2611230832_spec` passed (hexa loop stage done)
 > 2026-11-23 Accepted: Accepted in craigjohnson's session: Python brought up to what the other languages have, under his rule; he accepted the spec, and its sealed tests pass on main
 **Date:** 2026-11-23
 **Drivers:** A Python SDK managed with uv (`uv.lock`, `.venv/`) could not bind a sealed test through the built-in runner: it runs the system `python3 -m pytest`, which cannot import the package ("No module named 'client_sdk'"). Every uv or virtualenv project needs a `test.runners.py` override that restates the built-in runner with its own interpreter. The TypeScript runner already runs the project's own tool: `npx vitest` from the test's package, never one it fetches (ADR-2611191120). Python should run the same way.
