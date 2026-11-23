@@ -161,6 +161,10 @@ fn tally(output: &str) -> Tally {
     // unittest prints "Ran N tests in Xs" and, a line or two later, the
     // verdict: "OK", "OK (skipped=k)" or "FAILED (failures=a, errors=b)".
     let mut ran: Option<u64> = None;
+    // Whether `go test -v` listed this package's tests (`--- PASS`/`--- FAIL`)
+    // since the last package line: if so, the package line counts nothing
+    // more (ADR-2611230833 §1).
+    let mut go_listed = false;
     for raw in output.lines() {
         let line = raw.trim();
         if line.is_empty() {
@@ -247,10 +251,17 @@ fn tally(output: &str) -> Tally {
         // bare "FAIL" summary, and the zero-test markers.
         if line.starts_with("--- PASS") {
             t.saw(1, 0);
+            go_listed = true;
             continue;
         }
-        if line.starts_with("--- FAIL") || line == "FAIL" || line.starts_with("FAIL\t") {
+        if line.starts_with("--- FAIL") {
             t.saw(0, 1);
+            go_listed = true;
+            continue;
+        }
+        if line == "FAIL" || line.starts_with("FAIL\t") {
+            t.saw(0, 1);
+            go_listed = false;
             continue;
         }
         if line.contains("[no test files]") || line.contains("[no tests to run]") {
@@ -258,7 +269,10 @@ fn tally(output: &str) -> Tally {
             continue;
         }
         if line.starts_with("ok  \t") || line.starts_with("ok\t") {
-            t.saw(1, 0);
+            if !go_listed {
+                t.saw(1, 0);
+            }
+            go_listed = false;
             continue;
         }
 
