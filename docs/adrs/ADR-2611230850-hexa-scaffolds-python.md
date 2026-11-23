@@ -1,6 +1,7 @@
 # ADR-2611230850: `hexa init --scaffold` and `hexa scaffold` emit Python, as they emit Rust, Go and TypeScript
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-23 Accepted: Accepted in craigjohnson's session: Python brought up to what the other languages have, under his rule; he accepted the spec, and its sealed tests pass on main
 **Date:** 2026-11-23
 **Drivers:** ADR-2611211324 §9 left Python out of the scaffold: "`hexa scaffold` and `hexa init --scaffold` emitting Python … Each is a separate ADR or gap." Projects adopting hexa in Python build the ports, use cases and adapters layout by hand, where a Rust, Go or TypeScript project gets a runnable, A+-graded skeleton from one command. This ADR is that separate decision.
 **Supersedes:** none. Decides what ADR-2611211324 §9 named as out of scope.
