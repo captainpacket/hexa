@@ -157,6 +157,14 @@ deny = [
   "net/rpc", "net/rpc/jsonrpc", "net/smtp",
   "database/sql", "io/ioutil",
   "plugin",
+  # The standard library's I/O (ADR-2611230811); `os` and `http` above
+  # already cover `os.*` and `http.*`. Pure modules (`pathlib`, `io`,
+  # `urllib.parse`, `json`, …) are not listed; `importlib` loads code at run
+  # time, as Go's `plugin` does.
+  # Python
+  "subprocess", "socket", "shutil", "tempfile", "glob", "sqlite3",
+  "urllib.request", "ftplib", "smtplib", "poplib", "imaplib", "ssl",
+  "signal", "multiprocessing", "ctypes", "importlib",
 ]
 message = "The domain imported something from outside the project that it is not allowed to know about. Put the capability behind a port, or add it to `allow` in .hexa/ADR-rules.toml deliberately and say why in an ADR."
 severity = "error"
