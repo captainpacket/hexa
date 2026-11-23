@@ -29,7 +29,7 @@
       "when": "hexa makes a `claude-text` call",
       "then": "the call fails with an error that contains \"exited with 1\" and \"AWS SSO token expired\"",
       "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s01_nonzero_exit_surfaces_result",
-      "red": "a68c4e6"
+      "red": "abdefbb"
     },
     {
       "id": "S02",
@@ -42,7 +42,7 @@
       "when": "hexa makes a `claude-text` call",
       "then": "the call fails with an error that contains \"exited with 2\" and \"rate_limited\"",
       "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s02_falls_back_to_terminal_reason",
-      "red": "a68c4e6"
+      "red": "abdefbb"
     },
     {
       "id": "S03",
@@ -55,7 +55,7 @@
       "when": "hexa makes a `claude-text` call",
       "then": "the error contains both \"model unavailable\" and \"warning: retry exhausted\"",
       "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s03_stderr_reported_alongside_stdout_reason",
-      "red": "a68c4e6"
+      "red": "abdefbb"
     },
     {
       "id": "S04",
@@ -68,7 +68,7 @@
       "when": "hexa makes a `claude-text` call",
       "then": "the error message is not \"claude-text exited with 1: \" with only whitespace or nothing after the colon",
       "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s04_never_nothing_after_colon",
-      "red": "a68c4e6"
+      "red": "abdefbb"
     },
     {
       "id": "S05",
@@ -81,7 +81,7 @@
       "when": "hexa makes a `claude-text` call",
       "then": "the error names \"token expired\" as the reason, and is not built from \"error\" alone",
       "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s05_result_takes_precedence",
-      "red": "a68c4e6"
+      "red": "abdefbb"
     },
     {
       "id": "S06",
@@ -94,7 +94,7 @@
       "when": "hexa makes a `claude-text` call that receives them",
       "then": "the error contains the exit status, the stdout `result` if it is present (otherwise the `terminal_reason`), and the stderr text whenever stderr is non-empty",
       "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s06_every_nonzero_exit_carries_cli_output",
-      "red": "a68c4e6"
+      "red": "abdefbb"
     },
     {
       "id": "S07",
@@ -107,7 +107,7 @@
       "when": "the user runs `hexa bench agentic`",
       "then": "the command refuses with an error that names `bun` and all five fixtures, no fixture runs, no model is invoked, and no pass rate is reported",
       "test": "hexa-cli/tests/adr_2611221646_spec_3.rs::s07_missing_bun_refuses_before_any_fixture",
-      "red": "64aa6f3"
+      "red": "796f3c4"
     },
     {
       "id": "S08",
@@ -131,7 +131,7 @@
       "when": "the user runs `hexa bench agentic`",
       "then": "the bench refuses, the refusal names `pytest` and fixture C but not A or B, and none of A, B or C runs",
       "test": "hexa-cli/tests/adr_2611221646_spec_3.rs::s09_one_missing_program_refuses_whole_run",
-      "red": "64aa6f3"
+      "red": "796f3c4"
     },
     {
       "id": "S10",
@@ -155,7 +155,7 @@
       "when": "the user runs `hexa bench agentic`",
       "then": "if the first program of any selected fixture's evidence command is not found on PATH, no fixture runs and the refusal lists each missing program with the fixtures that need it; otherwise the bench proceeds",
       "test": "hexa-cli/tests/adr_2611221646_spec_3.rs::s11_runs_nothing_unless_every_program_resolves",
-      "red": "64aa6f3"
+      "red": "796f3c4"
     },
     {
       "id": "S12",
@@ -212,7 +212,7 @@
       "when": "the session context is injected",
       "then": "it shows Language: python",
       "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s16_pyproject_alone_means_python",
-      "red": "a68c4e6"
+      "red": "abdefbb"
     },
     {
       "id": "S17",
@@ -225,7 +225,7 @@
       "when": "the session context is injected for each",
       "then": "both show Language: python",
       "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_2::s17_setup_py_or_setup_cfg_alone_means_python",
-      "red": "a68c4e6"
+      "red": "abdefbb"
     },
     {
       "id": "S18",
@@ -260,7 +260,7 @@
       "when": "the session context is injected",
       "then": "it shows Language: python if and only if the subset contains at least one Python manifest and none of `Cargo.toml`, `go.mod` or `package.json`",
       "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_2::s20_python_iff_python_manifest_and_no_others",
-      "red": "a68c4e6"
+      "red": "abdefbb"
     },
     {
       "id": "S21",
@@ -273,7 +273,7 @@
       "when": "a code-reviewer subagent is launched without `isolation: \"worktree\"`",
       "then": "the pre-agent hook allows it, as it does for the fixed read-only types",
       "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_2::s21_project_definition_with_read_tools_runs_in_place",
-      "red": "a68c4e6"
+      "red": "abdefbb"
     },
     {
       "id": "S22",
@@ -286,7 +286,7 @@
       "when": "an auditor subagent is launched without a worktree",
       "then": "the pre-agent hook allows it",
       "test": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_2::s22_home_definition_used_when_project_has_none",
-      "red": "a68c4e6"
+      "red": "abdefbb"
     },
     {
       "id": "S23",
@@ -349,7 +349,7 @@
       "by": "Claude (agent, in craigjohnson's session; for review)",
       "file": "hexa-cli/tests/adr_2611221646_spec_2.rs",
       "from": "b6f7739dc968338b19b5bbd786d6c7cad874be7600f5a544528f00bb28fc23d9",
-      "reason": "S07, S09 and S11 moved to hexa-cli/tests/adr_2611221646_spec_3.rs, re-proved against the JSON fixtures hexa bench reads (hexa spec tests --only --red-at f1b4ae3 --because, red at 64aa6f3): their tests here invented a YAML fixture format. Only those three tests leave this file; the scenarios and every other test are unchanged. The re-prove resealed the file without recording this amendment (gap:reaccept-reseal-amend-catch22).",
+      "reason": "S07, S09 and S11 moved to hexa-cli/tests/adr_2611221646_spec_3.rs, re-proved against the JSON fixtures hexa bench reads (hexa spec tests --only --red-at f1b4ae3 --because, red at 796f3c4): their tests here invented a YAML fixture format. Only those three tests leave this file; the scenarios and every other test are unchanged. The re-prove resealed the file without recording this amendment (gap:reaccept-reseal-amend-catch22).",
       "to": "d3d7fc624aa1b29aa7c06bb1005286703504386520d4dc9e143b7c3018f7af26"
     }
   ]

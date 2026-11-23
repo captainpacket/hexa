@@ -26,7 +26,7 @@
       "when": "`extract_exports` is called on it with `Language::Python`",
       "then": "The export named `connect` has `hexa_public: true`",
       "test": "hexa-analysis/tests/adr_2611221644_spec_2.rs::part_1::s01_tagged_top_level_def_is_public",
-      "red": "f9f5cfe"
+      "red": "00b66bd"
     },
     {
       "id": "S02",
@@ -39,7 +39,7 @@
       "when": "`extract_exports` is called with `Language::Python`",
       "then": "The export named `Client` has `hexa_public: true`",
       "test": "hexa-analysis/tests/adr_2611221644_spec_2.rs::part_1::s02_tag_on_any_line_of_comment_run",
-      "red": "f9f5cfe"
+      "red": "00b66bd"
     },
     {
       "id": "S03",
@@ -52,7 +52,7 @@
       "when": "`extract_exports` is called with `Language::Python`",
       "then": "The export named `DEFAULT_TIMEOUT` has `hexa_public: true`",
       "test": "hexa-analysis/tests/adr_2611221644_spec_2.rs::part_1::s03_tagged_assignment_is_public",
-      "red": "f9f5cfe"
+      "red": "00b66bd"
     },
     {
       "id": "S04",
@@ -65,7 +65,7 @@
       "when": "`extract_exports` is called with `Language::Python`",
       "then": "The export named `lookup` has `hexa_public: true`",
       "test": "hexa-analysis/tests/adr_2611221644_spec_2.rs::part_1::s04_decorated_def_comment_above_first_decorator",
-      "red": "f9f5cfe"
+      "red": "00b66bd"
     },
     {
       "id": "S05",
@@ -78,7 +78,7 @@
       "when": "`extract_exports` is called with `Language::Python`",
       "then": "The export named `Point` has `hexa_public: true`",
       "test": "hexa-analysis/tests/adr_2611221644_spec_2.rs::part_1::s05_decorated_class_comment_above_first_decorator",
-      "red": "f9f5cfe"
+      "red": "00b66bd"
     },
     {
       "id": "S06",
@@ -113,7 +113,7 @@
       "when": "`extract_exports` is called with `Language::Python`",
       "then": "The export named `VERSION` has `hexa_public: true`, because its own line carries the tag. The export named `connect` has `hexa_public: false`",
       "test": "hexa-analysis/tests/adr_2611221644_spec_2.rs::part_1::s08_trailing_comment_belongs_to_its_line",
-      "red": "f9f5cfe"
+      "red": "00b66bd"
     },
     {
       "id": "S09",
@@ -137,7 +137,7 @@
       "when": "`extract_exports` is called with `Language::Python`",
       "then": "`a` has `hexa_public: true` and `b` has `hexa_public: false`",
       "test": "hexa-analysis/tests/adr_2611221644_spec_2.rs::part_1::s10_tag_does_not_carry_over",
-      "red": "f9f5cfe"
+      "red": "00b66bd"
     },
     {
       "id": "S11",
@@ -161,7 +161,7 @@
       "when": "`extract_exports` is called with `Language::Python`",
       "then": "`x` has `hexa_public: true` and `connect` has `hexa_public: false`",
       "test": "hexa-analysis/tests/adr_2611221644_spec_2.rs::part_1::s12_tag_must_be_in_directly_above_run",
-      "red": "f9f5cfe"
+      "red": "00b66bd"
     },
     {
       "id": "S13",
@@ -174,7 +174,7 @@
       "when": "`extract_exports` is called with `Language::Python`",
       "then": "For every returned export, `hexa_public` is true if and only if some line of the unbroken run of whole-line `#` comments directly above the definition (or above its first decorator) contains `@hexa:public`. A blank line ends the run, and a comment that trails code does not count for the next definition",
       "test": "hexa-analysis/tests/adr_2611221644_spec_2.rs::part_1::s13_public_iff_directly_above_run_carries_tag",
-      "red": "f9f5cfe"
+      "red": "00b66bd"
     },
     {
       "id": "S14",
@@ -187,7 +187,7 @@
       "when": "`extract_exports` is called with `Language::Python`",
       "then": "The exports are exactly `connect` and `Client`, and both have `hexa_public: true`",
       "test": "hexa-analysis/tests/adr_2611221644_spec_2.rs::part_1::s14_tag_above_all_marks_every_listed_name",
-      "red": "f9f5cfe"
+      "red": "00b66bd"
     },
     {
       "id": "S15",
@@ -200,7 +200,7 @@
       "when": "The project is analysed",
       "then": "`dead_exports` holds no entry for `connect`",
       "test": "hexa-analysis/tests/adr_2611221644_spec_2.rs::part_2::s15_tagged_all_names_are_never_reported_as_dead_exports",
-      "red": "f9f5cfe"
+      "red": "00b66bd"
     },
     {
       "id": "S16",
@@ -235,7 +235,7 @@
       "when": "`extract_exports` is called with `Language::Python`",
       "then": "`a` has `hexa_public: true` and `b` has `hexa_public: false`",
       "test": "hexa-analysis/tests/adr_2611221644_spec_2.rs::part_2::s18_tag_on_one_listed_definition_does_not_mark_others",
-      "red": "f9f5cfe"
+      "red": "00b66bd"
     },
     {
       "id": "S19",
@@ -248,7 +248,7 @@
       "when": "`extract_exports` is called with `Language::Python`",
       "then": "Every returned export is a name `__all__` lists, and every returned export has `hexa_public: true`",
       "test": "hexa-analysis/tests/adr_2611221644_spec_2.rs::part_2::s19_with_tagged_all_every_export_is_public",
-      "red": "f9f5cfe"
+      "red": "00b66bd"
     },
     {
       "id": "S20",
@@ -283,7 +283,7 @@
       "when": "`extract_exports` is called with `Language::Python`",
       "then": "Only `a` is returned. Neither `b` nor `_c` is added by the tag",
       "test": "hexa-analysis/tests/adr_2611221644_spec_2.rs::part_2::s22_tag_does_not_change_which_names_are_exports",
-      "red": "f9f5cfe"
+      "red": "00b66bd"
     },
     {
       "id": "S23",

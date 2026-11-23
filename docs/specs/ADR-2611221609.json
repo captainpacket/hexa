@@ -25,7 +25,7 @@
       "when": "extract_exports is called on it with Language::Go",
       "then": "The result contains exactly one ExportDeclaration named `Timeout`, with file `pkg/config.go`, line 4, kind ExportKind::Value and hexa_public false",
       "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s01_grouped_exported_var_is_value_export_at_spec_line",
-      "red": "37d5f79"
+      "red": "b9a2ea5"
     },
     {
       "id": "S02",
@@ -38,7 +38,7 @@
       "when": "extract_exports is called on it with Language::Go",
       "then": "The exports include `A` at line 4, `B` at line 5, and `C` and `D` both at line 6, all of kind Value",
       "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s02_every_exported_spec_in_var_group_recorded_at_own_line",
-      "red": "37d5f79"
+      "red": "b9a2ea5"
     },
     {
       "id": "S03",
@@ -51,7 +51,7 @@
       "when": "extract_exports is called on each with Language::Go",
       "then": "Each yields an export named `Limit` at line 4 of kind Value with hexa_public false; the two records agree in name, line, kind and hexa_public",
       "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s03_grouped_var_and_grouped_const_agree",
-      "red": "37d5f79"
+      "red": "b9a2ea5"
     },
     {
       "id": "S04",
@@ -64,7 +64,7 @@
       "when": "The project is analyzed for dead exports",
       "then": "The dead exports include one entry with file `internal/domain/vars.go`, export_name `UnusedFlag` and the line of its spec",
       "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s04_unused_grouped_var_is_dead_export",
-      "red": "37d5f79"
+      "red": "b9a2ea5"
     },
     {
       "id": "S05",
@@ -88,7 +88,7 @@
       "when": "extract_exports is called on it with Language::Go",
       "then": "The result is not empty and contains an export named `Timeout`",
       "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s06_grouped_var_not_left_out",
-      "red": "37d5f79"
+      "red": "b9a2ea5"
     },
     {
       "id": "S07",
@@ -101,7 +101,7 @@
       "when": "extract_exports is called on it with Language::Go",
       "then": "The `Timeout` export has kind Value, not Function, Type, Method, Impl or Default, and its line is 4, not 3 (the line of the `var` keyword)",
       "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s07_grouped_var_kind_and_line",
-      "red": "37d5f79"
+      "red": "b9a2ea5"
     },
     {
       "id": "S08",
@@ -114,7 +114,7 @@
       "when": "extract_exports is called on each with Language::Go",
       "then": "Both yield exactly one export named N, at line L, of kind Value, with the same hexa_public value",
       "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s08_grouping_does_not_change_record",
-      "red": "37d5f79"
+      "red": "b9a2ea5"
     },
     {
       "id": "S09",
@@ -127,7 +127,7 @@
       "when": "extract_exports is called on it with Language::Go",
       "then": "The set of export names equals the set of declared names starting with an upper-case letter; each appears once, of kind Value, at the line of the spec that declares it",
       "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s09_exactly_upper_case_names_recorded_once",
-      "red": "37d5f79"
+      "red": "b9a2ea5"
     },
     {
       "id": "S10",
@@ -151,7 +151,7 @@
       "when": "extract_exports is called on it with Language::Go",
       "then": "The exports are exactly `Single`, `Run` and `Grouped`, with no other entries",
       "test": "hexa-analysis/tests/adr_2611221609_spec_2.rs::s11_mixed_file_gains_exactly_grouped_var",
-      "red": "37d5f79"
+      "red": "b9a2ea5"
     },
     {
       "id": "S12",
