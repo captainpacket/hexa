@@ -167,10 +167,10 @@
         "§1"
       ],
       "kind": "property",
-      "description": "A Go deny entry denies exactly the path equal to it",
+      "description": "A Go standard-library deny entry denies exactly the path equal to it; a module deny entry covers the packages below it",
       "given": "Any Go deny list D, an empty allow list, and any Go import path p",
       "when": "judge is called for p",
-      "then": "The deny rule denies p if and only if p is equal to some entry of D. No entry denies a path that merely starts with it.",
+      "then": "The deny rule denies p if and only if p equals some entry of D, or some entry of D whose first path element has a dot is a prefix of p on a / boundary. No standard-library entry denies a path that merely starts with it.",
       "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_2::s14_go_deny_denies_exactly_equal_paths"
     },
     {
@@ -253,6 +253,28 @@
       "given": "Each of os, net, http, net/http, database/sql, os/exec, io/ioutil, plugin, os/signal, os/user, net/http/httptest, net/http/httputil, net/http/pprof, net/rpc, net/rpc/jsonrpc and net/smtp",
       "when": "judge is called for that Go import under the scaffolded rules",
       "then": "The verdict is denied"
+    },
+    {
+      "id": "S22",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "A Go module deny entry still covers the packages below it",
+      "given": "A domain policy with deny = [\"github.com/jackc/pgx/v5\"]",
+      "when": "A Go domain file imports github.com/jackc/pgx/v5/pgxpool",
+      "then": "The verdict is denied"
+    },
+    {
+      "id": "S23",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "A Go module deny entry does not match a path that only shares its leading characters",
+      "given": "A domain policy with deny = [\"github.com/jackc/pgx/v5\"]",
+      "when": "A Go domain file imports github.com/jackc/pgx/v5x/pool",
+      "then": "The verdict is not denied by that entry"
     }
   ]
 }

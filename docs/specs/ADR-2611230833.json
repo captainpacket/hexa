@@ -4,7 +4,7 @@
   "description": "A Go ok package line counts as one passed test only when no --- PASS or --- FAIL line for that package was read before it, so a run with -v counts each test once.",
   "universal": [
     "§1",
-    "§2"
+    "§3"
   ],
   "accepted": {
     "by": "craigjohnson",
@@ -149,7 +149,7 @@
     {
       "id": "S12",
       "decision": [
-        "§2"
+        "§3"
       ],
       "kind": "example",
       "description": "A Go package without test files is still recognised with no tests",
@@ -160,7 +160,7 @@
     {
       "id": "S13",
       "decision": [
-        "§2"
+        "§3"
       ],
       "kind": "example",
       "description": "A Go run that matched no test is still vacuous",
@@ -171,7 +171,7 @@
     {
       "id": "S14",
       "decision": [
-        "§2"
+        "§3"
       ],
       "kind": "example",
       "description": "Other runners' output is read as before",
@@ -182,7 +182,7 @@
     {
       "id": "S15",
       "decision": [
-        "§2"
+        "§3"
       ],
       "kind": "negative",
       "description": "A failed verbose Go test still fails the run",
@@ -193,7 +193,7 @@
     {
       "id": "S16",
       "decision": [
-        "§2"
+        "§3"
       ],
       "kind": "negative",
       "description": "A failure in one package is not hidden by a passing package line elsewhere",
@@ -204,7 +204,7 @@
     {
       "id": "S17",
       "decision": [
-        "§2"
+        "§3"
       ],
       "kind": "negative",
       "description": "A run that exited non-zero is not passed by any Go lines",
@@ -215,7 +215,7 @@
     {
       "id": "S18",
       "decision": [
-        "§2"
+        "§3"
       ],
       "kind": "negative",
       "description": "A zero-test marker line is not counted as a test",
@@ -226,7 +226,7 @@
     {
       "id": "S19",
       "decision": [
-        "§2"
+        "§3"
       ],
       "kind": "property",
       "description": "Over all Go outputs, any failure line fails the run whether or not it is verbose",
@@ -237,13 +237,46 @@
     {
       "id": "S20",
       "decision": [
-        "§2"
+        "§3"
       ],
       "kind": "property",
       "description": "Over all outputs with no Go ok package line, the count is the same as the count of the --- PASS and other runners' lines",
       "given": "any output from a run that exited 0 that contains no line starting \"ok  \\t\" or \"ok\\t\" and no failure lines",
       "when": "read_evidence(true, output, false) is called",
       "then": "its result equals the result for the same output read under the reading rules in force before this ADR"
+    },
+    {
+      "id": "S21",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "A test with passing subtests is one test",
+      "given": "A go test -v run of one test TestS03 with two t.Run subtests, printing --- PASS: TestS03/fixture, --- PASS: TestS03/real_tree, --- PASS: TestS03 and the ok package line",
+      "when": "read_evidence reads it",
+      "then": "It is Passed with tests: 1"
+    },
+    {
+      "id": "S22",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "A failing subtest still fails the run",
+      "given": "A go test -v run of one test whose subtest fails: --- FAIL: TestS03/fixture, --- FAIL: TestS03, FAIL pkg",
+      "when": "read_evidence reads it",
+      "then": "It is Failed"
+    },
+    {
+      "id": "S23",
+      "decision": [
+        "§2"
+      ],
+      "kind": "property",
+      "description": "Subtest lines never add to the count",
+      "given": "Any go test -v output of passing tests in one package, where each top-level test may have any number of passing t.Run subtests",
+      "when": "read_evidence reads it",
+      "then": "It is Passed with tests equal to the number of top-level --- PASS lines (names without a /)"
     }
   ]
 }

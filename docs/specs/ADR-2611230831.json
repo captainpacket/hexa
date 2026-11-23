@@ -364,6 +364,17 @@
       "given": "Any hexa invocation whose output is not written to a closed pipe",
       "when": "It runs",
       "then": "Its exit status is the same as before this ADR"
+    },
+    {
+      "id": "S29",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "A write to a child process that has exited does not kill hexa",
+      "given": "A hexa command that writes a prompt larger than a pipe buffer to the stdin of a child command, and a child that exits without reading it",
+      "when": "The command runs",
+      "then": "hexa is not ended by SIGPIPE; it reports the child's failure and exits with a non-zero status of its own"
     }
   ],
   "amendments": [

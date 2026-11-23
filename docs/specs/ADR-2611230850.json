@@ -26,7 +26,7 @@
       "description": "--lang python writes the whole Python counter layout, with the package named after the project",
       "given": "an empty directory and the project name `my-app`",
       "when": "`hexa scaffold --lang python` runs for `my-app`",
-      "then": "it writes exactly these files: `pyproject.toml`; the package `my_app/`, holding `domain/count.py`, `ports/store.py`, `usecases/increment.py`, `adapters/secondary/memory.py` and `composition_root.py`; `tests/__init__.py`; and `tests/test_increment.py`",
+      "then": "it writes exactly these files: `pyproject.toml`; the package `my_app/`, holding `__init__.py`, `domain/count.py`, `ports/store.py`, `usecases/increment.py`, `adapters/secondary/memory.py` and `composition_root.py`; `tests/__init__.py`; and `tests/test_increment.py`",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_1::s01_python_scaffold_writes_the_whole_layout"
     },
     {
@@ -315,6 +315,17 @@
       "when": "the scaffold runs for that language",
       "then": "the written paths and bytes equal what the scaffold wrote for that name and language before this ADR",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_3::s25_other_scaffolds_unchanged"
+    },
+    {
+      "id": "S26",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "A module of the scaffolded package importing another is an internal import",
+      "given": "A fresh Python scaffold, with a new module in its domain that imports the domain's Count",
+      "when": "hexa analyze runs on it",
+      "then": "The import is read as one of the project's own (no import-policy finding for it), and the grade stays A+"
     }
   ],
   "amendments": [
