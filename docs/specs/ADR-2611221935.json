@@ -12,7 +12,7 @@
     "sha256": "96fff833e87b3296aaa67bcb8b019d7a8fbdac20c2d3f63ac9662a341072e10a"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611221935_spec.rs": "24b87a152f11d9ab043ef147a277d3ec817b1a778d73f97653343ee224a4e6f0"
+    "hexa-cli/tests/adr_2611221935_spec.rs": "5693d5e35b258c90c24e3e5853b508667adb8bd72ad4ce92964de85cb16d85a9"
   },
   "red": "161818b",
   "specs": [
@@ -168,6 +168,17 @@
       "when": "`hexa spec draft` or `hexa spec accept` is run",
       "then": "whether it proceeds or refuses for lacking a test home is the same as before this change: it proceeds exactly when the root has a Cargo.toml or package.json or a test.runners entry is configured",
       "test": "hexa-cli/tests/adr_2611221935_spec.rs::part_2::s13_outcomes_unchanged_without_a_python_manifest"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-23T13:07:04.417440334+00:00",
+      "base_commit": "161818b15b0e72ee701ea2495baa9de967f11078",
+      "by": "Claude Code agent",
+      "file": "hexa-cli/tests/adr_2611221935_spec.rs",
+      "from": "24b87a152f11d9ab043ef147a277d3ec817b1a778d73f97653343ee224a4e6f0",
+      "reason": "The fixtures ran spec accept with no drafted spec, so accept stopped at 'has no spec to accept' before its test-home check; both helpers now write a drafted spec before accept, as a person accepts one. No assertion changes",
+      "to": "5693d5e35b258c90c24e3e5853b508667adb8bd72ad4ce92964de85cb16d85a9"
     }
   ]
 }
