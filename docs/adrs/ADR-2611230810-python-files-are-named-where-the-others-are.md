@@ -1,6 +1,7 @@
 # ADR-2611230810: Python's files are named where the other languages' are
 
-**Status:** Accepted
+**Status:** Completed
+> 2026-11-23 Completed: landed on main at a49ef72; gate `cargo test -p hexa-analysis --test adr_2611230810_spec` passed (hexa loop stage done)
 > 2026-11-23 Accepted: Accepted in craigjohnson's session: Python brought up to what the other languages have, under his rule; he accepted the spec, and its sealed tests pass on main
 **Date:** 2026-11-23
 **Drivers:** Three Python projects adopting hexa found four places where a list names Rust, Go and TypeScript files and no Python file, so a Python project is read worse than the same project in another language: an entry-point module's exports count as dead, `__main__.py` has no layer where `main.go` has one, a layer key `app/store.py` does not cover the package `app/store/` where `app/store.rs` would, and the rules `hexa init` writes never run on `.py`. ADR-2611211324 added Python; these lists were not extended with it.
