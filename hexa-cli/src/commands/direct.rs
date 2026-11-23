@@ -380,7 +380,7 @@ fn tests_json(t: Option<hexa_core::ports::evidence::TestCounts>, uncounted: bool
 
 /// End a gate that did not finish: the human lines, the result object, the
 /// AG-UI failure, and a non-zero exit (ADR-2611231400 §1).
-fn gate_failed(mut base: serde_json::Value, f: Box<hexa_exec::direct_exec::GateFailure>, uncounted: bool, started: bool) -> anyhow::Result<()> {
+fn gate_failed(mut base: serde_json::Value, f: hexa_exec::direct_exec::GateFailure, uncounted: bool, started: bool) -> anyhow::Result<()> {
     if let Some(out) = &f.output {
         println!("  {} the gate's output (last lines):", "\u{2192}".cyan());
         for l in out.lines() {
@@ -429,7 +429,7 @@ async fn gate(
     let top = std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).output()?;
     if !top.status.success() {
         let base = json!({ "ok": false, "mode": if dry_run { "dry-run" } else if local { "local" } else { "remote" }, "expect": expect.as_str(), "files": files });
-        return gate_failed(base, GateFailure::new("refused", "hexa do gate runs inside a git repository", "cd into the repository, then run the same command", None, false), uncounted, false);
+        return gate_failed(base, *GateFailure::new("refused", "hexa do gate runs inside a git repository", "cd into the repository, then run the same command", None, false), uncounted, false);
     }
     let root = std::path::PathBuf::from(String::from_utf8_lossy(&top.stdout).trim().to_string());
     let branch = std::process::Command::new("git")
@@ -454,12 +454,12 @@ async fn gate(
             // a path that is neither in the tree nor tracked (a deletion) is a mistake, not "no change": `--files a,b` used to report nothing to commit
             Some(p) if !root.join(&p).exists() && std::process::Command::new("git").args(["ls-files", "--error-unmatch", &p]).current_dir(&root).output().map(|o| !o.status.success()).unwrap_or(true) => {
                 let hint = if f.contains(',') { "give several files separated by spaces, not commas" } else { "name a file that is in the tree, or a tracked file you deleted" };
-                return gate_failed(base, GateFailure::new("refused", format!("{f}: no such file in the tree or in git"), hint, Some("--files"), false), uncounted, false);
+                return gate_failed(base, *GateFailure::new("refused", format!("{f}: no such file in the tree or in git"), hint, Some("--files"), false), uncounted, false);
             }
             Some(p) => rel.push(p),
             None => {
                 let why = format!("{f} is outside the repository ({}): only files in it can be gated and committed", root.display());
-                return gate_failed(base, GateFailure::new("refused", why, "name files inside the repository", Some("--files"), false), uncounted, false);
+                return gate_failed(base, *GateFailure::new("refused", why, "name files inside the repository", Some("--files"), false), uncounted, false);
             }
         }
     }
@@ -469,7 +469,7 @@ async fn gate(
     if dry_run {
         println!("{} {} {}", "\u{2b21} gate:".cyan().bold(), evidence, "[dry run: nothing is pushed, run or committed]".dimmed());
         return match hexa_exec::test_exec::gate_plan(&root, &rel, &evidence, remote.as_deref()).await {
-            Err(f) => gate_failed(base, f, uncounted, false),
+            Err(f) => gate_failed(base, *f, uncounted, false),
             Ok(plan) => {
                 let then = match &plan.upstream {
                     Some((r, m)) => format!(
@@ -548,7 +548,7 @@ async fn gate(
     );
     crate::commands::events::step_end("gate");
     let done = match outcome {
-        Err(f) => return gate_failed(base, f, uncounted, true),
+        Err(f) => return gate_failed(base, *f, uncounted, true),
         Ok(done) => done,
     };
     let sha = done["commit"].as_str().unwrap_or("").to_string();
