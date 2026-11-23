@@ -13,7 +13,7 @@
     "sha256": "d7fe54c35a89d93cf0ddaa8e29b0512669b19d026a84d846df678f3a1261b1da"
   },
   "sealed": {
-    "hexa-analysis/tests/adr_2611230810_spec.rs": "25fe7b776d1628733a86bdaa788fbcccd317b02186ecb710107b1fffba70141c"
+    "hexa-analysis/tests/adr_2611230810_spec.rs": "b919db046ea17b7abb7e996d1a87550c4b9ee526d238aa45fd48efffbbd96bfd"
   },
   "red": "899c41c",
   "specs": [
@@ -301,6 +301,17 @@
       "when": "It is analysed before and after this ADR",
       "then": "For every non-`.py` file, the layer, its adapter, whether each export is dead, and each rule finding are identical",
       "test": "hexa-analysis/tests/adr_2611230810_spec.rs::part_3::s24_non_python_files_unchanged"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-23T14:22:53.368646931+00:00",
+      "base_commit": "899c41cf53912ee2861e50664e194e46fde10345",
+      "by": "Claude Code agent",
+      "file": "hexa-analysis/tests/adr_2611230810_spec.rs",
+      "from": "25fe7b776d1628733a86bdaa788fbcccd317b02186ecb710107b1fffba70141c",
+      "reason": "The tests used cmd/main.go as the Go example of an entry point, but hexa classifies a file under cmd/ by its folder (a primary adapter), before this ADR and after; a top-level main.go is the entry point S08 and S22 mean. No assertion changes. All 19 still fail without the fix",
+      "to": "b919db046ea17b7abb7e996d1a87550c4b9ee526d238aa45fd48efffbbd96bfd"
     }
   ]
 }
