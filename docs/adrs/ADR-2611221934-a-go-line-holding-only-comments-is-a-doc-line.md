@@ -1,6 +1,7 @@
 # ADR-2611221934: A Go line of comments is read whole, when finding a doc comment
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-22 Accepted: Accepted in craigjohnson's session: a bug fix under his rule (no new or changed functionality); he accepted the spec, and its sealed tests pass on main
 **Date:** 2026-11-22
 **Drivers:** ADR-2611221553 §1 says a Go export is `hexa_public` when its doc comment carries the tag, and that "a comment that ends a line holding other code belongs to that line". `go_doc_tagged` (`hexa-analysis/src/treesitter_adapter.rs`) decides whether a comment ends a code line by looking at the one sibling before it, so it misreads a line that holds two comments: `A = 1 /* x */ // @hexa:public` followed by `B = 2` tags `B` (both comments are `A`'s line), and `/* @hexa:public */ // note` on the line above `func F()` does not tag `F` (the whole line is `F`'s doc). Found reviewing ADR-2611221643.
 **Supersedes:** none. A defect in how ADR-2611221553 §1 is read.
