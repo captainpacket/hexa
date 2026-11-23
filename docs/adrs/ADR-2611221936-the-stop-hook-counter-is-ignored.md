@@ -9,7 +9,7 @@
 
 - The Stop hook (`hexa-cli/src/commands/hook/mod.rs`, `stop_until_finished`) counts, per session id, how many times in a row it has blocked a stop, in `.hexa/stop-blocks.json`. It is one checkout's session state.
 - `ensure_ignored` (`hexa-cli/src/commands/task_ledger.rs`) writes `.hexa/.gitignore` with the task ledger's runtime files (`tasks.json`, `tasks.lock`, `.tasks.json.*.tmp`), adding only the lines missing (ADR-2611051850). `hexa init` calls it, and so does the task ledger when it writes.
-- The project floor's ignore lines are `hexa-core/src/ports/project_floor.rs` (`merged_gitignore`).
+- The project floor's ignore lines are `hexa-core/src/domain/project_floor.rs` (`merged_gitignore`).
 
 ## Decision
 
@@ -31,4 +31,4 @@ Every phase ends with `cargo test --workspace` and `hexa analyze .`.
 - ADR-2610281552: a new project's first commit (§3, the ignore lines)
 - ADR-2611051850: the task ledger (its runtime files are ignored)
 - ADR-2611161800: a plan ends on main (the Stop hook, §5)
-- `hexa-core/src/ports/project_floor.rs`
+- `hexa-core/src/domain/project_floor.rs`
