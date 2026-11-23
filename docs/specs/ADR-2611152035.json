@@ -1,0 +1,199 @@
+{
+  "adr": "ADR-2611152035",
+  "feature": "hexa-learning-loop",
+  "description": "hexa learns from its own record and gives better models bigger work",
+  "universal": [
+    "§4",
+    "§6",
+    "§7"
+  ],
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "Build ADR-2610221834 first",
+      "given": "hexa is configured with ADR-2610221834 implemented",
+      "when": "hexa harden is run",
+      "then": "fixes are applied in parallel worktrees, tested first, and the operator's tree remains untouched"
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "Harden never touches the operator's working tree",
+      "given": "The operator's tree holds an uncommitted edit to a file a confirmed finding cites",
+      "when": "`hexa harden` fixes that finding",
+      "then": "The fix is written in its own worktree; the operator's uncommitted edit is unchanged when the run ends"
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "Findings are clustered by cause before they are fixed",
+      "given": "verify phase confirms 9 findings, 6 of which share a root cause",
+      "when": "hexa harden proceeds to fix phase",
+      "then": "the 6 findings are grouped into one cluster and fixed with a shared change"
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "Findings are clustered by cause before they are fixed",
+      "given": "verify phase confirms 9 findings, each with a unique root cause",
+      "when": "hexa harden proceeds to fix phase",
+      "then": "each finding is fixed individually as today"
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "Every cluster leaves something behind",
+      "given": "a cluster of findings is fixed with a shared helper",
+      "when": "hexa harden completes the fix",
+      "then": "a rule is proposed in .hexa/ADR-rules.toml, a lesson is stored in hexa memory, and a class test is written"
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "Every cluster leaves something behind",
+      "given": "a cluster of findings is fixed with a shared helper, but no pattern can be generalized",
+      "when": "hexa harden completes the fix",
+      "then": "only a lesson is stored in hexa memory, and no rule or class test is written"
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§4"
+      ],
+      "kind": "property",
+      "description": "What hexa learned goes into what it asks next",
+      "given": "a project has lessons and rules stored",
+      "when": "hexa hunt, do run, build, or generate test is run",
+      "then": "the prompt includes the relevant lessons and rules, ordered and cached per ADR-2610281516 §3"
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "Harden takes a focus",
+      "given": "hexa harden --focus \"lesson:async-staleness\" is run",
+      "when": "the run proceeds",
+      "then": "only the focused check is run across all targets"
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§5"
+      ],
+      "kind": "negative",
+      "description": "A focus keeps verify and the gate",
+      "given": "`hexa harden --focus \"<what to look for>\" <target>` whose focus lens reports a finding that verify refutes",
+      "when": "The run proceeds",
+      "then": "The refuted finding is not fixed, and every fix that is attempted is gated as without a focus"
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§6"
+      ],
+      "kind": "property",
+      "description": "The size of the work follows the measured model",
+      "given": "a model has a record of N first-time passes and M failures",
+      "when": "hexa harden is run",
+      "then": "the batch size is adjusted based on the model's record, printed in the opening lines"
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§6"
+      ],
+      "kind": "example",
+      "description": "The size of the work follows the measured model",
+      "given": "a model has a record of 10 first-time passes and 0 failures",
+      "when": "hexa harden --fast-gate is run",
+      "then": "the model is given larger batches, up to the whole pool"
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§6"
+      ],
+      "kind": "negative",
+      "description": "The size of the work follows the measured model",
+      "given": "a model has a record of 0 first-time passes and 10 failures",
+      "when": "hexa harden --fast-gate is run",
+      "then": "the model is given smaller batches, down to one"
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§7"
+      ],
+      "kind": "property",
+      "description": "The gate, verify, and red-test rule never scale down",
+      "given": "a model is given larger batches",
+      "when": "hexa harden is run",
+      "then": "the gate, verify step, and red-test rule remain unchanged"
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§7"
+      ],
+      "kind": "example",
+      "description": "The gate, verify, and red-test rule never scale down",
+      "given": "a model is given larger batches",
+      "when": "hexa harden is run",
+      "then": "each fix is still tested with a full gate before landing"
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§7"
+      ],
+      "kind": "negative",
+      "description": "A fix that fails the full gate never lands, whatever the record",
+      "given": "A model with a perfect record, given the whole pool as one batch, one of whose fixes fails the full gate",
+      "when": "hexa harden is run",
+      "then": "That fix does not land; the record changed the batch size, not the check"
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "Rules that do not touch the target paths stay out of the prompt",
+      "given": "A project with a stored `lesson:*` entry and two rules, one matching the target path and one matching only paths outside it",
+      "when": "`hexa harden` hunts the target path",
+      "then": "The hunt prompt includes the lesson and the matching rule and does not include the rule that touches no target path"
+    },
+    {
+      "id": "S17",
+      "decision": [
+        "§4"
+      ],
+      "kind": "example",
+      "description": "A lens a lesson covers becomes a targeted check",
+      "given": "A project with `lesson:async-staleness` naming a class of call site, and a target with 3 such call sites",
+      "when": "`hexa harden` hunts the target",
+      "then": "The prompt carries the lesson, and the lens it covers asks to verify that these 3 call sites follow `lesson:async-staleness` rather than an open hunt"
+    }
+  ]
+}

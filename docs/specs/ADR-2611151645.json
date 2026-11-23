@@ -1,0 +1,213 @@
+{
+  "adr": "ADR-2611151645",
+  "feature": "hexa harden gate checks",
+  "description": "hexa harden runs the gate before attempting fixes and keeps gate output for reporting",
+  "universal": [
+    "§1",
+    "§2",
+    "§3",
+    "§4",
+    "§5",
+    "§6"
+  ],
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "Gate runs once on the tree before any fixes are attempted",
+      "given": "A tree with a green gate",
+      "when": "hexa harden is run",
+      "then": "The gate runs once before any fixes, records a green baseline, and proceeds to hunt"
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "The baseline is the full gate, not the fast one",
+      "given": "A project with a fast gate and a full gate, the tree green on both",
+      "when": "hexa harden is run",
+      "then": "The baseline run is the full gate's command, labelled `baseline`, and the fast gate is not used for it"
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "A red gate stops the pass immediately",
+      "given": "A tree with a red gate",
+      "when": "hexa harden is run",
+      "then": "The gate runs once, fails, and the pass stops without any fixes attempted"
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "A gate red twice spends no inference",
+      "given": "A tree whose gate fails both times it is run",
+      "when": "hexa harden is run",
+      "then": "No lens is asked, nothing is verified and no fix is tried; the report says the gate is red before any fix, with its output, and `hexa harden` exits non-zero"
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "--no-baseline skips the baseline gate run",
+      "given": "A tree with a red gate",
+      "when": "hexa harden is run with --no-baseline",
+      "then": "The baseline gate run is skipped, and the pass proceeds to hunt"
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "Without --no-baseline a red gate stops the pass",
+      "given": "A tree with a red gate",
+      "when": "hexa harden is run without --no-baseline",
+      "then": "The baseline runs, fails twice, and the pass stops before the hunt"
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§4"
+      ],
+      "kind": "example",
+      "description": "Gate output is kept for reporting",
+      "given": "A gate run with output",
+      "when": "hexa harden is run",
+      "then": "The gate's output is kept and reported in the run record"
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "A failing gate prints its tail where it fails",
+      "given": "A fix whose gate run fails with 100 lines of output",
+      "when": "hexa harden is run",
+      "then": "The last 12 lines are printed where it fails; the `GateRun` keeps the last 60 lines, labelled with the fix's title"
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§4"
+      ],
+      "kind": "property",
+      "description": "Gate output is bounded at 8 KiB",
+      "given": "A gate run with output larger than 8 KiB",
+      "when": "hexa harden is run",
+      "then": "The kept output is bounded at 8 KiB"
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "Second failed fix checks the tree without fixes",
+      "given": "Two consecutive failed fixes",
+      "when": "hexa harden is run",
+      "then": "The gate runs on the reverted tree after the second failed fix"
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§5"
+      ],
+      "kind": "negative",
+      "description": "A tree green without any fix lets the loop go on",
+      "given": "Two consecutive failed fixes on a tree that is green without fixes",
+      "when": "hexa harden is run",
+      "then": "The gate runs on the reverted tree, passes, and the fix loop goes on to the next finding"
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§6"
+      ],
+      "kind": "example",
+      "description": "Gate result is recorded in the run record",
+      "given": "A gate run",
+      "when": "hexa harden is run",
+      "then": "The gate result is recorded in ~/.hexa/runs/<id>.json"
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§6"
+      ],
+      "kind": "negative",
+      "description": "A pass that fails says why without a rerun",
+      "given": "A pass whose final gate fails",
+      "when": "`hexa status` reads its run record afterwards",
+      "then": "It shows the failed `gate_result` with its tail, and no gate is run to show it"
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§6"
+      ],
+      "kind": "property",
+      "description": "The run record holds the last gate run of the pass",
+      "given": "Any pass that runs its gate one or more times, with any mix of passing and failing runs",
+      "when": "The pass ends and `~/.hexa/runs/<id>.json` is read",
+      "then": "`gate_result` has `passed`, `secs` and `tail` equal to the last gate run of that pass, never an earlier run's"
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§1"
+      ],
+      "kind": "property",
+      "description": "Every pass with a baseline starts with exactly one baseline before the hunt",
+      "given": "Any `hexa harden` pass run without `--no-baseline` on a green tree",
+      "when": "The pass runs",
+      "then": "The first gate run is labelled `baseline`, it precedes every lens call, and exactly one baseline run is made"
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "§2"
+      ],
+      "kind": "property",
+      "description": "A baseline is judged on at most two runs",
+      "given": "Any tree whose first baseline run fails",
+      "when": "The pass runs",
+      "then": "The baseline runs a second time; green makes it a flake recorded in `flakes` and the pass goes on; red stops the pass with zero inference calls"
+    },
+    {
+      "id": "S17",
+      "decision": [
+        "§3"
+      ],
+      "kind": "property",
+      "description": "--no-baseline means no baseline, and the report says so",
+      "given": "Any tree, red or green, and `--no-baseline`",
+      "when": "The pass runs",
+      "then": "No gate run is labelled `baseline`, and the report states the baseline was skipped"
+    },
+    {
+      "id": "S18",
+      "decision": [
+        "§5"
+      ],
+      "kind": "property",
+      "description": "Two consecutive failed fixes always ask about the bare tree",
+      "given": "Any unbatched pass in which two fixes in a row fail the gate",
+      "when": "The second failure is handled",
+      "then": "The gate runs once on the reverted tree, labelled `without any fix`; red stops the fix loop and lists every remaining confirmed finding as not judged; green continues the loop"
+    }
+  ]
+}

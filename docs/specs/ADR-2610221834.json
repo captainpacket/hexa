@@ -1,0 +1,281 @@
+{
+  "adr": "ADR-2610221834",
+  "feature": "harden_fixes_parallel_worktrees",
+  "description": "Harden fixes in parallel worktrees, land each fix serially, and prove each regression test red",
+  "universal": [
+    "§1",
+    "§2",
+    "§3",
+    "§4",
+    "§5",
+    "§6",
+    "§7",
+    "§8"
+  ],
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "`hexa harden` takes multiple targets and runs hunt and verify phases once for all of them",
+      "given": "Three files: `hexa-exec/src/spec_author.rs`, `hexa-cli/src/commands/spec_ledger.rs`, and `hexa-exec/src/direct_exec.rs`",
+      "when": "`hexa harden hexa-exec/src/spec_author.rs hexa-cli/src/commands/spec_ledger.rs hexa-exec/src/direct_exec.rs` is run",
+      "then": "Hunt and verify phases run once over all three files, and the confirmed findings form one pool to fix"
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "`hexa harden` refuses to run with no targets",
+      "given": "No targets provided",
+      "when": "`hexa harden` is run with no arguments",
+      "then": "The command fails with an error message indicating that at least one target must be provided"
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "Each confirmed fix is written in its own git worktree in parallel",
+      "given": "A pool of 29 confirmed findings and `--jobs 4`",
+      "when": "The fix phase starts",
+      "then": "At most 4 agents run at once, each in its own worktree, and the worktrees are created from the pass's base commit"
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "A fix agent never sees the operator's uncommitted files",
+      "given": "The operator's tree holds an uncommitted file `scratch.rs` and a modified tracked file",
+      "when": "A fix agent runs for a confirmed finding",
+      "then": "The agent's cwd is its own worktree made from the pass's base commit; `scratch.rs` and the uncommitted modification are absent there, and the operator's tree is unchanged by the agent"
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "A fix is written in two steps: first a regression test, then the fix itself",
+      "given": "A confirmed finding and a worktree created from the base commit",
+      "when": "The agent starts writing the fix",
+      "then": "Step A: the agent writes only a regression test for the finding and commits it as `test(harden): <title> (failing)`. Step B: a second agent session makes the fix and commits it as `fix(harden): <title>`"
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "Step B cannot change files created by step A under a `tests/` directory",
+      "given": "Step A created a test file under `tests/`",
+      "when": "Step B tries to modify that test file",
+      "then": "The change is refused, and the run fails with an error indicating that the test is sealed"
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§4"
+      ],
+      "kind": "example",
+      "description": "Each fix lands on the branch one at a time, and the gate must fail with the test alone and pass with the fix",
+      "given": "A pair of commits (step A and step B) for a fix",
+      "when": "The landing phase starts",
+      "then": "Hexa cherry-picks the step-A commit and runs the gate. The gate fails. Hexa then cherry-picks the step-B commit and runs the gate. The gate passes. The pair is committed to the branch"
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "A fix whose test does not fail without the fix is not committed",
+      "given": "A pair of commits where the gate passes with the test alone",
+      "when": "The landing phase tries to land the pair",
+      "then": "Hexa resets the branch to where it was before the pair, drops the fix, and reports it as 'no red test'"
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "A fix that no longer applies cleanly is written again on the current branch",
+      "given": "A confirmed finding and a pair of commits that conflict with the current branch",
+      "when": "The landing phase tries to cherry-pick the pair",
+      "then": "The cherry-pick is aborted. The finding gets steps A and B again in a new worktree made from the current head, followed by the red-then-green check"
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§5"
+      ],
+      "kind": "negative",
+      "description": "A finding that conflicts twice is dropped",
+      "given": "A confirmed finding and a pair of commits that conflict with the current branch twice",
+      "when": "The landing phase tries to cherry-pick the pair a second time",
+      "then": "The cherry-pick is aborted again. The finding is dropped, and the report names it as conflicted"
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§6"
+      ],
+      "kind": "property",
+      "description": "The pair is the unit throughout: batching, bisection, and last-chance retry count, cut, and retry a fix as its two commits together",
+      "given": "A batch of fixes, each with a pair of commits",
+      "when": "Batching, bisection, or last-chance retry is applied",
+      "then": "The operations work on the pairs, and a red step-A commit is never taken as a culprit"
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§7"
+      ],
+      "kind": "example",
+      "description": "The project names its harden gate in `.hexa/project.json`",
+      "given": "A project with `.hexa/project.json` containing `harden.gate: \"cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings\"`",
+      "when": "`hexa harden` is run without `--gate`",
+      "then": "The gate defined in `.hexa/project.json` is used"
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§7"
+      ],
+      "kind": "negative",
+      "description": "A pass with no gate from either place is refused",
+      "given": "A project with no `.hexa/project.json` and no `--gate` provided",
+      "when": "`hexa harden` is run",
+      "then": "The command fails with an error indicating that a gate must be provided"
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§8"
+      ],
+      "kind": "example",
+      "description": "Every phase is timed, and the report says where the time went",
+      "given": "A run of `hexa harden` on three files",
+      "when": "The run completes",
+      "then": "The report records the wall time of hunt, verify, fix, landing, and the final gate, plus the longest single agent session. The verdict line prints them"
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§8"
+      ],
+      "kind": "property",
+      "description": "No recorded time exceeds the run it belongs to",
+      "given": "Any run of `hexa harden`",
+      "when": "The run completes",
+      "then": "Every recorded phase time and the longest agent session are non-negative and none exceeds the run's total wall time"
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "§8"
+      ],
+      "kind": "negative",
+      "description": "A phase that did not run is reported as zero, never omitted",
+      "given": "A `hexa harden` run in which no finding is confirmed, so the fix and landing phases never run",
+      "when": "The run completes and the report is written",
+      "then": "The report still lists hunt, verify, fix, landing and the final gate, with fix and landing at zero time; the verdict line prints every phase's time and is not printed without them"
+    },
+    {
+      "id": "S17",
+      "decision": [
+        "§1"
+      ],
+      "kind": "property",
+      "description": "Any number of targets is one hunt and one pool",
+      "given": "Any non-empty set of target files",
+      "when": "`hexa harden <targets>…` runs one pass",
+      "then": "Hunt runs once and verify runs once over all the targets together, and every finding confirmed in any target is in the single pool the fix phase draws from"
+    },
+    {
+      "id": "S18",
+      "decision": [
+        "§2"
+      ],
+      "kind": "property",
+      "description": "Never more than --jobs fix agents at once",
+      "given": "Any pool of confirmed findings and any `--jobs N` (or none, meaning 4)",
+      "when": "The fix phase runs",
+      "then": "At no moment are more than N fix agents running, and every agent runs in a worktree made from the pass's base commit, never in the operator's tree"
+    },
+    {
+      "id": "S19",
+      "decision": [
+        "§3"
+      ],
+      "kind": "property",
+      "description": "Step B never changes step A's tests",
+      "given": "Any confirmed finding whose step-A commit created files under `tests/`",
+      "when": "Its step-B commit is made",
+      "then": "The step-B commit changes none of those files; a step-B change that would is refused and that fix does not land"
+    },
+    {
+      "id": "S20",
+      "decision": [
+        "§4"
+      ],
+      "kind": "property",
+      "description": "Landing order is finding order, and each landed pair went red then green",
+      "given": "Any set of fix pairs, whatever order their agents finish in",
+      "when": "The landing phase runs",
+      "then": "Pairs land in finding order; for every pair that lands, the gate failed after its step-A commit and passed after its step-B commit; every other pair leaves the branch where it was before that pair"
+    },
+    {
+      "id": "S21",
+      "decision": [
+        "§5"
+      ],
+      "kind": "property",
+      "description": "A finding is written again at most once",
+      "given": "Any finding whose pair conflicts on cherry-pick",
+      "when": "Landing handles the conflict",
+      "then": "The aborted pick leaves the operator's tree as it was before the pick; the finding is rewritten from the current head at most once, and a second conflict drops it and names it in the report"
+    },
+    {
+      "id": "S22",
+      "decision": [
+        "§6"
+      ],
+      "kind": "example",
+      "description": "Batching cuts and retries a fix as its two commits",
+      "given": "A batch of three pairs where the second pair's fix makes the gate fail",
+      "when": "Bisection runs over the batch",
+      "then": "The second pair is dropped as both its commits together; the first and third land with both their commits each"
+    },
+    {
+      "id": "S23",
+      "decision": [
+        "§6"
+      ],
+      "kind": "negative",
+      "description": "A red step-A commit is never a culprit",
+      "given": "A batch whose gate run fails only because a step-A commit is red, as it is meant to be",
+      "when": "Bisection looks for the culprit",
+      "then": "No step-A commit is named as the culprit, and no step-A or step-B commit lands without the other half of its pair"
+    },
+    {
+      "id": "S24",
+      "decision": [
+        "§7"
+      ],
+      "kind": "property",
+      "description": "--gate wins; harden.gate is the default; neither is refused",
+      "given": "Any combination of `harden.gate` present or absent in `.hexa/project.json` and `--gate` given or not",
+      "when": "`hexa harden` starts",
+      "then": "The gate used is `--gate` when given, else `harden.gate`; with neither, the pass is refused before any hunt"
+    }
+  ]
+}

@@ -1,0 +1,315 @@
+{
+  "adr": "ADR-2611051850",
+  "feature": "concurrent_agents",
+  "description": "hexa records and enforces rules for concurrent agents",
+  "universal": [
+    "§1",
+    "§2",
+    "§3",
+    "§4",
+    "§5",
+    "§6",
+    "§7",
+    "§8",
+    "§9"
+  ],
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "a detached run writes a record before spawning",
+      "given": "a detached run is requested",
+      "when": "the parent process writes the run record",
+      "then": "the record exists at ~/.hexa/runs/<id>.json with pid 0 and started timestamp"
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "a run record with a dead pid and no ended is abandoned",
+      "given": "a run record with pid 1234 and no ended",
+      "when": "the pid 1234 is dead and the start time cannot be read",
+      "then": "hexa status reports the run as abandoned"
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§1"
+      ],
+      "kind": "property",
+      "description": "unreadable is not zero",
+      "given": "~/.hexa/runs/ exists but cannot be read",
+      "when": "hexa status is called",
+      "then": "the count.runs is null and ok is false, and unreadable names the source"
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "pid_start works on macOS",
+      "given": "a process is running on macOS",
+      "when": "pid_start is read for that pid",
+      "then": "the start time is returned in microseconds since the epoch"
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "pid_start returns None when the start time cannot be read",
+      "given": "a pid whose start time cannot be read",
+      "when": "pid_start is read for that pid",
+      "then": "None is returned and the record says pid_start_unknown"
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "a task is registered with leases",
+      "given": "a task name and a list of paths",
+      "when": "hexa agent register is called",
+      "then": "the task is added to .hexa/tasks.json with the leases"
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "a task with overlapping leases is refused",
+      "given": "a task with leases that overlap an active task",
+      "when": "hexa agent register is called",
+      "then": "The registration is refused, naming the task that holds the lease and the overlapping path; the ledger is unchanged"
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§3"
+      ],
+      "kind": "property",
+      "description": "Two registrations at once never lose an entry",
+      "given": "Two agents in two worktrees of one repository registering disjoint tasks at the same moment",
+      "when": "Both `hexa agent register` calls complete",
+      "then": "The one ledger found through `git rev-parse --git-common-dir` holds both entries, and the file is never left half-written"
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§4"
+      ],
+      "kind": "example",
+      "description": "a session bound to a task edits within its lease",
+      "given": "a session bound to a task with leases",
+      "when": "an edit is attempted within the lease",
+      "then": "the hook allows the edit"
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "a session bound to a task edits outside its lease",
+      "given": "a session bound to a task with leases",
+      "when": "an edit is attempted outside the lease",
+      "then": "the hook refuses the edit with exit 2"
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "a sealed path is never leasable",
+      "given": "a sealed path from a spec",
+      "when": "hexa agent register is called with that path",
+      "then": "the registration is refused with code lease_not_allowed"
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§5"
+      ],
+      "kind": "negative",
+      "description": "a credential path is never leasable",
+      "given": "a path matching a credential pattern",
+      "when": "hexa agent register is called with that path",
+      "then": "the registration is refused with code lease_not_allowed"
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§5"
+      ],
+      "kind": "property",
+      "description": "hexa do run never commits a credential or untracked neighbour",
+      "given": "a .runner file beside the edited file",
+      "when": "hexa do run is called",
+      "then": "the .runner file is left uncommitted and not staged"
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§6"
+      ],
+      "kind": "example",
+      "description": "a sealed file absent before and absent after is not an edit",
+      "given": "a sealed file that is absent at HEAD and absent after the run",
+      "when": "hexa harden is called",
+      "then": "the run is not refused for that sealed file"
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§6"
+      ],
+      "kind": "negative",
+      "description": "a sealed file deleted during a run is refused",
+      "given": "a sealed file that is present at HEAD and deleted during the run",
+      "when": "hexa harden is called",
+      "then": "the run is refused for that sealed file"
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "§7"
+      ],
+      "kind": "example",
+      "description": "hexa status prints JSON when stdout is not a terminal",
+      "given": "stdout is not a terminal",
+      "when": "hexa status is called",
+      "then": "the output is JSON"
+    },
+    {
+      "id": "S17",
+      "decision": [
+        "§7"
+      ],
+      "kind": "negative",
+      "description": "hexa status refuses when the ledger cannot be read",
+      "given": "the ledger file exists but cannot be read",
+      "when": "hexa status is called",
+      "then": "the output is JSON with ok false and unreadable named"
+    },
+    {
+      "id": "S18",
+      "decision": [
+        "§8"
+      ],
+      "kind": "example",
+      "description": "the bridge uses hooks, not supervision",
+      "given": "The parent registered a task for a subagent's `agent_id`, and that subagent starts",
+      "when": "the SubagentStart event fires",
+      "then": "`hexa hook subagent-start` writes the run record and binds the subagent to that task"
+    },
+    {
+      "id": "S19",
+      "decision": [
+        "§8"
+      ],
+      "kind": "negative",
+      "description": "hexa does not spawn or supervise subagents",
+      "given": "a subagent is requested",
+      "when": "hexa is called",
+      "then": "no process is spawned or supervised by hexa"
+    },
+    {
+      "id": "S20",
+      "decision": [
+        "§9"
+      ],
+      "kind": "example",
+      "description": "hexa does not arbitrate between user instructions and leases",
+      "given": "a user instruction outside a lease",
+      "when": "hexa is called",
+      "then": "the instruction is not refused by a lease"
+    },
+    {
+      "id": "S21",
+      "decision": [
+        "§9"
+      ],
+      "kind": "negative",
+      "description": "hexa does not schedule subagents",
+      "given": "a subagent is requested",
+      "when": "hexa is called",
+      "then": "no scheduling is performed by hexa"
+    },
+    {
+      "id": "S22",
+      "decision": [
+        "§9"
+      ],
+      "kind": "property",
+      "description": "A lease constrains only edits made through hooked tools",
+      "given": "Any set of held leases and any tool call that is not an edit made through a hooked tool (a read, a search, a shell command run outside the edit hooks)",
+      "when": "The PreToolUse hook is called for that tool call",
+      "then": "The hook never denies it on account of a lease, whatever paths the leases cover"
+    },
+    {
+      "id": "S23",
+      "decision": [
+        "§2"
+      ],
+      "kind": "property",
+      "description": "pid_start is a real reading or nothing",
+      "given": "Any pid on the machine",
+      "when": "pid_start is read for it, twice, while the process lives",
+      "then": "Both reads return the same value when the start time can be read; when it cannot, both return None and the record says `pid_start_unknown`; no value is ever invented"
+    },
+    {
+      "id": "S24",
+      "decision": [
+        "§4"
+      ],
+      "kind": "property",
+      "description": "A bound session edits only inside its leases",
+      "given": "Any task bound to a session (by `HEXA_TASK` or its `agent_id`) with any set of leased paths and prefixes, and any edited `file_path`, including under `docs/`, `tests/`, `config/` or `.hexa/`",
+      "when": "`hexa hook pre-edit` is called",
+      "then": "It exits 2 with a reason naming the task, its lease and the path exactly when the path is outside every lease; a session bound to no task gets the hook's unbound behaviour whatever leases exist"
+    },
+    {
+      "id": "S25",
+      "decision": [
+        "§6"
+      ],
+      "kind": "property",
+      "description": "Only a change to a sealed file counts as an edit",
+      "given": "Any sealed path and any run, with the path present or absent before and present or absent after",
+      "when": "The guard compares the two states",
+      "then": "The run is refused for that path exactly when its state after differs from its state before; absent before and absent after is never refused, and present before and absent after is always refused"
+    },
+    {
+      "id": "S26",
+      "decision": [
+        "§7"
+      ],
+      "kind": "property",
+      "description": "Every agent verb speaks JSON and structured errors",
+      "given": "Any of `hexa status`, `hexa agent register|report|list|release` and `hexa dev worktree merge-order`, with stdout not a terminal",
+      "when": "The verb runs, succeeding or failing",
+      "then": "Its stdout is JSON; any error it returns carries `code`, `hint`, `field` and `retryable`; with `--dry-run` it writes nothing"
+    },
+    {
+      "id": "S27",
+      "decision": [
+        "§8"
+      ],
+      "kind": "property",
+      "description": "hexa never supervises a subagent",
+      "given": "Any sequence of Claude Code hook events fed to hexa, including `SubagentStart` and `SubagentStop` with a `transcript_path`",
+      "when": "hexa handles each event",
+      "then": "hexa spawns, restarts and kills no process, and never opens the file at `transcript_path`"
+    }
+  ]
+}
