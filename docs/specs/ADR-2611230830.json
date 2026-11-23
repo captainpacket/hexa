@@ -12,7 +12,7 @@
     "sha256": "8b9ad20a4cde40c604664e582b71a6992dc6fa69c98a98b78d83754ed501e11c"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611230830_spec.rs": "f060acd3647e406f0b3fc6467863f3dd5aac0c17ce95426cf274e2e2d16d53f1"
+    "hexa-cli/tests/adr_2611230830_spec.rs": "01b456fcbff68fa11f8c0a156b2b85922d0f4faa5d5196a7c60b882c637b020a"
   },
   "red": "bfe7a81",
   "specs": [
@@ -199,6 +199,17 @@
       "given": "any repository and any invocation that is not a --ci run of `hexa adr gates` judging no gate and is not a --ci run of `hexa spec verify` finding no scenario",
       "when": "the command runs",
       "then": "its exit status and summary are the same as they were before this ADR"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-23T15:09:12.637884705+00:00",
+      "base_commit": "bfe7a8115771c5464663fd7b74d3f9408ca1bec8",
+      "by": "Claude Code agent",
+      "file": "hexa-cli/tests/adr_2611230830_spec.rs",
+      "from": "f060acd3647e406f0b3fc6467863f3dd5aac0c17ce95426cf274e2e2d16d53f1",
+      "reason": "Fixture defects only: S10's project had no test home, so spec accept refused it before the run under test (a pyproject.toml now gives one, and its .sh test keeps the built-in bash runner); S14's spec had one example and no negative for §1, so verify rejected the spec as incomplete (a negative scenario is added; its summary assertion counts the two scenarios, 2 passed, the same check as before for the complete spec). Without the fix S10 and S14 pass: guards, recorded red only for these defects",
+      "to": "01b456fcbff68fa11f8c0a156b2b85922d0f4faa5d5196a7c60b882c637b020a"
     }
   ]
 }
