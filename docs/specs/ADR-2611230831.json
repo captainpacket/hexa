@@ -13,7 +13,7 @@
     "sha256": "94fd323c04dfd0e5377405e39a6c1544adc107236785a8a0e5bfe8d555eff23d"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611230831_spec.rs": "0232bc6277dd3d0034662ecff2995cc16a87ca95de98a63e99c51a7f8b60b586"
+    "hexa-cli/tests/adr_2611230831_spec.rs": "a7d28c464b813011467cbd7c30d2378fd85320263e6c389a2fa817fff946a8f5"
   },
   "red": "0eada88",
   "specs": [
@@ -346,6 +346,17 @@
       "given": "Any hexa invocation whose output is not written to a closed pipe",
       "when": "It runs",
       "then": "Its exit status is the same as before this ADR"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-23T15:14:03.661667036+00:00",
+      "base_commit": "0eada884acb91051e2260e3f699dce53d7cbb5f1",
+      "by": "Claude Code agent",
+      "file": "hexa-cli/tests/adr_2611230831_spec.rs",
+      "from": "0232bc6277dd3d0034662ecff2995cc16a87ca95de98a63e99c51a7f8b60b586",
+      "reason": "Fixture defects only, no assertion changed: the fingerprint fixtures wrote the workplan objective under 'objective', which the extractor never reads (it reads 'description'); S26 used 'spec show' of a missing ADR as its failing command, which exits 0 before and after this ADR ('spec verify' of one fails); S09/S10's repository had no test home, and ran a real model call: it now has a Cargo.toml and a fake claude on PATH replying with a complete spec, as other spec draft tests do. 13 fail without the fix, 19 pass with it",
+      "to": "a7d28c464b813011467cbd7c30d2378fd85320263e6c389a2fa817fff946a8f5"
     }
   ]
 }
