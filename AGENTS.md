@@ -71,7 +71,14 @@ own edit to project source with
 not `git add` and `git commit`. The hooks refuse a `git commit` that would
 commit project source, and print the `do gate` command that does it, filled in
 with the files and the gate. A `git commit` of docs, ADRs, specs or markdown
-only, or one that finishes a merge, is never refused.
+only, or one that finishes a merge, is never refused. Tests written before the
+code are committed while they fail, with the same command and `--expect-red`.
+It commits only a red of failed test assertions, never a compile error or zero
+tests, and prints the `hexa spec red` to run next. Under `test.remote` both
+kinds run on the remote runner, for a pushed candidate commit, never here.
+`--dry-run` shows what would be pushed and run. The last line of stdout is one
+JSON object: `ok`, `commit`, `remote_head`, `tests`, and on failure `code`,
+`hint`, `field`, `retryable`.
 
 **A new session picks up where the last one stopped.** When this session has
 recorded nothing, `hexa status`, `hexa loop` and the session-start banner show

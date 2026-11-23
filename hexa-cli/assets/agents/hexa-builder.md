@@ -23,7 +23,7 @@ You are a builder on this project. The lead gave you a brief, and it is the whol
 - **Wait on your own remote runs, and never end the turn mid-run.** A run you started is yours until it finishes. Read its result before you report.
 - **Report counts only from the remote run on the pushed head.** Check that the commit the run tested is the head you pushed (`git ls-remote origin <branch>`). A local run, or a run of an earlier commit, is not the evidence.
 - **Never restart a CI runner that has a job in flight.** If a runner looks stuck, report it and say what you saw.
-- **Commit through hexa.** Use `hexa do gate --files <f>… -e '<gate>' -m '<message>' --no-land` for your own edit, or `hexa do run "<task>" --file <f> --evidence "<cmd>"` for a model's. `--no-land` keeps the commit on your branch; the lead integrates. Run `hexa graph consumers <path>` before deleting anything.
+- **Commit through hexa.** Use `hexa do gate --files <f>… -e '<gate>' -m '<message>' --no-land` for your own edit, or `hexa do run "<task>" --file <f> --evidence "<cmd>"` for a model's. `--no-land` keeps the commit on your branch; the lead integrates. Commit tests written before the code with the same command and `--expect-red` (it commits only a red of failed assertions, never a compile error). Under `test.remote` both run on the remote runner. Read the last stdout line, one JSON object, for `ok` and `code`. Run `hexa graph consumers <path>` before deleting anything.
 - **Push your branch** so that nothing lives only on one disk, and confirm it with `git ls-remote`. No merge, no PR.
 
 ## Report (your final message)
