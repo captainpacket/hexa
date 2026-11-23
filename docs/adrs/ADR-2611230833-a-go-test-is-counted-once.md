@@ -1,6 +1,7 @@
 # ADR-2611230833: A passing Go test is counted once, with or without `-v`
 
-**Status:** Accepted
+**Status:** Completed
+> 2026-11-23 Completed: landed on main at 5b36dd2; gate `cargo test -p hexa-core --test adr_2611230833_spec` passed (hexa loop stage done)
 > 2026-11-23 Accepted: Accepted in craigjohnson's session: a bug fix under his rule (no architectural change); he accepted the spec, and its sealed tests pass on main
 **Date:** 2026-11-23
 **Drivers:** A Go SDK bound a sealed test with `test.runners.go = go test -count=1 -v -run '^'{name}'$' ./$(dirname {file})`. The test passed, and `hexa spec verify` refused the scenario: "matched 2 tests; a scenario names one". `read_evidence` counts the `--- PASS: TestX` line as one passed test and the package line `ok  	pkg	0.01s` as another, so a `-v` run of one test reads as two, and of N tests in one package as N+1. A configured runner passes only when exactly one test ran (ADR-2611191120 §2), so every Go project that runs its tests verbosely is refused for a correct test, and `hexa loop gate` counts are one too high per package.
