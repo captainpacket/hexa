@@ -366,7 +366,13 @@ fn json_has_count_for(v: &serde_json::Value, sid: &str, count: u64) -> bool {
 
 fn run_hook(dir: &Path, home: &Path, event: &str, input: &serde_json::Value) -> Output {
     use std::io::Write;
-    let mut child = hexa_cmd(dir, home)
+    let mut cmd = hexa_cmd(dir, home);
+    // Claude Code runs a hook with its session's id in the environment, the
+    // one the payload names; without it hexa reads the calling process's.
+    if let Some(sid) = input["session_id"].as_str() {
+        cmd.env("HEXA_SESSION_ID", sid);
+    }
+    let mut child = cmd
         .args(["hook", event])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -394,8 +400,15 @@ fn s09_stop_hook_still_records_counter() {
     run_init(root, home.path());
 
     let sid = "adr-2611221936-session";
-    // The session touches a file and does not commit it: open work.
+    // The session edits a tracked file and does not commit it: open work.
+    // (The hook reads tracked files only, `--untracked-files=no`, so the file
+    // is committed first, then changed.)
     let file = root.join("work.txt");
+    fs::write(&file, "start\n").unwrap();
+    for args in [&["add", "work.txt"][..], &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "start"][..]] {
+        let out = git(root, home.path(), args);
+        assert!(out.status.success(), "git {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+    }
     fs::write(&file, "unfinished\n").unwrap();
     let edit = serde_json::json!({
         "session_id": sid,
