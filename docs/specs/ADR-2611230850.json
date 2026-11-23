@@ -12,7 +12,11 @@
     "by": "craigjohnson",
     "sha256": "62dffc791a3153664e33c7b46100cc23e6b246f92161e192041e3a4d48d80850"
   },
-  "red": "4cc5963",
+  "sealed": {
+    "hexa-cli/tests/adr_2611230850_spec.rs": "114075b28d2b437337843f7d3b1ea19fb14106a4956755c630221d0f5b4877a9",
+    "hexa-cli/tests/adr_2611230850_spec_2.rs": "5fa2cb2e86dda2f330c5027599a01fba65482cb990df19626832502042738dbf"
+  },
+  "red": "3184aa3",
   "specs": [
     {
       "id": "S01",
@@ -23,7 +27,9 @@
       "description": "--lang python writes the whole Python counter layout, with the package named after the project",
       "given": "an empty directory and the project name `my-app`",
       "when": "`hexa scaffold --lang python` runs for `my-app`",
-      "then": "it writes exactly these files: `pyproject.toml`; the package `my_app/`, holding `__init__.py`, `domain/count.py`, `ports/store.py`, `usecases/increment.py`, `adapters/secondary/memory.py` and `composition_root.py`; `tests/__init__.py`; and `tests/test_increment.py`"
+      "then": "it writes exactly these files: `pyproject.toml`; the package `my_app/`, holding `__init__.py`, `domain/count.py`, `ports/store.py`, `usecases/increment.py`, `adapters/secondary/memory.py` and `composition_root.py`; `tests/__init__.py`; and `tests/test_increment.py`",
+      "test": "hexa-cli/tests/adr_2611230850_spec_2.rs::s01_python_scaffold_writes_complete_layout",
+      "red": "b2d7a17"
     },
     {
       "id": "S02",
@@ -350,7 +356,7 @@
   "amendments": [
     {
       "at": "2026-11-23T15:18:40.739745973+00:00",
-      "base_commit": "4cc5963362456db61d19e8f0235bd1cde781b5f1",
+      "base_commit": "3184aa31d7b282ff7f1a0fa8bc49b9c6f54407dd",
       "by": "Claude Code agent",
       "file": "hexa-cli/tests/adr_2611230850_spec.rs",
       "from": "f724e84d69e21643c854f2734c973b77c675a4f62098ced69e38be2852c3c40d",

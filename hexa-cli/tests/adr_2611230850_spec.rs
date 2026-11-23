@@ -129,14 +129,7 @@ mod part_1 {
         (out.status.success(), text)
     }
 
-    /// S01: --lang python writes the whole Python counter layout, with the package named after the project
-    #[test]
-    fn s01_python_scaffold_writes_the_whole_layout() {
-        let (_t, dir) = scaffold_python();
-        let got = python_scaffold_files(&dir);
-        assert_eq!(got, expected_files(), "the Python scaffold's files");
-    }
-
+    
     /// S02: pyproject.toml declares the project, a version and the minimum Python
     #[test]
     fn s02_pyproject_declares_project_version_and_python() {
