@@ -11,7 +11,7 @@
     "sha256": "486ad2343a600902bd496bf5332980594e5debe0cfe27df012cc20a2e0b07479"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611221936_spec.rs": "1ef90472c7d4500c3a84cff56d970ab4767db08d1705923483d74412770a8483"
+    "hexa-cli/tests/adr_2611221936_spec.rs": "c816bb9741a7b8b9416b707b555ef779eaa2ff0c45f239fab6690fdde7a8a422"
   },
   "red": "9c68afb",
   "specs": [
@@ -131,6 +131,17 @@
       "given": "any existing root .gitignore content",
       "when": "merged_gitignore is applied to it",
       "then": "the result is the same as with the pre-ADR floor lines from gitignore_lines, which contain no entry naming stop-blocks.json"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-23T02:51:46.207687399+00:00",
+      "base_commit": "9c68afbe21359d8bbea1f6823c05f6555548a738",
+      "by": "Claude Code agent",
+      "file": "hexa-cli/tests/adr_2611221936_spec.rs",
+      "from": "1ef90472c7d4500c3a84cff56d970ab4767db08d1705923483d74412770a8483",
+      "reason": "S09's setup could never make the Stop hook block: it edited an untracked file (the hook reads tracked files only) and ran the hooks without the session id in the environment, as Claude Code sets it. The fixture now commits the file first and run_hook passes the payload's session_id as HEXA_SESSION_ID; no assertion changes. S09 passes without the fix: a guard recorded red only for its setup",
+      "to": "c816bb9741a7b8b9416b707b555ef779eaa2ff0c45f239fab6690fdde7a8a422"
     }
   ]
 }
