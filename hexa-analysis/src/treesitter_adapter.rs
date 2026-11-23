@@ -1267,25 +1267,40 @@ fn extract_go_exports(
 /// §1): the run of comment lines directly above it, each on the line just
 /// above the next, so a blank line or any other node ends the run. A Go doc
 /// comment is several `//` lines, each its own node, and the tag may be on any.
+///
+/// A line is read whole (ADR-2611221934): every comment on it is gathered, so
+/// a line of comments after code (`A = 1 /* x */ // …`) is that code's, and a
+/// line holding only comments (`/* … */ // …`) is one doc line.
 fn go_doc_tagged(node: &tree_sitter::Node, source: &str) -> bool {
     let mut next_row = node.start_position().row;
     let mut prev = node.prev_sibling();
-    while let Some(p) = prev {
-        if p.kind() != "comment" || p.end_position().row + 1 != next_row {
+    while let Some(last) = prev {
+        if last.kind() != "comment" || last.end_position().row + 1 != next_row {
             return false;
         }
-        // A comment that starts on the line where the node before it ends is
-        // that line's comment (`A = 1 // …`, `const ( // …`, `) // …`), not a
+        // The comments on this line, back to the first of them.
+        let mut line = vec![last];
+        let mut first = last;
+        while let Some(q) = first.prev_sibling() {
+            if q.kind() == "comment" && q.end_position().row == first.start_position().row {
+                line.push(q);
+                first = q;
+            } else {
+                break;
+            }
+        }
+        // Code before the first comment on its line makes the whole line that
+        // code's line comments (`A = 1 // …`, `const ( // …`, `) // …`), not a
         // doc line: the newline between them is hidden in the tree, so rows
         // are the only way to tell.
-        if p.prev_sibling().is_some_and(|q| q.kind() != "comment" && q.end_position().row == p.start_position().row) {
+        if first.prev_sibling().is_some_and(|q| q.kind() != "comment" && q.end_position().row == first.start_position().row) {
             return false;
         }
-        if node_text(p, source).contains("@hexa:public") {
+        if line.iter().any(|c| node_text(*c, source).contains("@hexa:public")) {
             return true;
         }
-        next_row = p.start_position().row;
-        prev = p.prev_sibling();
+        next_row = first.start_position().row;
+        prev = first.prev_sibling();
     }
     false
 }
