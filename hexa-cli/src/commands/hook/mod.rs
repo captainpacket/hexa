@@ -1123,8 +1123,10 @@ fn commit_gate_check(project_dir: &Path, command: &str, cwd: &Path, mode: &str) 
         } else {
             "It runs the gate on the change in your tree and commits only those files, and only if it passes."
         };
+        // The tests-first path, in every project (ADR-2611231400 §7).
+        let red = " A tests-first commit (tests that must fail before the code) is the same command with `--expect-red`; `--dry-run` shows what either would do.";
         let msg = format!(
-            "`git commit` would commit project source by hand ({}). Commit it through the gate instead: `{suggestion}`. {where_}{record} `git commit` is for docs, ADRs and other prose.",
+            "`git commit` would commit project source by hand ({}). Commit it through the gate instead: `{suggestion}`. {where_}{red}{record} `git commit` is for docs, ADRs and other prose.",
             files.join(", ")
         );
         if mode == "mandatory" {

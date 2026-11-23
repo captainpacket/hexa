@@ -76,6 +76,97 @@ pub fn is_single_script(cmd: &str) -> bool {
     }
 }
 
+/// How many tests a run's output reports, by the runners this reader knows
+/// (ADR-2611231400 §1). `recognised` is false when no line came from one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TestCounts {
+    pub passed: u64,
+    pub failed: u64,
+    pub recognised: bool,
+}
+
+/// The tests `output` reports passed and failed (ADR-2611231400 §1).
+pub fn count_tests(output: &str) -> TestCounts {
+    let t = tally(output);
+    TestCounts { passed: t.passed, failed: t.failed, recognised: t.recognised }
+}
+
+/// The first line of `output` that names a failure, trimmed: a failed test
+/// (`test x ... FAILED`, `--- FAIL`, `not ok`, vitest's `×`/`FAIL`), a build
+/// error, or a panic (ADR-2611231400 §1). `None` when no line does.
+pub fn first_failure(output: &str) -> Option<String> {
+    output.lines().map(str::trim).find(|l| is_failure_line(l)).map(str::to_string)
+}
+
+fn is_failure_line(line: &str) -> bool {
+    if line.is_empty() {
+        return false;
+    }
+    (line.starts_with("test ") && line.ends_with("... FAILED"))
+        || line.starts_with("--- FAIL")
+        || line.starts_with("not ok ")
+        || line.starts_with("FAIL ")
+        || line.starts_with("FAIL\t")
+        || line.starts_with("× ")
+        || line.starts_with("✗ ")
+        || line.contains("panicked at")
+        || is_build_error_line(line)
+}
+
+/// A line a compiler or a bundler writes for a build that did not finish
+/// (ADR-2611231400 §4): rustc's `error[E…]`, `error: could not compile` and
+/// `error: aborting due to`, TypeScript's `error TS…`, vitest's `Failed to
+/// load` and `Transform failed`.
+fn is_build_error_line(line: &str) -> bool {
+    let l = line.trim();
+    l.starts_with("error[E")
+        || l.starts_with("error: could not compile")
+        || l.starts_with("error: aborting due to")
+        || l.contains(": error TS")
+        || l.starts_with("error TS")
+        || l.contains("Failed to load url")
+        || l.starts_with("Error: Failed to load")
+        || l.contains("Transform failed")
+}
+
+/// What a gate expected to fail proved (ADR-2611231400 §4). Only `Red` commits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RedEvidence {
+    /// Exited non-zero, no build error, and a known runner counted ≥ 1 failed test.
+    Red { passed: u64, failed: u64 },
+    /// The gate passed: tests written first must fail before the code.
+    NotRed,
+    /// The gate failed on a build or compile error: not a red test.
+    BuildError { line: String },
+    /// The gate failed and no runner this reader knows counted a failed test.
+    Uncounted,
+    /// A runner this reader knows reported zero tests.
+    Vacuous,
+}
+
+/// Read a gate that is expected to fail, by its command and output
+/// (ADR-2611231400 §4). A build error wins over counted failures: a red that
+/// is half a compile error hides which tests are red.
+pub fn read_red_evidence(cmd: &str, exit_ok: bool, output: &str) -> RedEvidence {
+    if let Some(line) = output.lines().find(|l| is_build_error_line(l)) {
+        return RedEvidence::BuildError { line: line.trim().to_string() };
+    }
+    let t = tally(output);
+    if exit_ok && t.failed == 0 {
+        return match read_gate_evidence(cmd, true, output, false) {
+            Evidence::Vacuous => RedEvidence::Vacuous,
+            _ => RedEvidence::NotRed,
+        };
+    }
+    if t.failed > 0 {
+        return RedEvidence::Red { passed: t.passed, failed: t.failed };
+    }
+    if t.recognised && t.passed == 0 {
+        return RedEvidence::Vacuous;
+    }
+    RedEvidence::Uncounted
+}
+
 #[derive(Default)]
 struct Tally {
     recognised: bool,
@@ -219,6 +310,45 @@ mod tests {
     #[test]
     fn a_go_package_without_tests_alone_is_vacuous() {
         assert_eq!(read_evidence(true, "?   \tdemo/internal/ports\t[no test files]", false), Evidence::Vacuous);
+    }
+
+    const RED: &str = "running 2 tests\ntest a ... ok\ntest b ... FAILED\n\ntest result: FAILED. 1 passed; 1 failed; 0 ignored\n";
+
+    #[test]
+    fn assertion_failures_are_red() {
+        assert_eq!(read_red_evidence("cargo test", false, RED), RedEvidence::Red { passed: 1, failed: 1 });
+        let vitest = " Test Files  1 failed (1)\n      Tests  2 failed | 3 passed (5)\n";
+        assert_eq!(read_red_evidence("npx vitest run", false, vitest), RedEvidence::Red { passed: 3, failed: 2 });
+    }
+
+    #[test]
+    fn a_compile_error_is_not_red_even_beside_failures() {
+        let out = "error[E0425]: cannot find function `x`\nerror: could not compile `p` (test \"t\")\n";
+        assert!(matches!(read_red_evidence("cargo test", false, out), RedEvidence::BuildError { .. }));
+        let mixed = format!("{RED}error: could not compile `q`\n");
+        assert!(matches!(read_red_evidence("cargo test", false, &mixed), RedEvidence::BuildError { .. }), "a build error wins");
+        let ts = "src/a.test.ts(3,1): error TS2304: Cannot find name 'x'.\n";
+        assert!(matches!(read_red_evidence("npx tsc", false, ts), RedEvidence::BuildError { .. }));
+    }
+
+    #[test]
+    fn green_zero_and_uncounted_are_not_red() {
+        let green = "running 1 test\ntest result: ok. 1 passed; 0 failed\n";
+        assert_eq!(read_red_evidence("cargo test", true, green), RedEvidence::NotRed);
+        assert_eq!(read_red_evidence("bash ci/x.sh", true, "fine\n"), RedEvidence::NotRed, "one script, exit 0, is a pass");
+        let zero = "running 0 tests\ntest result: ok. 0 passed; 0 failed\n";
+        assert_eq!(read_red_evidence("cargo test", true, zero), RedEvidence::Vacuous);
+        assert_eq!(read_red_evidence("cargo test", false, zero), RedEvidence::Vacuous);
+        assert_eq!(read_red_evidence("bash ci/x.sh", false, "boom\n"), RedEvidence::Uncounted);
+    }
+
+    #[test]
+    fn counts_and_the_first_failure_are_read_from_the_output() {
+        assert_eq!(count_tests(RED), TestCounts { passed: 1, failed: 1, recognised: true });
+        assert_eq!(count_tests("hello\n"), TestCounts::default());
+        assert_eq!(first_failure(RED).as_deref(), Some("test b ... FAILED"));
+        assert_eq!(first_failure("all fine\n"), None);
+        assert_eq!(first_failure("x\nthread 'a' panicked at src/a.rs:1:1:\n").as_deref(), Some("thread 'a' panicked at src/a.rs:1:1:"));
     }
 
     #[test]

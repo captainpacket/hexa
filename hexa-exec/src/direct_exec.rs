@@ -1624,46 +1624,218 @@ pub async fn gate_patch(
     message: &str,
     uncounted: bool,
 ) -> Result<String, String> {
-    let paths = gate_checks(repo_root, files).await?;
+    gate_patch_local(repo_root, files, evidence, message, uncounted, Expect::Green)
+        .await
+        .map(|g| g.commit.chars().take(7).collect())
+        .map_err(|f| f.why)
+}
+
+/// What `hexa do gate` expects of its gate (ADR-2611231400 §4): to pass, or,
+/// for a tests-first commit, to fail on test assertions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Expect {
+    Green,
+    Red,
+}
+
+impl Expect {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Expect::Green => "green",
+            Expect::Red => "red",
+        }
+    }
+}
+
+/// A `hexa do gate` that did not commit, or whose commit did not reach the
+/// remote (ADR-2611231400 §1): a machine code, the reason, the next step, the
+/// flag concerned, and whether the same command could succeed if run again.
+#[derive(Debug, Clone)]
+pub struct GateFailure {
+    pub code: &'static str,
+    pub why: String,
+    pub hint: String,
+    pub field: Option<&'static str>,
+    pub retryable: bool,
+    /// The candidate's full id, when one was built.
+    pub commit: Option<String>,
+    /// What the gate counted, when it ran.
+    pub tests: Option<hexa_core::ports::evidence::TestCounts>,
+    pub first_failure: Option<String>,
+    /// The runner's output tail, when the gate ran remotely.
+    pub output: Option<String>,
+}
+
+impl GateFailure {
+    pub fn new(code: &'static str, why: impl Into<String>, hint: impl Into<String>, field: Option<&'static str>, retryable: bool) -> Self {
+        GateFailure { code, why: why.into(), hint: hint.into(), field, retryable, commit: None, tests: None, first_failure: None, output: None }
+    }
+
+    /// A refusal [`gate_checks`] made, before anything ran.
+    pub fn from_checks(why: String) -> Self {
+        if why.starts_with("nothing to commit") {
+            GateFailure::new(
+                "nothing-to-commit",
+                why,
+                "name only files that differ from HEAD (`git status --short`), or make the change first",
+                Some("--files"),
+                false,
+            )
+        } else {
+            GateFailure::new("refused", why, "fix what the refusal names, then run the same command again", Some("--files"), false)
+        }
+    }
+}
+
+/// A gate's run, judged for what was expected of it and passed.
+#[derive(Debug, Clone)]
+pub struct Judged {
+    /// The counts; `None` for an uncounted gate.
+    pub tests: Option<hexa_core::ports::evidence::TestCounts>,
+    pub first_failure: Option<String>,
+}
+
+/// Judge a gate's run (ADR-2611231400 §1, §4): `Ok` exactly when it may be
+/// committed. `remote` picks the failing gate's code (`remote-gate-failed` or
+/// `gate-failed`). The failure carries the counts, the first failing line and
+/// the output's last 40 lines.
+pub fn judge_gate(evidence: &str, exit_ok: bool, output: &str, uncounted: bool, expect: Expect, remote: bool) -> Result<Judged, GateFailure> {
+    use hexa_core::ports::evidence::{
+        count_tests, first_failure, read_gate_evidence, read_red_evidence, Evidence, RedEvidence, TestCounts, KNOWN_RUNNERS,
+    };
+    let counts = count_tests(output);
+    let first = first_failure(output);
+    let tail: String = {
+        let lines: Vec<&str> = output.lines().collect();
+        lines[lines.len().saturating_sub(40)..].join("\n")
+    };
+    let left = "nothing committed; the change is left in the tree";
+    let fail = |code: &'static str, why: String, hint: &str, field: Option<&'static str>| {
+        let mut f = GateFailure::new(code, format!("{why}\n{left}"), hint, field, false);
+        f.tests = Some(counts);
+        f.first_failure = first.clone();
+        f
+    };
+    match expect {
+        Expect::Green => match read_gate_evidence(evidence, exit_ok, output, uncounted) {
+            Evidence::Passed { tests } => Ok(Judged {
+                tests: Some(TestCounts { passed: tests.max(counts.passed), failed: 0, recognised: true }),
+                first_failure: None,
+            }),
+            Evidence::Uncounted => Ok(Judged { tests: None, first_failure: None }),
+            v @ Evidence::Failed { .. } => Err(fail(
+                if remote { "remote-gate-failed" } else { "gate-failed" },
+                evidence_failure(evidence, &v, &tail),
+                "read first_failure and the output; fix the change (or, if the test is wrong, the spec), then run the same command again",
+                Some("--evidence"),
+            )),
+            v @ Evidence::Vacuous => Err(fail(
+                "vacuous-gate",
+                evidence_failure(evidence, &v, &tail),
+                "the gate ran zero tests: name tests that exist and run (a filter that matches nothing proves nothing)",
+                Some("--evidence"),
+            )),
+            v @ Evidence::Unrecognised => Err(fail(
+                "unrecognised-evidence",
+                evidence_failure(evidence, &v, &tail),
+                &format!("use a gate whose test runner hexa reads ({KNOWN_RUNNERS}), or declare it --uncounted"),
+                Some("--evidence"),
+            )),
+        },
+        Expect::Red => match read_red_evidence(evidence, exit_ok, output) {
+            RedEvidence::Red { .. } => Ok(Judged { tests: Some(counts), first_failure: first.clone() }),
+            RedEvidence::NotRed => Err(fail(
+                "not-red",
+                format!("--expect-red: the gate `{evidence}` passed, so these tests are not red"),
+                "tests written first must fail before the code: check that they test the new behaviour; to commit tests and code together, drop --expect-red",
+                Some("--expect-red"),
+            )),
+            RedEvidence::BuildError { line } => Err(fail(
+                "red-not-a-test-failure",
+                format!("--expect-red: a compile error is not a red test: {line}"),
+                "make the tests compile against the code as it is (declare the new items with bodies that fail), so that only assertions fail, then run again",
+                Some("--expect-red"),
+            )),
+            RedEvidence::Uncounted => Err(fail(
+                "red-not-a-test-failure",
+                format!("--expect-red: the gate `{evidence}` failed, but no test runner hexa reads counted a failed test ({KNOWN_RUNNERS})"),
+                "use a gate whose runner reports its tests, so a red is a counted test failure and not a crash or a script's exit 1",
+                Some("--expect-red"),
+            )),
+            RedEvidence::Vacuous => Err(fail(
+                "vacuous-gate",
+                format!("--expect-red: the gate `{evidence}` ran zero tests"),
+                "name tests that exist and run; zero tests is not red",
+                Some("--evidence"),
+            )),
+        },
+    }
+    .map_err(|mut f| {
+        f.output = Some(tail.clone());
+        f
+    })
+}
+
+/// A local `hexa do gate` that committed: the full commit id and the verdict.
+#[derive(Debug, Clone)]
+pub struct LocalGated {
+    pub commit: String,
+    pub judged: Judged,
+}
+
+/// The `Gate:` trailer's parenthesis for a gate's kind (ADR-2611231400 §4).
+pub fn gate_how(uncounted: bool, expect: Expect) -> &'static str {
+    match (expect, uncounted) {
+        (Expect::Red, _) => "expected red: failed on test assertions",
+        (Expect::Green, true) => "uncounted: its exit status alone decided",
+        (Expect::Green, false) => "counted",
+    }
+}
+
+/// [`gate_patch`], judged for `expect` and returning a [`GateFailure`]
+/// (ADR-2611231400 §1, §4). Runs the gate here.
+pub async fn gate_patch_local(
+    repo_root: &std::path::Path,
+    files: &[String],
+    evidence: &str,
+    message: &str,
+    uncounted: bool,
+    expect: Expect,
+) -> Result<LocalGated, GateFailure> {
+    let paths = gate_checks(repo_root, files).await.map_err(GateFailure::from_checks)?;
     let (passed, output) = run_evidence(evidence, repo_root).await;
     // A gate that is one bash script counts as one test (ADR-2611191120 §7).
-    let verdict = hexa_core::ports::evidence::read_gate_evidence(evidence, passed, &output, uncounted);
-    if !verdict.passes() {
-        let tail: String = {
-            let lines: Vec<&str> = output.lines().collect();
-            lines[lines.len().saturating_sub(40)..].join("\n")
-        };
-        return Err(format!("{}\nnothing committed; the change is left in the tree", evidence_failure(evidence, &verdict, &tail)));
-    }
+    let judged = judge_gate(evidence, passed, &output, uncounted, expect, false)?;
+    let git_fail = |what: &str, e: String| GateFailure::new("refused", format!("{what}: {e}"), "read the git error, fix it, then run again", None, true);
     let add = tokio::process::Command::new("git")
         .args(["add", "-A", "--"])
         .args(&paths)
         .current_dir(repo_root)
         .output()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| git_fail("git add", e.to_string()))?;
     if !add.status.success() {
-        return Err(format!("git add: {}", String::from_utf8_lossy(&add.stderr)));
+        return Err(git_fail("git add", String::from_utf8_lossy(&add.stderr).to_string()));
     }
-    let how = if uncounted { "uncounted: its exit status alone decided" } else { "counted" };
-    let msg = format!("{}\n\nGate: {evidence} ({how}; hexa do gate, ADR-2611160730 §3)", message.trim());
+    let adr = if expect == Expect::Red { "ADR-2611231400 §4" } else { "ADR-2611160730 §3" };
+    let msg = format!("{}\n\nGate: {evidence} ({}; hexa do gate, {adr})", message.trim(), gate_how(uncounted, expect));
     let commit = tokio::process::Command::new("git")
         .args(["commit", "-q", "-m", &msg, "--"])
         .args(&paths)
         .current_dir(repo_root)
         .output()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| git_fail("git commit", e.to_string()))?;
     if !commit.status.success() {
-        return Err(format!("git commit: {}", String::from_utf8_lossy(&commit.stderr)));
+        return Err(git_fail("git commit", String::from_utf8_lossy(&commit.stderr).to_string()));
     }
     let head = tokio::process::Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
+        .args(["rev-parse", "HEAD"])
         .current_dir(repo_root)
         .output()
         .await
-        .map_err(|e| e.to_string())?;
-    Ok(String::from_utf8_lossy(&head.stdout).trim().to_string())
+        .map_err(|e| git_fail("git rev-parse", e.to_string()))?;
+    Ok(LocalGated { commit: String::from_utf8_lossy(&head.stdout).trim().to_string(), judged })
 }
 
 /// What `hexa do gate` checks before any gate runs, locally or remotely
