@@ -1,0 +1,241 @@
+{
+  "adr": "ADR-2611221933",
+  "feature": "Go deny entries match exactly one package",
+  "description": "For Go imports, a deny entry denies only the import path equal to it. The scaffolded Go deny list names each I/O package it used to reach by prefix, so pure packages like net/netip and net/url are allowed.",
+  "universal": [
+    "§1"
+  ],
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "A Go deny entry denies the package it names",
+      "given": "Language Go, deny = [\"net\"], allow empty",
+      "when": "judge is called for the Go import \"net\"",
+      "then": "The verdict is denied"
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "A Go deny entry does not deny a pure package whose path starts with it",
+      "given": "Language Go, deny = [\"net\"], allow empty",
+      "when": "judge is called for the standard-library Go import \"net/netip\"",
+      "then": "The verdict is not denied, and the import is let through as standard library"
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "Go net/url is not denied by a deny entry of net",
+      "given": "Language Go, deny = [\"net\"], allow empty",
+      "when": "judge is called for the standard-library Go import \"net/url\"",
+      "then": "The verdict is not denied"
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "A Go deny entry does not reach a package below it on a / boundary, even an I/O one",
+      "given": "Language Go, deny = [\"net\"], allow empty",
+      "when": "judge is called for the Go import \"net/http\"",
+      "then": "The verdict is not denied by the \"net\" entry, because it names only net"
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "A Go deny entry of os does not deny os/user or os/signal",
+      "given": "Language Go, deny = [\"os\"], allow empty",
+      "when": "judge is called for the Go imports \"os/user\" and \"os/signal\"",
+      "then": "Neither verdict is denied"
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "A deny entry naming a deeper path does not deny its parent",
+      "given": "Language Go, deny = [\"net/http\"], allow empty",
+      "when": "judge is called for the Go import \"net\"",
+      "then": "The verdict is not denied"
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "A Go deny entry does not match a path that only shares its leading characters",
+      "given": "Language Go, deny = [\"net\"], allow empty",
+      "when": "judge is called for a Go import \"network\"",
+      "then": "The verdict is not denied by the \"net\" entry"
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "Rust deny entries still match below the path",
+      "given": "Language Rust, deny = [\"std::fs\"], allow empty",
+      "when": "judge is called for the Rust import \"std::fs::File\"",
+      "then": "The verdict is denied, as before"
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "Rust std::net still covers std::net::IpAddr",
+      "given": "Language Rust, deny = [\"std::net\"], allow empty",
+      "when": "judge is called for the Rust import \"std::net::IpAddr\"",
+      "then": "The verdict is denied"
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "TypeScript deny entries still match below the path",
+      "given": "Language TypeScript, deny = [\"node:fs\"], allow empty",
+      "when": "judge is called for the TypeScript import \"node:fs/promises\"",
+      "then": "The verdict is denied, as before"
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "Python deny entries match as they did before this ADR",
+      "given": "Language Python, a deny entry and an import below it that the previous rule denied",
+      "when": "judge is called for that Python import",
+      "then": "The verdict is the same as under the previous rule"
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "Go allow entries still match below the path",
+      "given": "Language Go, allow = [\"example.com/lib\"], deny empty, and a non-standard-library import \"example.com/lib/sub\"",
+      "when": "judge is called for \"example.com/lib/sub\"",
+      "then": "The verdict is allowed, as before"
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "An exact Go deny match still beats an allow",
+      "given": "Language Go, deny = [\"net\"], allow = [\"net\"]",
+      "when": "judge is called for the Go import \"net\"",
+      "then": "The verdict is denied"
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§1"
+      ],
+      "kind": "property",
+      "description": "A Go deny entry denies exactly the path equal to it",
+      "given": "Any Go deny list D, an empty allow list, and any Go import path p",
+      "when": "judge is called for p",
+      "then": "The deny rule denies p if and only if p is equal to some entry of D. No entry denies a path that merely starts with it."
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§1"
+      ],
+      "kind": "property",
+      "description": "Non-Go deny entries and all allow entries keep their behaviour",
+      "given": "Any non-Go language (Rust, TypeScript, Python) with any import, allow and deny, or any Go import judged only against allow entries",
+      "when": "judge is called",
+      "then": "The verdict equals the verdict under the previous below-the-path matching"
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "The scaffolded Go deny names each I/O package explicitly",
+      "given": "The scaffolded rules template ADR-rules.toml",
+      "when": "Its Go deny entries are read",
+      "then": "They are os, os/exec, os/signal, os/user, net, net/http, net/http/httptest, net/http/httputil, net/http/pprof, net/rpc, net/rpc/jsonrpc, net/smtp, database/sql, io/ioutil, plugin and http"
+    },
+    {
+      "id": "S17",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "A scaffolded domain is still denied I/O packages once reached by prefix",
+      "given": "A project scaffolded from the template, judging a Go domain import",
+      "when": "judge is called for \"net/smtp\", \"os/user\", \"net/http/pprof\" and \"net/rpc/jsonrpc\"",
+      "then": "Each verdict is denied"
+    },
+    {
+      "id": "S18",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "A scaffolded domain may use pure network-name packages",
+      "given": "A project scaffolded from the template, judging a Go domain import",
+      "when": "judge is called for \"net/netip\", \"net/url\", \"net/mail\" and \"net/textproto\"",
+      "then": "None is denied. Each is let through as standard library."
+    },
+    {
+      "id": "S19",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "The scaffolded Go deny does not list the pure packages",
+      "given": "The scaffolded rules template",
+      "when": "Its Go deny entries are read",
+      "then": "They contain none of net/netip, net/url, net/mail or net/textproto"
+    },
+    {
+      "id": "S20",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "The template keeps the bare http entry",
+      "given": "The scaffolded rules template",
+      "when": "Its deny entries are read",
+      "then": "\"http\" is still present and has not been dropped"
+    },
+    {
+      "id": "S21",
+      "decision": [
+        "§2"
+      ],
+      "kind": "property",
+      "description": "The new template denies every Go I/O package the old template denied by prefix",
+      "given": "Each of os, net, http, net/http, database/sql, os/exec, io/ioutil, plugin, os/signal, os/user, net/http/httptest, net/http/httputil, net/http/pprof, net/rpc, net/rpc/jsonrpc and net/smtp",
+      "when": "judge is called for that Go import under the scaffolded rules",
+      "then": "The verdict is denied"
+    }
+  ]
+}
