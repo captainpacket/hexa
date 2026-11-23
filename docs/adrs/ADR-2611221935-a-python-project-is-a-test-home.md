@@ -9,7 +9,7 @@
 
 ## Context
 
-`require_a_rust_project` (`hexa-cli/src/commands/spec_ledger.rs`) lets `spec draft` and `spec accept` proceed when the root has a `Cargo.toml` or a `package.json`, or `.hexa/project.json` configures a `test.runners` entry; otherwise it refuses, naming those three. `hexa analyze` detects a Python project by a `pyproject.toml`, `setup.py` or `setup.cfg` at its root (ADR-2611211324), and `hexa spec red` binds a `.py` test through the built-in pytest runner. The runner rule is `hexa-core/src/domain/test_runner.rs`.
+`require_a_rust_project` (`hexa-cli/src/commands/spec_ledger.rs`) lets `spec draft` and `spec accept` proceed when the root has a `Cargo.toml` or a `package.json`, or `.hexa/project.json` configures a `test.runners` entry; otherwise it refuses, naming those three. `hexa analyze` detects a Python project by a `pyproject.toml`, `setup.py`, `manage.py` or `requirements.txt` at its root (ADR-2611211324 §4; the session header reads `pyproject.toml`, `setup.py` or `setup.cfg`, ADR-2611221646 §4), and `hexa spec red` binds a `.py` test through the built-in pytest runner. The runner rule is `hexa-core/src/domain/test_runner.rs`.
 
 ## Decision
 
