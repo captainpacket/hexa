@@ -13,7 +13,7 @@
     "sha256": "8b8601a37f70d36e3e2b9a2d645e01295400e7901d7d9385fa8cef9fee16240e"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611230900_spec.rs": "9deaaac6176ef68f657ac0413cf7e741f14d0f81082c1e301e6854e384f9e1ad"
+    "hexa-cli/tests/adr_2611230900_spec.rs": "a09885c745f3bdb33ef368c31fa9aac50ddc07e5a39267a851152ee193037150"
   },
   "red": "0ab2027",
   "specs": [
@@ -231,6 +231,17 @@
       "when": "hexa analyze runs",
       "then": "The policy's findings equal those produced by path matching alone. Every non-policy finding is the same as when the policy is judged by path alone",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s18_non_layer_policies_unaffected_by_layers_map"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-23T15:59:20.447678037+00:00",
+      "base_commit": "0ab20276be2e5e880257c035afb51d2918a55284",
+      "by": "Claude Code agent",
+      "file": "hexa-cli/tests/adr_2611230900_spec.rs",
+      "from": "9deaaac6176ef68f657ac0413cf7e741f14d0f81082c1e301e6854e384f9e1ad",
+      "reason": "Fixture defects, plus one corrected example: the rules were written to .hexa/rules.toml, which hexa never reads (it reads .hexa/ADR-rules.toml), and each [[import_policy]] lacked the required adr, id and message fields, so no policy ran and the control cases failed too; S13 used the standard-library net as the import the allow list omits, but the standard library is permitted unless denied (before and after this ADR), so it now uses an external import, example.com/ext, which keeps S13's point (allow and severity apply to declared files). Without the fix 9 fail and 8 guards pass; with it 17 pass",
+      "to": "a09885c745f3bdb33ef368c31fa9aac50ddc07e5a39267a851152ee193037150"
     }
   ]
 }
