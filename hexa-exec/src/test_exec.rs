@@ -479,7 +479,7 @@ fn git_ok(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Result<String, Str
 use crate::direct_exec::{Expect, GateFailure};
 
 /// HEAD's full id and its branch, or the refusal of a gate with nowhere to commit.
-fn head_and_branch(root: &Path) -> Result<(String, String), GateFailure> {
+fn head_and_branch(root: &Path) -> Result<(String, String), Box<GateFailure>> {
     let head = full_commit(root, "HEAD").ok_or_else(|| {
         GateFailure::new("refused", "HEAD is not a commit: there is nothing to build the candidate on", "make a first commit, then gate", None, false)
     })?;
@@ -491,7 +491,7 @@ fn head_and_branch(root: &Path) -> Result<(String, String), GateFailure> {
 
 /// The remote and branch ref `branch` tracks. A branch with none is refused
 /// rather than guessed at (ADR-2611221610 §7).
-fn upstream_of(root: &Path, branch: &str) -> Result<(String, String), GateFailure> {
+fn upstream_of(root: &Path, branch: &str) -> Result<(String, String), Box<GateFailure>> {
     git_ok(root, &["config", &format!("branch.{branch}.remote")], &[])
         .and_then(|r| git_ok(root, &["config", &format!("branch.{branch}.merge")], &[]).map(|m| (r, m)))
         .map_err(|_| {
@@ -515,7 +515,7 @@ fn remote_head(root: &Path, remote: &str, merge: &str) -> Option<String> {
 /// What `hexa do gate` would do, after every check it makes before it builds
 /// a candidate, doing none of it (ADR-2611231400 §6). `template` is the
 /// `test.remote` template, or `None` for a gate run here.
-pub async fn gate_plan(root: &Path, files: &[String], evidence: &str, template: Option<&str>) -> Result<GatePlan, GateFailure> {
+pub async fn gate_plan(root: &Path, files: &[String], evidence: &str, template: Option<&str>) -> Result<GatePlan, Box<GateFailure>> {
     let paths = crate::direct_exec::gate_checks(root, files).await.map_err(GateFailure::from_checks)?;
     let (parent, branch) = head_and_branch(root)?;
     let (upstream, run) = match template {
@@ -548,7 +548,7 @@ pub async fn gate_patch_remote(
     uncounted: bool,
     template: &str,
     expect: Expect,
-) -> Result<RemoteGated, GateFailure> {
+) -> Result<RemoteGated, Box<GateFailure>> {
     let paths = crate::direct_exec::gate_checks(root, files).await.map_err(GateFailure::from_checks)?;
     let (head, branch) = head_and_branch(root)?;
     let (remote, merge) = upstream_of(root, &branch)?;
@@ -576,7 +576,7 @@ pub async fn gate_patch_remote(
     })();
     let _ = std::fs::remove_file(&index);
     let candidate = built.map_err(|e| refuse(format!("the candidate commit could not be built: {e}")))?;
-    let with_commit = |mut f: GateFailure| {
+    let with_commit = |mut f: Box<GateFailure>| {
         f.commit = Some(candidate.clone());
         f
     };

@@ -380,7 +380,7 @@ fn tests_json(t: Option<hexa_core::ports::evidence::TestCounts>, uncounted: bool
 
 /// End a gate that did not finish: the human lines, the result object, the
 /// AG-UI failure, and a non-zero exit (ADR-2611231400 §1).
-fn gate_failed(mut base: serde_json::Value, f: hexa_exec::direct_exec::GateFailure, uncounted: bool, started: bool) -> anyhow::Result<()> {
+fn gate_failed(mut base: serde_json::Value, f: Box<hexa_exec::direct_exec::GateFailure>, uncounted: bool, started: bool) -> anyhow::Result<()> {
     if let Some(out) = &f.output {
         println!("  {} the gate's output (last lines):", "\u{2192}".cyan());
         for l in out.lines() {
@@ -518,7 +518,7 @@ async fn gate(
     println!("  {} {}", "files".dimmed(), rel.join(", "));
     let started_at = chrono::Utc::now().to_rfc3339();
     let clock = std::time::Instant::now();
-    let outcome: Result<serde_json::Value, GateFailure> = match &remote {
+    let outcome: Result<serde_json::Value, Box<GateFailure>> = match &remote {
         None => hexa_exec::direct_exec::gate_patch_local(&root, &rel, &evidence, &message, uncounted, expect).await.map(|g| {
             json!({ "commit": g.commit, "tests": tests_json(g.judged.tests, uncounted), "first_failure": g.judged.first_failure })
         }),

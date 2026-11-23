@@ -1667,12 +1667,13 @@ pub struct GateFailure {
 }
 
 impl GateFailure {
-    pub fn new(code: &'static str, why: impl Into<String>, hint: impl Into<String>, field: Option<&'static str>, retryable: bool) -> Self {
-        GateFailure { code, why: why.into(), hint: hint.into(), field, retryable, commit: None, tests: None, first_failure: None, output: None }
+    /// Boxed: it is the error of every gate step, and it is large.
+    pub fn new(code: &'static str, why: impl Into<String>, hint: impl Into<String>, field: Option<&'static str>, retryable: bool) -> Box<Self> {
+        Box::new(GateFailure { code, why: why.into(), hint: hint.into(), field, retryable, commit: None, tests: None, first_failure: None, output: None })
     }
 
     /// A refusal [`gate_checks`] made, before anything ran.
-    pub fn from_checks(why: String) -> Self {
+    pub fn from_checks(why: String) -> Box<Self> {
         if why.starts_with("nothing to commit") {
             GateFailure::new(
                 "nothing-to-commit",
@@ -1699,7 +1700,7 @@ pub struct Judged {
 /// committed. `remote` picks the failing gate's code (`remote-gate-failed` or
 /// `gate-failed`). The failure carries the counts, the first failing line and
 /// the output's last 40 lines.
-pub fn judge_gate(evidence: &str, exit_ok: bool, output: &str, uncounted: bool, expect: Expect, remote: bool) -> Result<Judged, GateFailure> {
+pub fn judge_gate(evidence: &str, exit_ok: bool, output: &str, uncounted: bool, expect: Expect, remote: bool) -> Result<Judged, Box<GateFailure>> {
     use hexa_core::ports::evidence::{
         count_tests, first_failure, read_gate_evidence, read_red_evidence, Evidence, RedEvidence, TestCounts, KNOWN_RUNNERS,
     };
@@ -1801,7 +1802,7 @@ pub async fn gate_patch_local(
     message: &str,
     uncounted: bool,
     expect: Expect,
-) -> Result<LocalGated, GateFailure> {
+) -> Result<LocalGated, Box<GateFailure>> {
     let paths = gate_checks(repo_root, files).await.map_err(GateFailure::from_checks)?;
     let (passed, output) = run_evidence(evidence, repo_root).await;
     // A gate that is one bash script counts as one test (ADR-2611191120 §7).
