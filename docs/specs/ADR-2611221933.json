@@ -7,10 +7,7 @@
   ],
   "accepted": {
     "by": "craigjohnson",
-    "sha256": "25b96b57e2ad33ed2f81a8554dbfe5522d27293b15c56060d2d2486c3b567a6b"
-  },
-  "sealed": {
-    "hexa-analysis/tests/adr_2611221933_spec.rs": "83999d07bcf7cc3266edb1eae8ad9b6be9768036194fac44f56be62a92e9729f"
+    "sha256": "4ed043c9229dad6f2fc78a8e1b87a5efbb0805bea290d46ffa60c280741287fd"
   },
   "red": "fa061f2",
   "specs": [
@@ -35,7 +32,8 @@
       "given": "Language Go, deny = [\"net\"], allow empty",
       "when": "judge is called for the standard-library Go import \"net/netip\"",
       "then": "The verdict is not denied, and the import is let through as standard library",
-      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_1::s02_go_deny_net_does_not_deny_net_netip"
+      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_1::s02_go_deny_net_does_not_deny_net_netip",
+      "red": "b59908f"
     },
     {
       "id": "S03",
@@ -47,7 +45,8 @@
       "given": "Language Go, deny = [\"net\"], allow empty",
       "when": "judge is called for the standard-library Go import \"net/url\"",
       "then": "The verdict is not denied",
-      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_1::s03_go_deny_net_does_not_deny_net_url"
+      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_1::s03_go_deny_net_does_not_deny_net_url",
+      "red": "b59908f"
     },
     {
       "id": "S04",
@@ -59,7 +58,8 @@
       "given": "Language Go, deny = [\"net\"], allow empty",
       "when": "judge is called for the Go import \"net/http\"",
       "then": "The verdict is not denied by the \"net\" entry, because it names only net",
-      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_1::s04_go_deny_net_does_not_deny_net_http"
+      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_1::s04_go_deny_net_does_not_deny_net_http",
+      "red": "b59908f"
     },
     {
       "id": "S05",
@@ -71,7 +71,8 @@
       "given": "Language Go, deny = [\"os\"], allow empty",
       "when": "judge is called for the Go imports \"os/user\" and \"os/signal\"",
       "then": "Neither verdict is denied",
-      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_1::s05_go_deny_os_does_not_deny_os_user_or_os_signal"
+      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_1::s05_go_deny_os_does_not_deny_os_user_or_os_signal",
+      "red": "b59908f"
     },
     {
       "id": "S06",
@@ -170,8 +171,7 @@
       "description": "A Go standard-library deny entry denies exactly the path equal to it; a module deny entry covers the packages below it",
       "given": "Any Go deny list D, an empty allow list, and any Go import path p",
       "when": "judge is called for p",
-      "then": "The deny rule denies p if and only if p equals some entry of D, or some entry of D whose first path element has a dot is a prefix of p on a / boundary. No standard-library entry denies a path that merely starts with it.",
-      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_2::s14_go_deny_denies_exactly_equal_paths"
+      "then": "The deny rule denies p if and only if p equals some entry of D, or some entry of D whose first path element has a dot is a prefix of p on a / boundary. No standard-library entry denies a path that merely starts with it."
     },
     {
       "id": "S15",
@@ -194,7 +194,8 @@
       "given": "The scaffolded rules template ADR-rules.toml",
       "when": "Its Go deny entries are read",
       "then": "They are os, os/exec, os/signal, os/user, net, net/http, net/http/httptest, net/http/httputil, net/http/pprof, net/rpc, net/rpc/jsonrpc, net/smtp, database/sql, io/ioutil, plugin and http",
-      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_2::s16_template_go_deny_names_each_io_package"
+      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_2::s16_template_go_deny_names_each_io_package",
+      "red": "b59908f"
     },
     {
       "id": "S17",
@@ -217,7 +218,8 @@
       "given": "A project scaffolded from the template, judging a Go domain import",
       "when": "judge is called for \"net/netip\", \"net/url\", \"net/mail\" and \"net/textproto\"",
       "then": "None is denied. Each is let through as standard library.",
-      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_2::s18_scaffolded_domain_may_use_pure_packages"
+      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_2::s18_scaffolded_domain_may_use_pure_packages",
+      "red": "b59908f"
     },
     {
       "id": "S19",
@@ -229,7 +231,8 @@
       "given": "The scaffolded rules template",
       "when": "Its Go deny entries are read",
       "then": "They contain none of net/netip, net/url, net/mail or net/textproto",
-      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_2::s19_template_does_not_list_pure_packages"
+      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_2::s19_template_does_not_list_pure_packages",
+      "red": "b59908f"
     },
     {
       "id": "S20",
@@ -241,7 +244,8 @@
       "given": "The scaffolded rules template",
       "when": "Its deny entries are read",
       "then": "\"http\" is still present and has not been dropped",
-      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_2::s20_template_keeps_bare_http"
+      "test": "hexa-analysis/tests/adr_2611221933_spec.rs::part_2::s20_template_keeps_bare_http",
+      "red": "b59908f"
     },
     {
       "id": "S21",

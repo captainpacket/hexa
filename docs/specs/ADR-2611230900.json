@@ -10,10 +10,7 @@
   ],
   "accepted": {
     "by": "craigjohnson",
-    "sha256": "8b8601a37f70d36e3e2b9a2d645e01295400e7901d7d9385fa8cef9fee16240e"
-  },
-  "sealed": {
-    "hexa-cli/tests/adr_2611230900_spec.rs": "1f72a05cd87ea71394fa179844ec101f810ac298185881dc5c84cb4424ab4111"
+    "sha256": "1e59a1bbb95c0164943a127037c0a3d0f65b49897c30a9512395d0b37447cec0"
   },
   "red": "ea59473",
   "specs": [
@@ -27,7 +24,8 @@
       "given": "A Go project whose .hexa/project.json has analyze.layers {\"perfpayload\": \"domain\"}, and a rules file with an [[import_policy]] layer = \"/domain/\" whose deny list includes \"os/exec\" at severity \"error\". domain/access_control.go and perfpayload/encode.go each contain `import _ \"os/exec\"`",
       "when": "hexa analyze runs on the project",
       "then": "The policy reports one finding in domain/access_control.go and one in perfpayload/encode.go, each naming \"os/exec\" at its line",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s01_go_file_declared_domain_is_held_to_domain_policy"
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s01_go_file_declared_domain_is_held_to_domain_policy",
+      "red": "ea59473"
     },
     {
       "id": "S02",
@@ -39,7 +37,8 @@
       "given": "A Python project with analyze.layers {\"sdk/core\": \"domain\"} and no folder named domain. The domain [[import_policy]] (layer \"/domain/\") denies os, ssl and subprocess at severity error. sdk/core/client.py imports os, ssl and subprocess",
       "when": "hexa analyze runs",
       "then": "Three error findings are reported for sdk/core/client.py, and the health score is 30 points lower than for the same tree with those three imports removed",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s02_python_domain_declared_by_map_is_checked"
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s02_python_domain_declared_by_map_is_checked",
+      "red": "ea59473"
     },
     {
       "id": "S03",
@@ -51,7 +50,8 @@
       "given": "analyze.layers {\"src/db\": \"adapters/secondary\"}, and an [[import_policy]] with layer \"adapters/secondary/\" that denies \"net/http\". src/db/store.go imports \"net/http\"",
       "when": "hexa analyze runs",
       "then": "A finding is reported for src/db/store.go. The same finding is reported when the policy's layer is written \"/adapters/secondary\" or \"adapters/secondary\"",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s03_slashed_layer_name_picks_up_declared_files"
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s03_slashed_layer_name_picks_up_declared_files",
+      "red": "ea59473"
     },
     {
       "id": "S04",
@@ -63,7 +63,8 @@
       "given": "analyze.layers {\"src/model.py\": \"domain\"}, and a domain policy (layer \"/domain/\") denying subprocess. src/model/history.py imports subprocess",
       "when": "hexa analyze runs",
       "then": "A finding is reported for src/model/history.py",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s04_source_file_key_covers_its_module"
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s04_source_file_key_covers_its_module",
+      "red": "ea59473"
     },
     {
       "id": "S05",
@@ -75,7 +76,8 @@
       "given": "analyze.layers {\"src/http\": \"adapters/primary\"}, and a domain policy (layer \"/domain/\") denying os. src/http/server.py imports os, and no segment of its path is \"domain\"",
       "when": "hexa analyze runs",
       "then": "The domain policy reports nothing for src/http/server.py",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s05_file_declared_in_other_layer_is_not_added"
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s05_file_declared_in_other_layer_is_not_added",
+      "red": "ea59473"
     },
     {
       "id": "S06",
@@ -87,7 +89,8 @@
       "given": "analyze.layers {\"perfpayload\": \"domain\"}, and an [[import_policy]] with layer \"/domain/models/\" that denies \"os/exec\". perfpayload/encode.go imports \"os/exec\"",
       "when": "hexa analyze runs",
       "then": "That policy reports nothing for perfpayload/encode.go",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s06_policy_layer_containing_layer_name_adds_nothing"
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s06_policy_layer_containing_layer_name_adds_nothing",
+      "red": "ea59473"
     },
     {
       "id": "S07",
@@ -99,7 +102,8 @@
       "given": "Any project and any analyze.layers map, and any policy whose layer, with its leading and trailing '/' trimmed, equals a layer name L",
       "when": "hexa analyze runs",
       "then": "The set of files the policy judges is the files its path matches, together with every file an analyze.layers key assigns to L, less the files §3 excludes. The policy judges no file outside that set",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s07_declared_files_are_in_scope_of_their_layer_policy"
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s07_declared_files_are_in_scope_of_their_layer_policy",
+      "red": "ea59473"
     },
     {
       "id": "S08",
@@ -111,7 +115,8 @@
       "given": "A project with no analyze.layers in .hexa/project.json. A domain policy denies std::fs. src/domain/a.rs uses std::fs, and src/core/b.rs uses std::fs",
       "when": "hexa analyze runs",
       "then": "The findings are the same as before this ADR: one for src/domain/a.rs and none for src/core/b.rs",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s08_without_layers_policy_is_path_only"
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s08_without_layers_policy_is_path_only",
+      "red": "ea59473"
     },
     {
       "id": "S09",
@@ -123,7 +128,8 @@
       "given": "No analyze.layers. A crate directory app-domain/ whose files the built-in classification grades as domain, though no path segment is \"domain\". A domain policy (layer \"/domain/\") denies std::fs, and app-domain/src/lib.rs uses std::fs",
       "when": "hexa analyze runs",
       "then": "The domain policy reports nothing for app-domain/src/lib.rs",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s09_crate_named_for_layer_adds_nothing"
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s09_crate_named_for_layer_adds_nothing",
+      "red": "ea59473"
     },
     {
       "id": "S10",
@@ -135,7 +141,8 @@
       "given": "analyze.layers {\"src/core\": \"domain\"}, and a domain policy denying os. src/core_utils/io.py imports os",
       "when": "hexa analyze runs",
       "then": "The domain policy reports nothing for src/core_utils/io.py",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s10_key_covers_whole_segments_only"
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s10_key_covers_whole_segments_only",
+      "red": "ea59473"
     },
     {
       "id": "S11",
@@ -147,7 +154,8 @@
       "given": "Any project with no analyze.layers, and any set of import policies",
       "when": "hexa analyze runs",
       "then": "Every import-policy finding, and the grade, are identical to what path matching alone produces",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s11_no_declaration_no_change"
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s11_no_declaration_no_change",
+      "red": "ea59473"
     },
     {
       "id": "S12",
@@ -159,7 +167,8 @@
       "given": "analyze.layers {\"src/domain\": \"domain\"}, and a domain policy (layer \"/domain/\") denying os at severity error. src/domain/x.py imports os once",
       "when": "hexa analyze runs",
       "then": "Exactly one finding is reported for that import, and the score falls by 10 points, not 20",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s12_path_matched_and_declared_is_judged_once"
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s12_path_matched_and_declared_is_judged_once",
+      "red": "ea59473"
     },
     {
       "id": "S13",
@@ -170,8 +179,7 @@
       "description": "Allow and severity apply to declared files as written",
       "given": "A Go project whose analyze.layers declares pkg/model as domain, and a /domain/ policy with allow = [\"example.com/ok\"], no deny, and severity warning; pkg/model/a.go imports example.com/ok and example.com/ext",
       "when": "hexa analyze runs",
-      "then": "example.com/ok has no finding (allowed); example.com/ext has exactly one finding, a warning; and the score is the same as for the same project whose a.go imports nothing",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s13_allow_and_severity_apply_to_declared_files"
+      "then": "example.com/ok has no finding (allowed); example.com/ext has exactly one finding, a warning; and the score is the same as for the same project whose a.go imports nothing"
     },
     {
       "id": "S14",
@@ -183,7 +191,8 @@
       "given": "analyze.layers {\"tests/fixtures\": \"domain\"}, and a domain policy denying subprocess. tests/fixtures/run.py imports subprocess. The same holds for benches/ and examples/",
       "when": "hexa analyze runs",
       "then": "The domain policy reports nothing for files under the top-level tests/, benches/ or examples/",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s14_declared_file_under_top_level_tests_stays_out_of_scope"
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s14_declared_file_under_top_level_tests_stays_out_of_scope",
+      "red": "ea59473"
     },
     {
       "id": "S15",
@@ -195,7 +204,8 @@
       "given": "Any project, any policy, and any file that is both path-matched and declared in the policy's layer",
       "when": "hexa analyze runs",
       "then": "Each import or reference in that file yields at most one finding from that policy. No file under a top-level tests/, benches/ or examples/ yields any",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s15_each_import_judged_at_most_once_per_policy"
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s15_each_import_judged_at_most_once_per_policy",
+      "red": "ea59473"
     },
     {
       "id": "S16",
@@ -207,7 +217,8 @@
       "given": "analyze.layers {\"forward_netbox/utilities\": \"domain\", \"forward_netbox/core\": \"domain\"}, and a policy with layer \"forward_netbox/utilities\" that denies requests. forward_netbox/utilities/a.py and forward_netbox/core/b.py both import requests",
       "when": "hexa analyze runs",
       "then": "That policy reports a.py and does not report b.py",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s16_path_policy_naming_no_layer_stays_path_only"
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s16_path_policy_naming_no_layer_stays_path_only",
+      "red": "ea59473"
     },
     {
       "id": "S17",
@@ -230,7 +241,8 @@
       "given": "Any project, any analyze.layers map, and any policy whose trimmed layer is not a layer name",
       "when": "hexa analyze runs",
       "then": "The policy's findings equal those produced by path matching alone. Every non-policy finding is the same as when the policy is judged by path alone",
-      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s18_non_layer_policies_unaffected_by_layers_map"
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s18_non_layer_policies_unaffected_by_layers_map",
+      "red": "ea59473"
     }
   ],
   "amendments": [

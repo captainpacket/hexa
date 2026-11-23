@@ -8,7 +8,7 @@
   ],
   "accepted": {
     "by": "craigjohnson",
-    "sha256": "ef57215464479c20ded64c94d83b7f30a3afd55a66ec6293353c1e61d21ffb4d"
+    "sha256": "7888b542d0c1c7a0615c04002a8a60f8ab9bbb0671b9e29fdf6dd25f9b204fa2"
   },
   "sealed": {
     "hexa-core/tests/adr_2611230833_spec.rs": "0eb47d169fed36113bd5ae4e7bc38820ff3b65940a86044aa449435ddb034614"
@@ -25,7 +25,8 @@
       "given": "output \"=== RUN   TestX\\n--- PASS: TestX (0.00s)\\nPASS\\nok  \\tdemo/pkg\\t0.01s\\n\" from a run that exited 0",
       "when": "read_evidence(true, output, false) is called",
       "then": "it returns Evidence::Passed { tests: 1 }",
-      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s01_verbose_run_of_one_passing_test_is_one_test"
+      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s01_verbose_run_of_one_passing_test_is_one_test",
+      "red": "e9e33fc"
     },
     {
       "id": "S02",
@@ -37,7 +38,8 @@
       "given": "output with three lines \"--- PASS: TestA (0.00s)\", \"--- PASS: TestB (0.00s)\" and \"--- PASS: TestC (0.00s)\", then \"PASS\" and \"ok  \\tdemo/pkg\\t0.02s\", from a run that exited 0",
       "when": "read_evidence(true, output, false) is called",
       "then": "it returns Evidence::Passed { tests: 3 }",
-      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s02_verbose_run_of_n_passing_tests_is_n"
+      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s02_verbose_run_of_n_passing_tests_is_n",
+      "red": "e9e33fc"
     },
     {
       "id": "S03",
@@ -60,7 +62,8 @@
       "given": "output \"--- PASS: TestX (0.00s)\\nok\\tdemo/pkg\\t0.01s\\n\" from a run that exited 0",
       "when": "read_evidence(true, output, false) is called",
       "then": "it returns Evidence::Passed { tests: 1 }",
-      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s04_tab_only_package_line_follows_same_rule"
+      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s04_tab_only_package_line_follows_same_rule",
+      "red": "e9e33fc"
     },
     {
       "id": "S05",
@@ -72,7 +75,8 @@
       "given": "a configured runner whose run of one passing test exits 0 and prints \"=== RUN   TestX\\n--- PASS: TestX (0.00s)\\nPASS\\nok  \\tdemo/pkg\\t0.01s\\n\"",
       "when": "judge_counted(true, output) is called",
       "then": "it returns Verdict::Passed",
-      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s05_verbose_configured_runner_judged_as_one_passing_test"
+      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s05_verbose_configured_runner_judged_as_one_passing_test",
+      "red": "e9e33fc"
     },
     {
       "id": "S06",
@@ -84,7 +88,8 @@
       "given": "output \"--- PASS: TestA\\n--- PASS: TestB\\nok  \\tdemo/p1\\t0.01s\\nok  \\tdemo/p2\\t0.01s\\n\" from a run that exited 0, where p1 listed two tests and p2 listed none",
       "when": "read_evidence(true, output, false) is called",
       "then": "it returns Evidence::Passed { tests: 3 }",
-      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s06_each_package_judged_on_its_own_lines"
+      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s06_each_package_judged_on_its_own_lines",
+      "red": "e9e33fc"
     },
     {
       "id": "S07",
@@ -96,7 +101,8 @@
       "given": "output \"--- PASS: TestA\\nok  \\tdemo/p1\\t0.01s\\n--- PASS: TestB\\nok  \\tdemo/p2\\t0.01s\\n\" from a run that exited 0",
       "when": "read_evidence(true, output, false) is called",
       "then": "it returns Evidence::Passed { tests: 2 }",
-      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s07_two_verbose_packages_count_only_listed_tests"
+      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s07_two_verbose_packages_count_only_listed_tests",
+      "red": "e9e33fc"
     },
     {
       "id": "S08",
@@ -108,7 +114,8 @@
       "given": "output \"--- PASS: TestX (0.00s)\\nok  \\tdemo/pkg\\t0.01s\\n\" from a run that exited 0",
       "when": "read_evidence(true, output, false) is called",
       "then": "it does not return Evidence::Passed { tests: 2 }",
-      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s08_verbose_package_line_not_counted_as_another_test"
+      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s08_verbose_package_line_not_counted_as_another_test",
+      "red": "e9e33fc"
     },
     {
       "id": "S09",
@@ -120,7 +127,8 @@
       "given": "a configured runner whose run exits 0 and prints \"--- PASS: TestX (0.00s)\\nPASS\\nok  \\tdemo/pkg\\t0.01s\\n\"",
       "when": "judge_counted(true, output) is called",
       "then": "it does not return Verdict::Ambiguous(2), or any Verdict::Ambiguous",
-      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s09_verbose_run_of_one_test_not_ambiguous"
+      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s09_verbose_run_of_one_test_not_ambiguous",
+      "red": "e9e33fc"
     },
     {
       "id": "S10",
@@ -132,7 +140,8 @@
       "given": "output \"--- PASS: TestA\\nok  \\tdemo/p1\\t0.01s\\nok  \\tdemo/p2\\t0.01s\\n\" from a run that exited 0",
       "when": "read_evidence(true, output, false) is called",
       "then": "it does not return Evidence::Passed { tests: 1 }; it returns Evidence::Passed { tests: 2 }",
-      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s10_listed_lines_do_not_stop_later_unlisted_package_counting"
+      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s10_listed_lines_do_not_stop_later_unlisted_package_counting",
+      "red": "e9e33fc"
     },
     {
       "id": "S11",
@@ -144,7 +153,8 @@
       "given": "any sequence of packages, each printing k ≥ 0 lines \"--- PASS: T…\" followed by its \"ok  \\t<pkg>\\t<t>s\" line, from a run that exited 0, with at least one package",
       "when": "read_evidence(true, output, false) is called",
       "then": "it returns Evidence::Passed { tests: Σ over packages of (k if k > 0 else 1) }",
-      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_2::s11_each_listed_test_counts_once_and_each_unlisted_package_line_once"
+      "test": "hexa-core/tests/adr_2611230833_spec.rs::part_2::s11_each_listed_test_counts_once_and_each_unlisted_package_line_once",
+      "red": "e9e33fc"
     },
     {
       "id": "S12",
