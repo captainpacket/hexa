@@ -1920,14 +1920,6 @@ fn unchecked_file(
         .collect()
 }
 
-/// Whether a file sits in a policy's layer.
-///
-/// `rel.contains("/domain/")` also matched `tests/domain/` and
-/// `src/adapters/domain_helpers/`, so a policy could report against files it
-/// was never written for. Segments are compared whole, and the directories a
-/// project keeps its tests and examples in are out of scope: a fixture that
-/// imports a database driver on purpose is not a domain violation.
-/// (ADR-2609221430 §7.)
 /// A top-level `tests/`, `benches/` or `examples/` file, which no policy
 /// judges (ADR-2609221430 §7; ADR-2611230900 §3).
 fn out_of_policy_scope(rel_slashed: &str) -> bool {
@@ -1937,6 +1929,14 @@ fn out_of_policy_scope(rel_slashed: &str) -> bool {
         .is_some_and(|s| matches!(s, "tests" | "benches" | "examples"))
 }
 
+/// Whether a file sits in a policy's layer.
+///
+/// `rel.contains("/domain/")` also matched `tests/domain/` and
+/// `src/adapters/domain_helpers/`, so a policy could report against files it
+/// was never written for. Segments are compared whole, and the directories a
+/// project keeps its tests and examples in are out of scope: a fixture that
+/// imports a database driver on purpose is not a domain violation.
+/// (ADR-2609221430 §7.)
 fn layer_matches(rel_slashed: &str, layer: &str) -> bool {
     let segments: Vec<&str> = rel_slashed.split('/').filter(|s| !s.is_empty()).collect();
     if segments.first().is_some_and(|s| matches!(*s, "tests" | "benches" | "examples")) {
