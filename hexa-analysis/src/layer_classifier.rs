@@ -257,6 +257,9 @@ fn read_adapter_groups(root: &std::path::Path) -> Result<Vec<(String, Vec<String
 pub struct LayerMap {
     /// (prefix, layer), longest prefix first.
     entries: Vec<(String, HexLayer)>,
+    /// Each key as the project wrote it, with the prefix it is read as, in
+    /// the order declared: what an unmatched key's error names.
+    declared: Vec<(String, String)>,
 }
 
 impl LayerMap {
@@ -277,6 +280,7 @@ impl LayerMap {
             .as_object()
             .ok_or("analyze.layers must be an object of path prefix → layer")?;
         let mut entries = Vec::with_capacity(obj.len());
+        let mut declared = Vec::with_capacity(obj.len());
         for (prefix, name) in obj {
             let name = name.as_str().unwrap_or("");
             let layer = parse_layer(name).ok_or_else(|| {
@@ -286,9 +290,10 @@ impl LayerMap {
                 )
             })?;
             entries.push((prefix.trim_matches('/').to_string(), layer));
+            declared.push((prefix.clone(), prefix.trim_matches('/').to_string()));
         }
         entries.sort_by_key(|(p, _)| std::cmp::Reverse(p.len()));
-        Ok(Self { entries })
+        Ok(Self { entries, declared })
     }
 
     /// The declared path prefixes, each one adapter when its layer is one
@@ -303,19 +308,45 @@ impl LayerMap {
     /// `crate::store::Disk` resolves to `src/store/Disk`, not `src/store.rs`,
     /// and a declaration that missed it left the import unchecked.
     pub fn classify(&self, path: &str) -> HexLayer {
-        let under = |p: &str, key: &str| {
-            p == key || p.strip_prefix(key).is_some_and(|rest| rest.starts_with('/'))
-        };
         for (prefix, layer) in &self.entries {
-            let module = [".rs", ".ts", ".tsx", ".go"]
-                .iter()
-                .find_map(|ext| prefix.strip_suffix(ext));
-            if under(path, prefix) || module.is_some_and(|m| under(path, m)) {
+            if key_covers(prefix, path) {
                 return *layer;
             }
         }
         classify_layer(path)
     }
+
+    /// One error per declared key under which none of `graded` falls, by the
+    /// rule [`Self::classify`] applies (ADR-2611221705 §1). A key holding a
+    /// glob character is told keys are prefixes, and offered the prefix before
+    /// that character (§2).
+    pub fn unmatched_keys<'a>(&self, graded: impl IntoIterator<Item = &'a str> + Clone) -> Vec<String> {
+        self.declared
+            .iter()
+            .filter(|(_, prefix)| !graded.clone().into_iter().any(|f| key_covers(prefix, f)))
+            .map(|(key, _)| {
+                let mut e = format!("analyze.layers[\"{key}\"] matches no file the grade reads");
+                if let Some(i) = key.find(['*', '?', '[']) {
+                    let stem = key[..i].trim_end_matches('/');
+                    e.push_str(&format!("; keys are path prefixes, not globs: write \"{stem}\""));
+                }
+                e
+            })
+            .collect()
+    }
+}
+
+/// Whether the layer key `prefix` covers `path`: the path itself or below it on
+/// a segment boundary, or the module a source-file key names (`src/store.rs`
+/// covers `src/store/Disk`).
+fn key_covers(prefix: &str, path: &str) -> bool {
+    let under = |p: &str, key: &str| {
+        p == key || p.strip_prefix(key).is_some_and(|rest| rest.starts_with('/'))
+    };
+    let module = [".rs", ".ts", ".tsx", ".go"]
+        .iter()
+        .find_map(|ext| prefix.strip_suffix(ext));
+    under(path, prefix) || module.is_some_and(|m| under(path, m))
 }
 
 /// Layer names as `HexLayer`'s `Display` writes them, so what a project

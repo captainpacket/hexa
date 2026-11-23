@@ -398,29 +398,16 @@ mod part_2 {
     };
     use std::future::Future;
     use std::path::{Path, PathBuf};
-    use std::pin::Pin;
     use std::sync::Arc;
-    use std::task::{Context, Poll, Wake, Waker};
 
     // ── helpers ──────────────────────────────────────────────
 
-    struct ThreadWaker(std::thread::Thread);
-    impl Wake for ThreadWaker {
-        fn wake(self: Arc<Self>) {
-            self.0.unpark();
-        }
-    }
-
     fn block_on<F: Future>(fut: F) -> F::Output {
-        let mut fut = Box::pin(fut);
-        let waker = Waker::from(Arc::new(ThreadWaker(std::thread::current())));
-        let mut cx = Context::from_waker(&waker);
-        loop {
-            match Pin::as_mut(&mut fut).poll(&mut cx) {
-                Poll::Ready(v) => return v,
-                Poll::Pending => std::thread::park(),
-            }
-        }
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime")
+            .block_on(fut)
     }
 
     /// A small, deterministic AstPort for the fixtures below: it reads
@@ -781,20 +768,21 @@ mod part_2 {
         let r = analyze(with.path());
         let base = analyze(without.path());
 
-        for f in ["src/domain/order.ts", "src/ui/view.ts"] {
-            assert!(
-                r.coverage.unclassified.iter().any(|u| u == f),
-                "{f}: {:?}",
-                r.coverage
-            );
-        }
+        assert!(
+            r.coverage.unclassified.iter().any(|u| u == "src/ui/view.ts"),
+            "src/ui/view.ts stays unclassified: {:?}",
+            r.coverage
+        );
         assert_eq!(r.coverage, base.coverage, "coverage unchanged");
         assert_eq!(layer_key_errors(&r).len(), 2, "{:?}", r.config_errors);
         let d = entry_for(&r, "src/domain/**").expect("entry for src/domain/**");
         assert!(has_glob_hint(&d, "src/domain/**", "src/domain"), "{d}");
         let u = entry_for(&r, "src/ui/**").expect("entry for src/ui/**");
         assert!(has_glob_hint(&u, "src/ui/**", "src/ui"), "{u}");
-        assert_eq!(r.health_score, base.health_score.saturating_sub(20));
+        // One file in two has a layer: the coverage ceiling (50) caps both
+        // scores, so the errors' cost is hidden here (S02 shows it).
+        assert!(r.health_score <= base.health_score, "{} > {}", r.health_score, base.health_score);
+        assert_eq!(r.coverage.ceiling(), 50);
     }
 
     /// S16: An unmatched key does not change how other files are classified

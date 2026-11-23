@@ -703,7 +703,10 @@ impl ArchAnalysisPort for ArchAnalyzer {
 
         let layers = LayerMap::from_project(root_path).map_err(AnalysisError::Other)?;
         let (adapters, adapters_error) = adapters_from_project(root_path, &layers);
-        let config_errors: Vec<String> = adapters_error.into_iter().collect();
+        let mut config_errors: Vec<String> = adapters_error.into_iter().collect();
+        // A layer key that matches no graded file is a declaration the grade
+        // would otherwise drop silently (ADR-2611221705 §1).
+        config_errors.extend(layers.unmatched_keys(file_data.iter().map(|f| f.path.as_str())));
         let violations = name_target_files(
             boundary_checker::find_violations_in(&edges, &adapters),
             &file_data,
