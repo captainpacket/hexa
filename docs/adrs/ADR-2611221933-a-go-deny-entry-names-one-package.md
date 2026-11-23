@@ -10,7 +10,7 @@
 - A Go import path names one package. `net`, `net/netip` and `net/http` are three packages; Go has no package nesting, and `net/netip` shares nothing with `net` but the start of its path.
 - `judge` (`hexa-analysis/src/import_policy.rs`) checks `deny` first, then lets the standard library through, then checks `allow`. Each check uses `covers`, which is true for the path itself and for any path below it on a `/` boundary. Below-the-path matching is right for Rust (`std::fs` covers `std::fs::File`, an item of that module) and for TypeScript (`node:fs` covers `node:fs/promises`). For Go it makes one entry deny every package whose path starts with it.
 - The scaffolded rules file (`hexa-cli/assets/templates/ADR-rules.toml`) denies, for Go, `os`, `net`, `http`, `net/http`, `database/sql`, `os/exec`, `io/ioutil` and `plugin`. By prefix, these also deny I/O packages the list does not name: `os/signal`, `os/user`, `net/http/httptest`, `net/http/httputil`, `net/http/pprof`, `net/rpc`, `net/rpc/jsonrpc`, `net/smtp`, and pure ones: `net/netip`, `net/url`, `net/mail`, `net/textproto`.
-- The rule is `judge(lang, raw, origin, allow, deny) -> Verdict` in `hexa-analysis/src/import_policy.rs`, with `Origin` and `Verdict` there; its signature does not change.
+- The rule is `pub fn judge(lang: Language, raw: &str, origin: Origin, allow: &[String], deny: &[String]) -> Verdict` in `hexa-analysis/src/import_policy.rs` (`hexa_analysis::import_policy`), with `Origin` and `Verdict` there; `Language` is `hexa_analysis::domain::Language` (`hexa-analysis/src/domain.rs`). The signature does not change.
 
 ## Decision
 
