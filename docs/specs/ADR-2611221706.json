@@ -10,6 +10,9 @@
     "by": "craigjohnson",
     "sha256": "10aafe44518d5326a62cc646ac76175be9e825d29b89e5c811b6753513ddf791"
   },
+  "sealed": {
+    "hexa-analysis/tests/adr_2611221706_spec.rs": "a99c5b4be703b6a71ffce8737dfb99f806d29a249d9e9a7ca1e9dc4539b11c5f"
+  },
   "red": "4a0354c",
   "specs": [
     {
@@ -208,6 +211,17 @@
       "then": "coverage.unclassified is the same for P and P'; coverage.total is the same; dead_exports for P' equals dead_exports for P minus exactly the entries whose exports T imports by name",
       "test": "hexa-analysis/tests/adr_2611221706_spec.rs::part_2::s17_adding_a_tsx_test_changes_nothing_about_the_other_files",
       "red": "4a0354c"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-23T00:35:35.428769+00:00",
+      "base_commit": "4a0354c2ed878d9a9ebe5132761fd7c5c24d7659",
+      "by": "Claude Code agent (spec re-accepted by craigjohnson)",
+      "file": "hexa-analysis/tests/adr_2611221706_spec.rs",
+      "from": "2f5fdd1f7949888ba78e677617b7d122063668e99af988a36cfbe9bd55da4e53",
+      "reason": "S14 follows the re-accepted spec: the grade reads no .jsx file, so Widget.test.jsx counts in nothing, before this ADR and after; the drafted S14 claimed it was graded, which was never true",
+      "to": "a99c5b4be703b6a71ffce8737dfb99f806d29a249d9e9a7ca1e9dc4539b11c5f"
     }
   ]
 }
