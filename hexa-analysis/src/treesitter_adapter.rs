@@ -199,7 +199,7 @@ fn python_comment_tagged(root: &tree_sitter::Node, lines: &[&str], row: usize) -
             return false;
         }
         let at = tree_sitter::Point { row: r, column: col };
-        if root.descendant_for_point_range(at, at).map_or(true, |n| n.kind() != "comment") {
+        if root.descendant_for_point_range(at, at).is_none_or(|n| n.kind() != "comment") {
             return false;
         }
         if line.contains("@hexa:public") {
