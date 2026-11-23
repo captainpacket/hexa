@@ -13,7 +13,7 @@
     "sha256": "95459d0b22a60198b7126812736dca335cf2aec6473407df7ea4a29ee0b9cd6f"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611230850_spec.rs": "f724e84d69e21643c854f2734c973b77c675a4f62098ced69e38be2852c3c40d"
+    "hexa-cli/tests/adr_2611230850_spec.rs": "1b18646333d6cc2596b70faf516c96bfce522d9af67620f9885d9e52e5971538"
   },
   "red": "4cc5963",
   "specs": [
@@ -315,6 +315,17 @@
       "when": "the scaffold runs for that language",
       "then": "the written paths and bytes equal what the scaffold wrote for that name and language before this ADR",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_3::s25_other_scaffolds_unchanged"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-23T15:18:40.739745973+00:00",
+      "base_commit": "4cc5963362456db61d19e8f0235bd1cde781b5f1",
+      "by": "Claude Code agent",
+      "file": "hexa-cli/tests/adr_2611230850_spec.rs",
+      "from": "f724e84d69e21643c854f2734c973b77c675a4f62098ced69e38be2852c3c40d",
+      "reason": "Fixture defects only, no assertion changed: S18 and S20 looked for each file's layer in hexa analyze --json, which names a file's layer only on a violation edge, so a clean scaffold showed none; they now ask the grade's own classifier (LayerMap::classify). S23 and S24 ran hexa scaffold without the description and --target it requires: S23 uses hexa init --scaffold (offline, the same --lang default), and S24 gives hexa scaffold its arguments, which refuses an unknown language before writing anything or calling a model. 23 fail without the fix, 24 pass with it",
+      "to": "1b18646333d6cc2596b70faf516c96bfce522d9af67620f9885d9e52e5971538"
     }
   ]
 }
