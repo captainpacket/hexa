@@ -540,6 +540,8 @@ pub const SCAFFOLD_LANGS: &[(&str, &str)] = &[
     ("rust", "cargo test"),
     ("go", "go test ./..."),
     ("ts", "npm install && npm test"),
+    // The standard library's runner: no install, no network (ADR-2611230850 §2).
+    ("python", "python3 -m unittest discover -s tests -t ."),
 ];
 
 /// The gate command for a language, or `None` if it is not one we emit.
@@ -591,6 +593,10 @@ fn scaffold_files(target: &Path, lang: &str, project_name: &str) -> Result<Vec<P
         // `.tmpl` marks a file whose *name* would otherwise be picked up by a
         // build tool sitting in the assets tree. The suffix is dropped here.
         let rel = rel.strip_suffix(".tmpl").unwrap_or(rel);
+        // A path is rendered as contents are, so a Python package directory
+        // can carry the project's name (ADR-2611230850 §3).
+        let rel = vars.render(rel);
+        let rel = rel.as_str();
         found += 1;
         let dest = target.join(rel);
         if dest.exists() {

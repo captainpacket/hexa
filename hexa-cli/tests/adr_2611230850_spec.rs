@@ -537,6 +537,29 @@ mod part_2 {
         }
     }
 
+    /// The layer the grade's classifier gives the file under `root` whose path
+    /// ends with `suffix` (`hexa analyze --json` names a file's layer only on a
+    /// violation edge, and a clean scaffold has none).
+    fn layer_in(root: &Path, suffix: &str) -> Option<String> {
+        fn walk(d: &Path, root: &Path, out: &mut Vec<String>) {
+            for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    if p.file_name().is_some_and(|n| n != ".git") {
+                        walk(&p, root, out);
+                    }
+                } else if let Ok(r) = p.strip_prefix(root) {
+                    out.push(r.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(root, root, &mut files);
+        let rel = files.into_iter().find(|f| f == suffix || f.ends_with(&format!("/{suffix}")))?;
+        let map = hexa_analysis::layer_classifier::LayerMap::from_project(root).ok()?;
+        Some(map.classify(&rel).to_string())
+    }
+
     fn is_layer(found: &str, expected: HexLayer) -> bool {
         serde_json::from_value::<HexLayer>(Value::String(found.to_string())).ok() == Some(expected)
             || found == expected.to_string()
@@ -745,7 +768,7 @@ mod part_2 {
         for key in ["violations", "circular_deps", "config_errors"] {
             assert!(empty_array(result, key), "{key} not empty: {}", result[key]);
         }
-        let layer = find_layer(&json, "composition_root.py")
+        let layer = layer_in(&dir, "composition_root.py")
             .unwrap_or_else(|| panic!("no layer for composition_root.py in {json}"));
         assert!(
             is_layer(&layer, HexLayer::CompositionRoot),
@@ -797,7 +820,7 @@ mod part_2 {
             ("composition_root.py", HexLayer::CompositionRoot),
         ] {
             let layer =
-                find_layer(&json, file).unwrap_or_else(|| panic!("no layer for {file} in {json}"));
+                layer_in(&dir, file).unwrap_or_else(|| panic!("no layer for {file} in {json}"));
             assert!(!is_layer(&layer, HexLayer::Unknown), "{file} is unknown");
             assert!(
                 is_layer(&layer, expected),
@@ -1003,7 +1026,9 @@ mod part_3 {
         let dir = tmp.path().join("demo");
         std::fs::create_dir(&dir).unwrap();
         let mut c = hexa();
-        c.current_dir(&dir).arg("scaffold");
+        // `hexa init --scaffold` takes `--lang` offline; `hexa scaffold` also
+        // needs a description, `--target` and a model call.
+        c.current_dir(&dir).args(["init", "--scaffold", "."]);
         let o = run(c);
         assert!(o.status.success(), "hexa scaffold failed:\n{}", text(&o));
 
@@ -1034,7 +1059,9 @@ mod part_3 {
         let dir = tmp.path().join("demo");
         std::fs::create_dir(&dir).unwrap();
         let mut c = hexa();
-        c.current_dir(&dir).args(["scaffold", "--lang", "cobol"]);
+        // `hexa scaffold` checks the language before it writes anything or
+        // calls a model; it needs a description and `--target`.
+        c.current_dir(&dir).args(["scaffold", "a counter", "--target", ".", "--lang", "cobol"]);
         let o = run(c);
         let msg = text(&o);
         assert!(!o.status.success(), "`--lang cobol` was accepted:\n{msg}");
