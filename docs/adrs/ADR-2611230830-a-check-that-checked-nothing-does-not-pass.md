@@ -1,6 +1,7 @@
 # ADR-2611230830: A `--ci` check that checked nothing does not pass
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-23 Accepted: Accepted in craigjohnson's session: a bug fix under his rule (no architectural change); he accepted the spec, and its sealed tests pass on main
 **Date:** 2026-11-23
 **Drivers:** A project designing its release gate around `hexa adr gates --ci` and `hexa spec verify --ci` asked what either does when there is nothing to check. Both exit 0: in a repository whose `docs/adrs/` holds no ADR, `hexa adr gates --ci` prints `0 passed · 0 failed · …` and `hexa spec verify --ci` prints `0 passed · 0 failed · 0 not proven here · 0 pending`. A release job gated on them passes having run nothing. CLAUDE.md: "A vacuous gate is a failed gate. `evidence_is_vacuous` rejects 'running 0 tests'; every new gate shape needs the same guard." These two never got it.
 **Supersedes:** none. Applies the vacuous-gate rule to the two `--ci` runs that lacked it.
