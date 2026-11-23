@@ -184,6 +184,17 @@ fn nearest(root: &Path, file: &Path, marker: &str) -> Option<PathBuf> {
     }
 }
 
+/// `p` relative to `base`, through `..` where `p` is not below it: both are
+/// paths in one repository, so they share its root.
+fn pathdiff(p: &Path, base: &Path) -> String {
+    let p: Vec<_> = p.components().collect();
+    let b: Vec<_> = base.components().collect();
+    let common = p.iter().zip(b.iter()).take_while(|(x, y)| x == y).count();
+    let mut out: Vec<String> = std::iter::repeat_n("..".to_string(), b.len() - common).collect();
+    out.extend(p[common..].iter().map(|c| c.as_os_str().to_string_lossy().to_string()));
+    out.join("/")
+}
+
 fn rel(root: &Path, p: &Path) -> String {
     p.strip_prefix(root).map(|r| r.to_string_lossy().to_string()).unwrap_or_else(|_| p.display().to_string())
 }
@@ -267,14 +278,24 @@ pub fn plan_test(root: &Path, r: &str, cfg: &TestConfig, prefix: &str) -> Result
             let from = dir.join("_");
             let python = if nearest(root, &from, "uv.lock").is_some() {
                 "uv run python".to_string()
-            } else if let Some(v) = [".venv/bin/python", "venv/bin/python"]
-                .iter()
-                .filter_map(|m| nearest(root, &from, m).map(|d| d.join(m)))
-                .max_by_key(|p| p.components().count())
-            {
-                // Quoted only when the shell needs it, so a plain path reads
-                // as the command a person would type.
-                let v = v.to_string_lossy().to_string();
+            } else if let Some(v) = {
+                // The nearest interpreter wins; at the same depth `.venv` wins
+                // over `venv`, as ADR-2611230832 §2 lists them.
+                let mut found: Option<(usize, PathBuf)> = None;
+                for m in [".venv/bin/python", "venv/bin/python"] {
+                    if let Some(d) = nearest(root, &from, m) {
+                        let depth = d.components().count();
+                        if found.as_ref().is_none_or(|(best, _)| depth > *best) {
+                            found = Some((depth, d.join(m)));
+                        }
+                    }
+                }
+                found.map(|(_, p)| p)
+            } {
+                // Relative to the directory pytest runs from (the command
+                // `cd`s there), so the plan names no path of this machine and
+                // runs the same under test.remote.
+                let v = pathdiff(&v, &dir);
                 if v.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c)) { v } else { shell_quote(&v) }
             } else {
                 "python3".to_string()
