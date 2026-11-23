@@ -108,6 +108,12 @@ mod part_1 {
         }
 
         fn accept(&self) -> String {
+            // `spec accept` reads the drafted spec before it looks for a test
+            // home, so the spec is drafted first, as a person accepts one.
+            self.write(
+                &format!("docs/specs/{ADR_ID}.json"),
+                &format!(r#"{{"adr":"{ADR_ID}","feature":"demo","specs":[]}}"#),
+            );
             self.run(&["spec", "accept", ADR_ID, "--by", "tester"])
         }
     }
@@ -325,6 +331,17 @@ mod part_2 {
 
     /// Run `hexa` in `root` with a timeout; returns the combined output.
     fn run(root: &Path, args: &[&str]) -> (Option<i32>, String) {
+        // `spec accept` reads the drafted spec before it looks for a test
+        // home, so a drafted spec is there first, as a person accepts one.
+        if args.get(1) == Some(&"accept") {
+            let specs = root.join("docs/specs");
+            fs::create_dir_all(&specs).unwrap();
+            fs::write(
+                specs.join(format!("{ADR_ID}.json")),
+                format!(r#"{{"adr":"{ADR_ID}","feature":"demo","specs":[]}}"#),
+            )
+            .unwrap();
+        }
         let out_path = root
             .join("home")
             .join(format!("out-{}.txt", uuid::Uuid::new_v4()));

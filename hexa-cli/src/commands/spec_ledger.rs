@@ -277,19 +277,24 @@ pub fn check(adr: Option<&str>) -> anyhow::Result<()> {
 }
 
 /// A spec is drafted and accepted only where a test could be bound to it:
-/// a Cargo.toml (generated Rust tests), a package.json (vitest), or a
-/// configured runner (ADR-2611191120 §9). Said before a paid `spec draft`.
+/// a Cargo.toml (generated Rust tests), a package.json (vitest), a Python
+/// manifest (the built-in pytest runner, ADR-2611221935 §1), or a configured
+/// runner (ADR-2611191120 §9). Said before a paid `spec draft`.
 fn require_a_rust_project(root: &Path, id: &str, verb: &str) -> anyhow::Result<()> {
     if root.join("Cargo.toml").is_file() || root.join("package.json").is_file() {
+        return Ok(());
+    }
+    if ["pyproject.toml", "setup.py", "setup.cfg"].iter().any(|m| root.join(m).is_file()) {
         return Ok(());
     }
     if test_config(root).is_ok_and(|c| !c.runners.is_empty()) {
         return Ok(());
     }
     anyhow::bail!(
-        "{id}: {verb} refused: no Cargo.toml, package.json or test.runners at {}. `hexa spec tests` generates Rust tests only; \
+        "{id}: {verb} refused: no Cargo.toml, package.json, Python manifest (pyproject.toml, setup.py or setup.cfg) or test.runners at {}. \
+         `hexa spec tests` generates Rust tests only; \
          a test in another language is written by hand and bound with `hexa spec red <ADR> <commit> --test <S>=<file>::<name>`, \
-         which needs a runner for its file: vitest under a package.json, bash for .sh, or one in test.runners in .hexa/project.json",
+         which needs a runner for its file: vitest under a package.json, pytest for .py, bash for .sh, or one in test.runners in .hexa/project.json",
         root.display()
     )
 }
