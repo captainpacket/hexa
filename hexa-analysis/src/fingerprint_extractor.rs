@@ -509,15 +509,17 @@ fn infer_output_type(objective: &str, language: &str, framework: &str, root: &Pa
     {
         return "cli".to_string();
     }
-    if lower.contains("api") || lower.contains("server") || lower.contains("rest")
-        || lower.contains("http") || lower.contains("endpoint")
-    {
-        return "web-api".to_string();
-    }
+    // A library word outranks an API word: "an SDK for the X API" is a
+    // library, not a web API (ADR-2611230831 §3).
     if lower.contains("library") || lower.contains("crate") || lower.contains("package")
         || lower.contains("sdk") || lower.contains("framework")
     {
         return "library".to_string();
+    }
+    if lower.contains("api") || lower.contains("server") || lower.contains("rest")
+        || lower.contains("http") || lower.contains("endpoint")
+    {
+        return "web-api".to_string();
     }
 
     // Go binaries default to CLI unless framework says otherwise

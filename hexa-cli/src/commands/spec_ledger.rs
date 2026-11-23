@@ -535,7 +535,12 @@ pub async fn draft(adr: &str, model: Option<&str>, force: bool) -> anyhow::Resul
     for f in &d.findings {
         println!("  {} {}", "\u{2717}".red(), f.message());
     }
-    println!("\n  Read every scenario. It is what \"correct\" will mean. Then `hexa spec accept {}`.", a.id);
+    // `spec accept` refuses an uncommitted first acceptance (ADR-2611161600
+    // §1), so the instruction says to commit first (ADR-2611230831 §2).
+    println!(
+        "\n  Read every scenario in {}/{}.json. It is what \"correct\" will mean. Commit it, then `hexa spec accept {}`.",
+        SPECS, a.id, a.id
+    );
     Ok(())
 }
 

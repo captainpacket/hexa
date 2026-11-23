@@ -306,6 +306,38 @@ The `greet` command prints a greeting.\n\n\
             std::fs::create_dir_all(&adr_dir).unwrap();
             std::fs::write(adr_dir.join(format!("{ADR_ID}-greeting.md")), ADR_TEXT).unwrap();
             std::fs::write(r.root.path().join("README.md"), "# sample\n").unwrap();
+            // `spec draft` needs a test home (ADR-2611191120 §9).
+            std::fs::write(
+                r.root.path().join("Cargo.toml"),
+                "[package]\nname = \"sample\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            )
+            .unwrap();
+            // A fake `claude` on PATH, as other spec draft tests use: the
+            // draft is a model call, and a test must not depend on one.
+            let bin = r.cfg_dir.path().join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let scenarios = serde_json::json!([
+                {"id":"S01","decision":["§1"],"kind":"example","description":"greet says hello","given":"the name Ada","when":"greet Ada runs","then":"it prints Hello, Ada! and exits 0"},
+                {"id":"S02","decision":["§1"],"kind":"negative","description":"no other greeting","given":"the name Ada","when":"greet Ada runs","then":"it prints nothing else"},
+                {"id":"S03","decision":["§2"],"kind":"example","description":"an empty name is refused","given":"an empty name","when":"greet runs","then":"it prints an error and exits 2"},
+                {"id":"S04","decision":["§2"],"kind":"negative","description":"an empty name does not greet","given":"an empty name","when":"greet runs","then":"it prints no greeting"}
+            ]);
+            let envelope = serde_json::json!({
+                "type":"result","subtype":"success","is_error":false,
+                "result": scenarios.to_string(),
+                "usage":{"input_tokens":1,"output_tokens":1,"cache_read_input_tokens":0},
+                "total_cost_usd":0.0001
+            });
+            std::fs::write(r.cfg_dir.path().join("reply.json"), envelope.to_string()).unwrap();
+            let stub = format!(
+                "#!/bin/sh\ncase \" $* \" in *\" --version \"*) echo \"2.1.0 (Claude Code)\"; exit 0;; esac\ncat > /dev/null\ncat '{}'\n",
+                r.cfg_dir.path().join("reply.json").display()
+            );
+            std::fs::write(bin.join("claude"), stub).unwrap();
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(bin.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
             assert!(r.git(&["add", "-A"]).0);
             let (ok, out) = r.git(&["commit", "-q", "-m", "initial"]);
             assert!(ok, "initial commit failed: {out}");
@@ -313,7 +345,14 @@ The `greet` command prints a greeting.\n\n\
         }
 
         fn apply_env(&self, cmd: &mut Command) {
+            let path = format!(
+                "{}:{}",
+                self.cfg_dir.path().join("bin").display(),
+                std::env::var("PATH").unwrap_or_default()
+            );
             cmd.current_dir(self.root.path())
+                .env("PATH", path)
+                .env("HOME", self.cfg_dir.path())
                 .env("GIT_CONFIG_GLOBAL", &self.global_cfg)
                 .env("GIT_CONFIG_NOSYSTEM", "1")
                 .env_remove("GIT_DIR")
@@ -349,7 +388,7 @@ The `greet` command prints a greeting.\n\n\
         }
 
         fn draft(&self) -> (String, String) {
-            let (ok, out) = self.hexa(&["spec", "draft", ADR_ID]);
+            let (ok, out) = self.hexa(&["spec", "draft", ADR_ID, "--model", "claude-text"]);
             assert!(ok, "`hexa spec draft {ADR_ID}` failed:\n{out}");
             let changed = self.changed_paths();
             let spec = changed
@@ -550,7 +589,7 @@ mod part_2 {
         let wp_path = wp_dir.path().join("workplan.json");
         let wp = serde_json::json!({
             "id": "wp-test",
-            "objective": objective,
+            "description": objective,
             "title": "test workplan",
             "status": "active",
             "phases": [],
@@ -1097,7 +1136,9 @@ mod part_3 {
     #[test]
     fn s26_failing_commands_keep_exit_status() {
         let tmp = tempfile::tempdir().unwrap();
-        let args = ["spec", "show", "ADR-0001010000"];
+        // `spec show` of a missing ADR exits 0 today; `spec verify` of one
+        // fails, which is the failing command this scenario needs.
+        let args = ["spec", "verify", "ADR-0001010000"];
         let (piped_status, _out, piped_err) = run_fully_read(&args, tmp.path());
         let out_file = tmp.path().join("show.out");
         let (file_status, file_err) = run_to_file(&args, tmp.path(), &out_file);
@@ -1107,7 +1148,7 @@ mod part_3 {
         let code = piped_status
             .code()
             .expect("a failing command should exit with a status, not a signal");
-        assert_ne!(code, 0, "spec show of a missing ADR should fail");
+        assert_ne!(code, 0, "spec verify of a missing ADR should fail");
         assert_eq!(Some(code), file_status.code());
     }
 
@@ -1119,7 +1160,7 @@ mod part_3 {
         let body = serde_json::json!({
             "id": "wp-test",
             "title": objective,
-            "objective": objective,
+            "description": objective,
             "phases": [],
             "steps": []
         });
