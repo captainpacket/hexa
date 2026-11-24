@@ -2,6 +2,10 @@
   "adr": "ADR-2611231735",
   "feature": "Codex agent backend",
   "description": "hexa runs Codex as an agent backend through a new inference adapter and configuration",
+  "accepted": {
+    "by": "craigjohnson",
+    "sha256": "1f60d51562220ed4e4aa88b5af95c240def4c9fe6a15d2387e884301ae8fccd9"
+  },
   "specs": [
     {
       "id": "S01",
