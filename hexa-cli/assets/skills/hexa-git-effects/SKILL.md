@@ -111,6 +111,10 @@ Run it only in a clean checkout no one else is using. A worktree is best.
   - With `--fast-gate`, fixes are batched. A failing batch is bisected with
     `git reset --keep` and cherry-pick from the batch's base. **A commit made
     by anyone else since that base, and not part of the batch, is dropped.**
+- **Under `test.remote`** (unless `--local`) every gate run pushes a scratch
+  candidate commit of the tree to `refs/heads/hexa-gate/<id>` on the branch's
+  remote and deletes it after the run. Untracked files that were in the tree
+  before the pass are left out of it. The branch itself is not pushed.
 - **Recover:** find HEAD from before the run in `git reflog` and cherry-pick
   what was lost. Fixes that were set aside or dropped are listed in the run's
   report with their SHAs. A reverted uncommitted edit cannot be recovered.

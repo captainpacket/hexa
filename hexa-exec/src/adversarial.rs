@@ -115,11 +115,38 @@ fn tail_of(output: &str) -> String {
 /// Run `gate` in `repo_root` and keep what it said. A run that passed having
 /// run no tests did not pass, unless the gate is declared `uncounted`
 /// (ADR-2611160730 §5).
-async fn run_gate(label: &str, gate: &str, repo_root: &Path, uncounted: bool) -> GateRun {
+async fn run_gate(label: &str, gate: &str, repo_root: &Path, uncounted: bool, g: &Gating) -> GateRun {
     let started = std::time::Instant::now();
-    let (exit_ok, mut output) = crate::direct_exec::run_evidence(gate, repo_root).await;
-    let passed = gate_passes(exit_ok, &mut output, uncounted);
+    let (passed, output) = match g.exec(gate, repo_root).await {
+        Ok((exit_ok, mut output)) => (gate_passes(exit_ok, &mut output, uncounted), output),
+        // A runner failure is never a pass (ADR-2611240900 §1).
+        Err(why) => (false, why),
+    };
     GateRun { label: label.to_string(), passed, secs: started.elapsed().as_secs(), tail: tail_of(&output) }
+}
+
+/// Where a pass's gates run, as the pass sees it (ADR-2611240900 §1): here,
+/// or on the remote runner for a scratch candidate of the tree, leaving out
+/// the untracked files that were the operator's before the pass began.
+#[derive(Debug, Clone, Default)]
+struct Gating {
+    remote: Option<String>,
+    leave_out: std::collections::BTreeSet<String>,
+}
+
+impl Gating {
+    /// Run `cmd` for the tree as it stands. `Err` is a runner failure: it
+    /// proved nothing, and is never read as a pass or as red.
+    async fn exec(&self, cmd: &str, repo_root: &Path) -> Result<(bool, String), String> {
+        match &self.remote {
+            None => Ok(crate::direct_exec::run_evidence(cmd, repo_root).await),
+            Some(template) => {
+                let (ok, out, candidate) = crate::test_exec::run_tree_remote(repo_root, template, cmd, &self.leave_out).await?;
+                let short: String = candidate.chars().take(12).collect();
+                Ok((ok, format!("{out}\n(gated on the remote runner: candidate {short}, test.remote)")))
+            }
+        }
+    }
 }
 
 /// Outcome of a review run.
@@ -1335,6 +1362,7 @@ async fn red_first(
     after: &Snapshot,
     gate: &str,
     fast_gate: Option<&str>,
+    g: &Gating,
 ) -> Result<(), String> {
     let tests: Vec<String> =
         touched.iter().filter(|p| is_test_path(p) && matches!(after.get(*p), Some(Some(_)))).cloned().collect();
@@ -1359,10 +1387,14 @@ async fn red_first(
         Some(f) => crate::direct_exec::substitute_touched(f, &tests),
         None => gate.to_string(),
     };
-    let (passed, _) = crate::direct_exec::run_evidence(&cmd, repo_root).await;
+    let ran = g.exec(&cmd, repo_root).await;
     for p in &code {
         put_bytes(&repo_root.join(p), agent_bytes(p).as_deref());
     }
+    let passed = match ran {
+        Ok((passed, _)) => passed,
+        Err(why) => return Err(format!("{}: so its test was not shown to fail without the fix", first_line(&why))),
+    };
     if passed {
         Err(format!("its test ({}) passes without the fix", tests.join(", ")))
     } else {
@@ -1560,8 +1592,7 @@ pub async fn run_review_gated_at(
     repo_root: &Path,
     reporter: Reporter,
 ) -> ReviewReport {
-    let _ = at;
-    review(frontier, Some(history), target, gates, repo_root, reporter).await
+    review_at(frontier, Some(history), target, gates, at, repo_root, reporter).await
 }
 
 /// The pipeline both entry points share. `history` is needed only with a
@@ -1571,6 +1602,18 @@ async fn review(
     history: Option<Arc<dyn GitHistory>>,
     target: &str,
     gates: &HardenGates,
+    repo_root: &Path,
+    reporter: Reporter,
+) -> ReviewReport {
+    review_at(frontier, history, target, gates, GateAt::Here, repo_root, reporter).await
+}
+
+async fn review_at(
+    frontier: Arc<dyn Frontier>,
+    history: Option<Arc<dyn GitHistory>>,
+    target: &str,
+    gates: &HardenGates,
+    at: GateAt,
     repo_root: &Path,
     reporter: Reporter,
 ) -> ReviewReport {
@@ -1602,6 +1645,24 @@ async fn review(
     // that touches any of these is left in the tree for review, never
     // committed over the operator's work.
     let dirty_before: std::collections::BTreeSet<String> = changed_files(repo_root).await.into_keys().collect();
+    // Where the gates run (ADR-2611240900 §1). The operator's untracked files
+    // are never pushed to the runner.
+    let g = Gating {
+        remote: match &at {
+            GateAt::Here => None,
+            GateAt::Remote(t) => Some(t.clone()),
+        },
+        leave_out: dirty_before.clone(),
+    };
+    if g.remote.is_some() && crate::test_exec::scratch_remote(repo_root).is_none() {
+        let why = "harden gates on the remote runner (test.remote), and this repository has no remote to push its candidates to: \
+                   `git remote add origin <url>`, or run here with --local"
+            .to_string();
+        reporter(Progress { phase: "refused", message: why.clone(), elapsed: Duration::ZERO });
+        report.notes.push(why.clone());
+        report.stopped = Some(why);
+        return report;
+    }
 
     // ── Phase 0: the gate on the tree as it is (ADR-2611151645 §1 to §3) ────
     // A gate that is red before the pass starts cannot judge a fix, and finding
@@ -1609,13 +1670,13 @@ async fn review(
     // pass spent. Red once is run again: a flake is not a red tree.
     if gates.baseline {
         let base = Phase::start(&reporter, "baseline", format!("the gate on the tree as it is: {gate}"), HEARTBEAT);
-        let first = run_gate("baseline", gate, repo_root, uncounted).await;
+        let first = run_gate("baseline", gate, repo_root, uncounted, &g).await;
         report.gate_runs.push(first.clone());
         if first.passed {
             base.finish("passed");
         } else {
             base.note(format!("gate FAILED, running it once more: {}", first.shown()));
-            let second = run_gate("baseline", gate, repo_root, uncounted).await;
+            let second = run_gate("baseline", gate, repo_root, uncounted, &g).await;
             report.gate_runs.push(second.clone());
             if second.passed {
                 report.flakes.push("baseline: the gate failed, then passed on its second run".to_string());
@@ -1785,6 +1846,7 @@ async fn review(
             branch: branch.clone(),
             uncounted,
             stopped: None,
+            gating: g.clone(),
         }),
         _ => None,
     };
@@ -1890,7 +1952,7 @@ async fn review(
                     continue;
                 }
                 fix.note(format!("gate after fix: {gate}"));
-                let run = run_gate(&f.title, gate, repo_root, uncounted).await;
+                let run = run_gate(&f.title, gate, repo_root, uncounted, &g).await;
                 let passed = run.passed;
                 report.gate_runs.push(run.clone());
                 if passed {
@@ -1911,7 +1973,7 @@ async fn review(
                         continue;
                     }
                     // Red first (§5): the new test must fail without the fix.
-                    let red = red_first(repo_root, &touched, &before, &after, gate, None).await;
+                    let red = red_first(repo_root, &touched, &before, &after, gate, None, &g).await;
                     let mut scratch = Vec::new();
                     if commit_result(
                         repo_root,
@@ -1943,7 +2005,7 @@ async fn review(
                     ));
                     failed_in_a_row += 1;
                     if failed_in_a_row >= 2 {
-                        let check = run_gate("without any fix", gate, repo_root, uncounted).await;
+                        let check = run_gate("without any fix", gate, repo_root, uncounted, &g).await;
                         report.gate_runs.push(check.clone());
                         if check.passed {
                             fix.note("the gate is green without those fixes: they failed on their own");
@@ -1998,7 +2060,7 @@ async fn review(
         }
     }
     let final_gate = Phase::start(&reporter, "gate", format!("running: {gate}"), HEARTBEAT);
-    let run = run_gate("final", gate, repo_root, uncounted).await;
+    let run = run_gate("final", gate, repo_root, uncounted, &g).await;
     let passed = run.passed;
     report.gate_runs.push(run);
     if batching.is_some() {
@@ -2107,13 +2169,17 @@ struct Batching<'a> {
     /// Why the pass must stop: a reset would have dropped a commit hexa did
     /// not make (ADR-2611160730 §1). Set, nothing more is reset or picked.
     stopped: Option<String>,
+    /// Where the gates run (ADR-2611240900 §1).
+    gating: Gating,
 }
 
 impl Batching<'_> {
     /// One full-gate run, counted; a pass records the tree it passed on.
     async fn full_gate(&mut self, report: &mut ReviewReport) -> (bool, String) {
-        let (exit_ok, mut out) = crate::direct_exec::run_evidence(self.gate, self.repo_root).await;
-        let passed = gate_passes(exit_ok, &mut out, self.uncounted);
+        let (passed, out) = match self.gating.exec(self.gate, self.repo_root).await {
+            Ok((exit_ok, mut out)) => (gate_passes(exit_ok, &mut out, self.uncounted), out),
+            Err(why) => (false, why),
+        };
         report.full_gates += 1;
         if passed {
             self.last_green = head(self.repo_root).await;
@@ -2126,7 +2192,10 @@ impl Batching<'_> {
     /// the second value says so (§2).
     async fn fast_gate(&self, touched: &[String]) -> (bool, bool) {
         let cmd = crate::direct_exec::substitute_touched(self.fast_gate, touched);
-        let (passed, out) = crate::direct_exec::run_evidence(&cmd, self.repo_root).await;
+        let (passed, out) = match self.gating.exec(&cmd, self.repo_root).await {
+            Ok(r) => r,
+            Err(why) => (false, why),
+        };
         // harden is not among ADR-2611081151 §5's consumers: only zero tests
         // turns a pass here into a fail, read by the one reader.
         let vacuous = passed
@@ -2226,7 +2295,7 @@ impl Batching<'_> {
                 return;
             }
             // Red first, under the fast gate only (ADR-2611160730 §5).
-            let red = red_first(self.repo_root, touched, before, after, self.gate, Some(self.fast_gate)).await;
+            let red = red_first(self.repo_root, touched, before, after, self.gate, Some(self.fast_gate), &self.gating).await;
             let mut scratch = Vec::new();
             if commit_result(self.repo_root, touched, &subject, "hexa-harden", &["Hexa-Gate: fast"], &mut scratch).await {
                 fix.note(format!("committed: {}", f.title));

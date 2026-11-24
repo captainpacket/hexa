@@ -169,15 +169,34 @@ pub const ON_RUNNER_ENV: &str = "HEXA_ON_RUNNER";
 /// [`batch_script`] for `commit`: each command also sees [`ON_RUNNER_ENV`] set
 /// to `commit` (ADR-2611240900 §3).
 pub fn batch_script_for(tag: &str, commit: &str, cmds: &[String]) -> String {
-    let _ = commit;
-    batch_script(tag, cmds)
+    format!("export {ON_RUNNER_ENV}={}\n{}", shell_quote(commit), batch_script(tag, cmds))
 }
 
 /// Whether this process runs on the remote runner (ADR-2611240900 §3):
 /// `marker` is [`ON_RUNNER_ENV`]'s value, `head` the checkout's HEAD.
 pub fn on_runner(marker: Option<&str>, head: Option<&str>) -> Result<bool, String> {
-    let _ = (marker, head);
-    Ok(false)
+    let Some(marker) = marker.map(str::trim).filter(|m| !m.is_empty()) else { return Ok(false) };
+    if !is_full_commit(marker) {
+        return Err(format!(
+            "{ON_RUNNER_ENV}={marker} is not a full commit id (40 hex characters): it names the commit a remote runner \
+             checked out, so a hexa verb there runs its tests in place. Unset it, or set it to `$(git rev-parse HEAD)` \
+             in the runner's checkout"
+        ));
+    }
+    let Some(head) = head.filter(|h| !h.is_empty()) else {
+        return Err(format!(
+            "{ON_RUNNER_ENV} is set to {marker}, but this checkout has no HEAD commit to compare it with: \
+             run the verb in the runner's checkout of {marker}, or unset {ON_RUNNER_ENV}"
+        ));
+    };
+    if head != marker {
+        return Err(format!(
+            "{ON_RUNNER_ENV} names {marker}, but this checkout's HEAD is {head}: the runner checked out another commit \
+             than the one it was sent, so nothing runs. Check that the runner checks out the commit it is given, \
+             or unset {ON_RUNNER_ENV} if this is not the runner's checkout"
+        ));
+    }
+    Ok(true)
 }
 
 /// Each command's (exit 0, output) from a batch run's output, in order. `Err`
