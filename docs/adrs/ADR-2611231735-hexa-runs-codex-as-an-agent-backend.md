@@ -19,10 +19,10 @@
 4. **The model id is passed through.** A registered model other than the bare id `codex` is passed as `-m <model>`; the bare id `codex` passes no `-m`, so Codex's own default model is used, as `claude-code` passes no `--model`.
 5. **A Codex-served model is an agent, never a completion.** `served_by_frontier_cli_in` in `hexa-infer/src/wiring.rs` and `completion_path_open` in `hexa-cli/src/commands/spec_ledger.rs` treat provider `codex` as they treat `claude-code`: `hexa spec tests` and `hexa spec draft` refuse it, with the same message naming the rule (ADR-2610221540 §2).
 6. **`hexa inference add codex` registers it.** It runs `codex login status`, refuses with the command to run when not logged in, and writes an endpoint with provider `codex` and no URL and no key reference. `hexa inference test` reports it reachable when `codex --version` exits 0.
-7. **Out of scope: delegating the whole do-loop to Codex.** `hexa-exec/src/frontier.rs` still delegates a task to `claude` alone. Decided here so that nobody reads §1 as covering it; it is a later ADR.
 
 ## Consequences
 
+- Not decided here: delegating the whole do-loop to Codex. `hexa-exec/src/frontier.rs` still delegates a task to `claude` alone; that is a later ADR.
 - A project with Codex can use it for completions and the agent path that goes through `IInferencePort`, with no key in any file.
 - Codex runs unsandboxed, as Claude does. The ADR says so rather than hide it.
 - `spec tests` keeps its rule: neither agent CLI writes the tests. A second CLI adds no way around the gate.
