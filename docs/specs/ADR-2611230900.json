@@ -12,7 +12,7 @@
     "by": "craigjohnson",
     "sha256": "1e59a1bbb95c0164943a127037c0a3d0f65b49897c30a9512395d0b37447cec0"
   },
-  "red": "ea59473",
+  "red": "0ab2027",
   "specs": [
     {
       "id": "S01",
@@ -25,7 +25,7 @@
       "when": "hexa analyze runs on the project",
       "then": "The policy reports one finding in domain/access_control.go and one in perfpayload/encode.go, each naming \"os/exec\" at its line",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s01_go_file_declared_domain_is_held_to_domain_policy",
-      "red": "ea59473"
+      "red": "0ab2027"
     },
     {
       "id": "S02",
@@ -38,7 +38,7 @@
       "when": "hexa analyze runs",
       "then": "Three error findings are reported for sdk/core/client.py, and the health score is 30 points lower than for the same tree with those three imports removed",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s02_python_domain_declared_by_map_is_checked",
-      "red": "ea59473"
+      "red": "0ab2027"
     },
     {
       "id": "S03",
@@ -51,7 +51,7 @@
       "when": "hexa analyze runs",
       "then": "A finding is reported for src/db/store.go. The same finding is reported when the policy's layer is written \"/adapters/secondary\" or \"adapters/secondary\"",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s03_slashed_layer_name_picks_up_declared_files",
-      "red": "ea59473"
+      "red": "0ab2027"
     },
     {
       "id": "S04",
@@ -64,7 +64,7 @@
       "when": "hexa analyze runs",
       "then": "A finding is reported for src/model/history.py",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s04_source_file_key_covers_its_module",
-      "red": "ea59473"
+      "red": "0ab2027"
     },
     {
       "id": "S05",
@@ -77,7 +77,7 @@
       "when": "hexa analyze runs",
       "then": "The domain policy reports nothing for src/http/server.py",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s05_file_declared_in_other_layer_is_not_added",
-      "red": "ea59473"
+      "red": "0ab2027"
     },
     {
       "id": "S06",
@@ -90,7 +90,7 @@
       "when": "hexa analyze runs",
       "then": "That policy reports nothing for perfpayload/encode.go",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s06_policy_layer_containing_layer_name_adds_nothing",
-      "red": "ea59473"
+      "red": "0ab2027"
     },
     {
       "id": "S07",
@@ -103,7 +103,7 @@
       "when": "hexa analyze runs",
       "then": "The set of files the policy judges is the files its path matches, together with every file an analyze.layers key assigns to L, less the files §3 excludes. The policy judges no file outside that set",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s07_declared_files_are_in_scope_of_their_layer_policy",
-      "red": "ea59473"
+      "red": "0ab2027"
     },
     {
       "id": "S08",
@@ -116,7 +116,7 @@
       "when": "hexa analyze runs",
       "then": "The findings are the same as before this ADR: one for src/domain/a.rs and none for src/core/b.rs",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s08_without_layers_policy_is_path_only",
-      "red": "ea59473"
+      "red": "0ab2027"
     },
     {
       "id": "S09",
@@ -129,7 +129,7 @@
       "when": "hexa analyze runs",
       "then": "The domain policy reports nothing for app-domain/src/lib.rs",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s09_crate_named_for_layer_adds_nothing",
-      "red": "ea59473"
+      "red": "0ab2027"
     },
     {
       "id": "S10",
@@ -142,7 +142,7 @@
       "when": "hexa analyze runs",
       "then": "The domain policy reports nothing for src/core_utils/io.py",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_1::s10_key_covers_whole_segments_only",
-      "red": "ea59473"
+      "red": "0ab2027"
     },
     {
       "id": "S11",
@@ -155,7 +155,7 @@
       "when": "hexa analyze runs",
       "then": "Every import-policy finding, and the grade, are identical to what path matching alone produces",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s11_no_declaration_no_change",
-      "red": "ea59473"
+      "red": "0ab2027"
     },
     {
       "id": "S12",
@@ -168,7 +168,7 @@
       "when": "hexa analyze runs",
       "then": "Exactly one finding is reported for that import, and the score falls by 10 points, not 20",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s12_path_matched_and_declared_is_judged_once",
-      "red": "ea59473"
+      "red": "0ab2027"
     },
     {
       "id": "S13",
@@ -192,7 +192,7 @@
       "when": "hexa analyze runs",
       "then": "The domain policy reports nothing for files under the top-level tests/, benches/ or examples/",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s14_declared_file_under_top_level_tests_stays_out_of_scope",
-      "red": "ea59473"
+      "red": "0ab2027"
     },
     {
       "id": "S15",
@@ -205,7 +205,7 @@
       "when": "hexa analyze runs",
       "then": "Each import or reference in that file yields at most one finding from that policy. No file under a top-level tests/, benches/ or examples/ yields any",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s15_each_import_judged_at_most_once_per_policy",
-      "red": "ea59473"
+      "red": "0ab2027"
     },
     {
       "id": "S16",
@@ -218,7 +218,7 @@
       "when": "hexa analyze runs",
       "then": "That policy reports a.py and does not report b.py",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s16_path_policy_naming_no_layer_stays_path_only",
-      "red": "ea59473"
+      "red": "0ab2027"
     },
     {
       "id": "S17",
@@ -242,7 +242,7 @@
       "when": "hexa analyze runs",
       "then": "The policy's findings equal those produced by path matching alone. Every non-policy finding is the same as when the policy is judged by path alone",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s18_non_layer_policies_unaffected_by_layers_map",
-      "red": "ea59473"
+      "red": "0ab2027"
     }
   ],
   "amendments": [

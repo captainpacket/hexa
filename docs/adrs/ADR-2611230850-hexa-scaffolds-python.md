@@ -2,7 +2,7 @@
 
 **Status:** Completed
 > 2026-11-23 Amended (pre-PR review): §1 adds the package's `__init__.py`. Without it hexa does not count the package as the project's own (ADR-2611211324 §2), so an import between two of its modules read as an outside import.
-> 2026-11-23 Completed: landed on main at ea099ba; gate `cargo test -p hexa-cli --test adr_2611230850_spec` passed (hexa loop stage done)
+> 2026-11-23 Completed: landed on main at fa33fce; gate `cargo test -p hexa-cli --test adr_2611230850_spec` passed (hexa loop stage done)
 > 2026-11-23 Accepted: Accepted in craigjohnson's session: Python brought up to what the other languages have, under his rule; he accepted the spec, and its sealed tests pass on main
 **Date:** 2026-11-23
 **Drivers:** ADR-2611211324 §9 left Python out of the scaffold: "`hexa scaffold` and `hexa init --scaffold` emitting Python … Each is a separate ADR or gap." Projects adopting hexa in Python build the ports, use cases and adapters layout by hand, where a Rust, Go or TypeScript project gets a runnable, A+-graded skeleton from one command. This ADR is that separate decision.

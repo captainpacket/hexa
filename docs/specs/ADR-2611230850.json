@@ -16,7 +16,7 @@
     "hexa-cli/tests/adr_2611230850_spec.rs": "114075b28d2b437337843f7d3b1ea19fb14106a4956755c630221d0f5b4877a9",
     "hexa-cli/tests/adr_2611230850_spec_2.rs": "5fa2cb2e86dda2f330c5027599a01fba65482cb990df19626832502042738dbf"
   },
-  "red": "3184aa3",
+  "red": "4cc5963",
   "specs": [
     {
       "id": "S01",
@@ -42,7 +42,7 @@
       "when": "`pyproject.toml` is read as TOML",
       "then": "it has a `[project]` table with `name` set to the project's name, a non-empty `version`, and `requires-python = \">=3.10\"`",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_1::s02_pyproject_declares_project_version_and_python",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S03",
@@ -55,7 +55,7 @@
       "when": "`my_app/ports/store.py` and `tests/test_increment.py` are read",
       "then": "`ports/store.py` makes `Count` from the domain importable from the port, and `test_increment.py` is a unittest test case that obtains its use case through `my_app.composition_root`",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_1::s03_port_reexports_count_and_test_uses_composition_root",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S04",
@@ -68,7 +68,7 @@
       "when": "the imports of `my_app/adapters/secondary/memory.py` are listed",
       "then": "its only project-internal import is from `my_app.ports`; it imports nothing from `my_app.domain` or `my_app.usecases`",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_1::s04_memory_adapter_imports_only_the_port",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S05",
@@ -81,7 +81,7 @@
       "when": "every written path and file content is inspected",
       "then": "no path or content contains `{{name}}` or `{{name_snake}}`, and no written file name ends in `.tmpl`",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_1::s05_no_placeholder_or_tmpl_survives",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S06",
@@ -94,7 +94,7 @@
       "when": "`python3 -m unittest discover -s tests -t .` runs in the project root",
       "then": "it exits 0, and its output reports `Ran 1 test` followed by `OK`",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_1::s06_python_gate_passes_on_fresh_scaffold",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S07",
@@ -107,7 +107,7 @@
       "when": "the entry for `python` is looked up",
       "then": "its gate command is `python3 -m unittest discover -s tests -t .`",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_1::s07_scaffold_langs_names_python_gate",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S08",
@@ -120,7 +120,7 @@
       "when": "the Python gate runs",
       "then": "it passes; the gate command contains no `pip`, `install`, `venv` or `&&` step",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_1::s08_python_gate_needs_no_install_or_network",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S09",
@@ -133,7 +133,7 @@
       "when": "the gate runs and the evidence reader reads its output",
       "then": "the output reports `FAILED`, not `OK`, the gate exits non-zero, and the evidence reader does not record a pass",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_1::s09_failing_unittest_run_is_not_a_pass",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S10",
@@ -146,7 +146,7 @@
       "when": "the scaffold writes its files",
       "then": "the file is written at `my_app/domain/count.py`",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_1::s10_placeholders_in_asset_path_are_rendered",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S11",
@@ -159,7 +159,7 @@
       "when": "the scaffold writes its files",
       "then": "the file is written at `my-app.txt`",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_2::s11_name_placeholder_in_a_path_is_rendered",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S12",
@@ -183,7 +183,7 @@
       "when": "the Python scaffold for `my-app` runs",
       "then": "`my_app/domain/count.py` keeps its custom content",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_2::s13_path_rendering_does_not_overwrite_an_existing_file",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S14",
@@ -196,7 +196,7 @@
       "when": "the scaffold computes the asset's output path",
       "then": "the output path equals the asset's path with `{{name}}` and `{{name_snake}}` replaced exactly as they are replaced in its contents, and then its `.tmpl` suffix, if any, removed",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_2::s14_asset_path_rendered_by_same_substitution_as_contents",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S15",
@@ -209,7 +209,7 @@
       "when": "`gitignore_lines(\"python\")` is called",
       "then": "it contains `__pycache__/` and `.venv/`, together with `.hexa/loop.json`, `.hexa/loop.lock`, `.env*` and `!.env.example`",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_2::s15_python_ignore_lines",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S16",
@@ -222,7 +222,7 @@
       "when": "`gitignore_lines` is called for each",
       "then": "`python`'s lines contain no `target/`, `node_modules/` or `dist/`; and none of the `rust`, `ts` or `go` lines contain `__pycache__/` or `.venv/`",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_2::s16_python_ignore_lines_are_pythons_only",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S17",
@@ -235,7 +235,7 @@
       "when": "`merged_gitignore(existing, \"python\")` runs and its result (or the existing text, if the result is `None`) is read",
       "then": "`__pycache__/` and `.venv/` each appear exactly once as a trimmed line, and every line of the existing text is kept in order",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_2::s17_merged_python_gitignore_holds_each_line_once",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S18",
@@ -248,7 +248,7 @@
       "when": "`hexa analyze .` runs on it",
       "then": "the grade is A+; coverage has `classified == total` and an empty `unclassified` list; `violations`, `circular_deps` and `config_errors` are empty; and `composition_root.py` is classified as `HexLayer::CompositionRoot`",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_2::s18_analyze_grades_python_scaffold_a_plus",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S19",
@@ -261,7 +261,7 @@
       "when": "the domain policy is checked",
       "then": "it reports no error-severity finding",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_2::s19_python_scaffold_satisfies_its_domain_policy",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S20",
@@ -274,7 +274,7 @@
       "when": "each file's layer is read from the analysis",
       "then": "no file is `HexLayer::Unknown`; `domain/count.py` is Domain, `ports/store.py` is Ports, `usecases/increment.py` is Usecases, and `adapters/secondary/memory.py` is AdaptersSecondary",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_2::s20_no_python_file_unclassified_or_misplaced",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S21",
@@ -287,7 +287,7 @@
       "when": "the Python gate runs without any file being modified",
       "then": "it exits 0",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_3::s21_fresh_python_scaffold_gate_passes_without_edit",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S22",
@@ -300,7 +300,7 @@
       "when": "the Python scaffold runs once in each directory with that name",
       "then": "both runs write the same set of relative paths, with byte-identical contents",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_3::s22_python_scaffold_is_deterministic",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S23",
@@ -313,7 +313,7 @@
       "when": "`hexa scaffold` runs without `--lang`",
       "then": "it writes the Rust scaffold and no Python file",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_3::s23_lang_defaults_to_rust",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S24",
@@ -326,7 +326,7 @@
       "when": "`hexa scaffold --lang cobol` runs",
       "then": "it fails with a non-zero exit, writes no file, and its message names `python` alongside `rust`, `go` and `ts`",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_3::s24_unknown_lang_refused_naming_python",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S25",
@@ -339,7 +339,7 @@
       "when": "the scaffold runs for that language",
       "then": "the written paths and bytes equal what the scaffold wrote for that name and language before this ADR",
       "test": "hexa-cli/tests/adr_2611230850_spec.rs::part_3::s25_other_scaffolds_unchanged",
-      "red": "3184aa3"
+      "red": "4cc5963"
     },
     {
       "id": "S26",

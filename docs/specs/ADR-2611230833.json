@@ -26,7 +26,7 @@
       "when": "read_evidence(true, output, false) is called",
       "then": "it returns Evidence::Passed { tests: 1 }",
       "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s01_verbose_run_of_one_passing_test_is_one_test",
-      "red": "e9e33fc"
+      "red": "cdfaf18"
     },
     {
       "id": "S02",
@@ -39,7 +39,7 @@
       "when": "read_evidence(true, output, false) is called",
       "then": "it returns Evidence::Passed { tests: 3 }",
       "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s02_verbose_run_of_n_passing_tests_is_n",
-      "red": "e9e33fc"
+      "red": "cdfaf18"
     },
     {
       "id": "S03",
@@ -63,7 +63,7 @@
       "when": "read_evidence(true, output, false) is called",
       "then": "it returns Evidence::Passed { tests: 1 }",
       "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s04_tab_only_package_line_follows_same_rule",
-      "red": "e9e33fc"
+      "red": "cdfaf18"
     },
     {
       "id": "S05",
@@ -76,7 +76,7 @@
       "when": "judge_counted(true, output) is called",
       "then": "it returns Verdict::Passed",
       "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s05_verbose_configured_runner_judged_as_one_passing_test",
-      "red": "e9e33fc"
+      "red": "cdfaf18"
     },
     {
       "id": "S06",
@@ -89,7 +89,7 @@
       "when": "read_evidence(true, output, false) is called",
       "then": "it returns Evidence::Passed { tests: 3 }",
       "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s06_each_package_judged_on_its_own_lines",
-      "red": "e9e33fc"
+      "red": "cdfaf18"
     },
     {
       "id": "S07",
@@ -102,7 +102,7 @@
       "when": "read_evidence(true, output, false) is called",
       "then": "it returns Evidence::Passed { tests: 2 }",
       "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s07_two_verbose_packages_count_only_listed_tests",
-      "red": "e9e33fc"
+      "red": "cdfaf18"
     },
     {
       "id": "S08",
@@ -115,7 +115,7 @@
       "when": "read_evidence(true, output, false) is called",
       "then": "it does not return Evidence::Passed { tests: 2 }",
       "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s08_verbose_package_line_not_counted_as_another_test",
-      "red": "e9e33fc"
+      "red": "cdfaf18"
     },
     {
       "id": "S09",
@@ -128,7 +128,7 @@
       "when": "judge_counted(true, output) is called",
       "then": "it does not return Verdict::Ambiguous(2), or any Verdict::Ambiguous",
       "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s09_verbose_run_of_one_test_not_ambiguous",
-      "red": "e9e33fc"
+      "red": "cdfaf18"
     },
     {
       "id": "S10",
@@ -141,7 +141,7 @@
       "when": "read_evidence(true, output, false) is called",
       "then": "it does not return Evidence::Passed { tests: 1 }; it returns Evidence::Passed { tests: 2 }",
       "test": "hexa-core/tests/adr_2611230833_spec.rs::part_1::s10_listed_lines_do_not_stop_later_unlisted_package_counting",
-      "red": "e9e33fc"
+      "red": "cdfaf18"
     },
     {
       "id": "S11",
@@ -154,7 +154,7 @@
       "when": "read_evidence(true, output, false) is called",
       "then": "it returns Evidence::Passed { tests: Σ over packages of (k if k > 0 else 1) }",
       "test": "hexa-core/tests/adr_2611230833_spec.rs::part_2::s11_each_listed_test_counts_once_and_each_unlisted_package_line_once",
-      "red": "e9e33fc"
+      "red": "cdfaf18"
     },
     {
       "id": "S12",

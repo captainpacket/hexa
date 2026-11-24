@@ -1,7 +1,7 @@
 # ADR-2611230831: hexa says what is true (II)
 
 **Status:** Completed
-> 2026-11-23 Completed: landed on main at c998137; gate `cargo test -p hexa-cli --test adr_2611230831_spec` passed (hexa loop stage done)
+> 2026-11-23 Completed: landed on main at 9b29d89; gate `cargo test -p hexa-cli --test adr_2611230831_spec` passed (hexa loop stage done)
 > 2026-11-23 Accepted: Accepted in craigjohnson's session: a bug fix under his rule (no architectural change); he accepted the spec, and its sealed tests pass on main
 **Date:** 2026-11-23
 **Drivers:** Four more places, found by projects adopting hexa, where hexa printed something untrue or crashed on a harmless use. ADR-2611221646 fixed five of the same kind. CLAUDE.md: "A gate that degrades silently is worse than no gate."
