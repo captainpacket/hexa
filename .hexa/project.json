@@ -124,7 +124,8 @@
   "adr": {
     "unbuilt": {
       "ADR-2610161730": "the delegate_scope test its gate names was never written; the delegate allowlist is not built",
-      "ADR-2610221834": "parallel harden is proposed and not built; its gate is its spec, which is not drafted yet"
+      "ADR-2610221834": "parallel harden is proposed and not built; its gate is its spec, which is not drafted yet",
+      "ADR-2611240930": "a waiting task state is proposed and not built; its gate is its spec, which is not drafted until the owner accepts it"
     }
   }
 }

@@ -35,4 +35,4 @@ This changes what "done" and "open" mean for the hooks, so it is for the owner t
 - The forge read becomes a dependency of the stop hook, which today reads only files. Decision 3's timeout and its 24-hour limit bound that.
 - An agent can still abuse `waiting` to silence the hook. Decision 3 (a condition that holds turns the task back), decision 4 (`stage done` refuses) and the 24-hour limit on an unchecked condition are the guards. Whether those guards are enough is the owner's call at acceptance.
 
-**Gate:** none until accepted. When it is, its spec is drafted and its tests are written before the code. (A command written on this line is read as the ADR's gate: drafting a spec needs a model and proves nothing, so none is named here.)
+**Gate:** `hexa spec verify ADR-2611240930`: the spec's sealed tests, each red before the code. Until the spec is drafted, accepted and sealed this fails, which is the truth: nothing is built. The ADR is declared under `adr.unbuilt` in `.hexa/project.json` until then (ADR-2610271110), as ADR-2610221834 is.
