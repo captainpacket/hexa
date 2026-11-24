@@ -53,3 +53,15 @@
 - **Not decided here:** the SubagentStop hook still reruns a subagent task's gate here (`close_subagent_task` in `hexa-cli/src/commands/hook/mod.rs`), and `hexa build`'s gates run here. Neither is a verb datum's builders use today. Both are recorded as workplan items.
 
 **Gate:** `cargo test -p hexa-cli --test adr_2611240900_spec && cargo test -p hexa-exec --test harden_remote_gate && cargo test -p hexa-core --lib domain::evidence && cargo test -p hexa-core --lib domain::test_runner`
+
+## Addendum, 2026-11-24: what the build settled
+
+- **The scratch remote** is the branch's upstream remote, else `origin` (`scratch_remote` in `hexa-exec/src/test_exec.rs`). harden needs no upstream of the branch's own name, unlike `do gate`, because it pushes only the scratch ref and never the branch.
+- **What a harden gate run reports** is the runner's segment of the output, followed by one line naming the candidate it gated (`(gated on the remote runner: candidate <id>, test.remote)`). That line is in each `GateRun`'s tail, so `hexa status` shows which commit the runner judged.
+- **A runner failure in red-first** reads `<the runner failure>: so its test was not shown to fail without the fix`. The fix itself is still judged by its own gate, which a runner failure fails.
+- **The marker is read only under `test.remote`** (decision 3). hexa's own suite spawns hexa in temporary repositories, and a marker inherited from a batch would otherwise refuse every one of them.
+- **`loop stage done` without evidence** sends one command, as before. With an ADR and evidence recorded, it sends two in one batch, and the evidence is appended only after the gate passed. `--local` keeps the old order: the gate, then the evidence run here.
+- **`hexa loop task done`** is pinned by S16: it runs no gate, here or remote.
+- **Not built, recorded as workplan drafts:** the SubagentStop hook's local gate rerun, `hexa build`'s local gates, and the line datum's `ci/remote-gate.sh` needs (`export HEXA_ON_RUNNER="$(git rev-parse HEAD)"`).
+
+**Built:** decisions 1 to 4, 2026-11-24, on `feat/remote-lifecycle`. Red at `7d62175`: hexa-core 7 passed and 5 failed, harden 1 passed and 4 failed, CLI 1 passed and 7 failed, each on its assertion. Green at `33155d4` on max: 12, 5 and 8 passed. The spec is drafted and awaits `hexa spec accept ADR-2611240900`.

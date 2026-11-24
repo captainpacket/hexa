@@ -103,7 +103,7 @@ pub fn first_failure(output: &str) -> Option<String> {
 /// (`ESC [` parameters, intermediates, one final byte), OSC (`ESC ]` up to BEL
 /// or `ESC \`), and the two-byte `ESC x`. Output with colour reads as the
 /// same output without it.
-pub fn strip_ansi(text: &str) -> std::borrow::Cow<'_, str> {
+fn strip_ansi(text: &str) -> std::borrow::Cow<'_, str> {
     if !text.contains('\u{1b}') {
         return std::borrow::Cow::Borrowed(text);
     }

@@ -428,7 +428,7 @@ pub async fn run_gate(dir: &Path, gate: &str, cfg: &TestConfig, local: bool) -> 
 }
 
 /// The code a refusal of an unpushed HEAD carries (ADR-2611240900 §4).
-pub const HEAD_NOT_PUSHED: &str = "head-not-pushed";
+const HEAD_NOT_PUSHED: &str = "head-not-pushed";
 
 /// Run `gate`, then each of `also`, for HEAD of `dir`: here one after another,
 /// or through the remote in **one** run (ADR-2611191120 §4, ADR-2611240900 §4).
@@ -460,7 +460,7 @@ pub async fn run_gate_and(dir: &Path, gate: &str, also: &[String], cfg: &TestCon
 /// itself (`git ls-remote`): it must be `commit`, or a commit `commit` is an
 /// ancestor of. A branch with no upstream falls back to the local
 /// remote-tracking refs (ADR-2611191120 §5).
-pub fn remote_holds(dir: &Path, commit: &str) -> Result<(), String> {
+fn remote_holds(dir: &Path, commit: &str) -> Result<(), String> {
     let short: String = commit.chars().take(12).collect();
     let branch = git(dir, &["symbolic-ref", "--quiet", "--short", "HEAD"]);
     let upstream = branch.as_deref().and_then(|b| {
