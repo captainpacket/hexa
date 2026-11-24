@@ -286,5 +286,16 @@
       "when": "A Go domain file imports github.com/jackc/pgx/v5x/pool",
       "then": "The verdict is not denied by that entry"
     }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-24T22:21:46.587848498+00:00",
+      "base_commit": "0d0a1fa1fba43115df8105df09059b89d1ed8019",
+      "by": "craigjohnson",
+      "file": "hexa-analysis/tests/adr_2611221933_spec.rs",
+      "from": "83999d07bcf7cc3266edb1eae8ad9b6be9768036194fac44f56be62a92e9729f",
+      "reason": "S14 re-proved in adr_2611221933_spec_2.rs after the spec was re-accepted (a standard-library deny entry is exact; a module entry covers its subpackages); the other tests are unchanged",
+      "to": "fffd8fd10c0fad3e2ab4048b1c58bb5ee27e6f6fa4bdad2579552dfc24077c1e"
+    }
   ]
 }
