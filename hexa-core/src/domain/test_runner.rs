@@ -162,6 +162,24 @@ pub fn batch_script(tag: &str, cmds: &[String]) -> String {
     s
 }
 
+/// The environment variable that tells a hexa verb it is running on the
+/// remote runner, in a checkout of the commit it names (ADR-2611240900 §3).
+pub const ON_RUNNER_ENV: &str = "HEXA_ON_RUNNER";
+
+/// [`batch_script`] for `commit`: each command also sees [`ON_RUNNER_ENV`] set
+/// to `commit` (ADR-2611240900 §3).
+pub fn batch_script_for(tag: &str, commit: &str, cmds: &[String]) -> String {
+    let _ = commit;
+    batch_script(tag, cmds)
+}
+
+/// Whether this process runs on the remote runner (ADR-2611240900 §3):
+/// `marker` is [`ON_RUNNER_ENV`]'s value, `head` the checkout's HEAD.
+pub fn on_runner(marker: Option<&str>, head: Option<&str>) -> Result<bool, String> {
+    let _ = (marker, head);
+    Ok(false)
+}
+
 /// Each command's (exit 0, output) from a batch run's output, in order. `Err`
 /// when any end marker is missing: the run is a runner failure (§4, §5).
 pub fn split_batch(tag: &str, n: usize, output: &str) -> Result<Vec<(bool, String)>, String> {
@@ -302,5 +320,38 @@ pub fn judge_counted(exit_ok: bool, output: &str) -> Verdict {
         Evidence::Unrecognised | Evidence::Uncounted => Verdict::Unreadable(format!(
             "the runner exited 0 but no test runner hexa reads wrote its output ({KNOWN_RUNNERS})"
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const A: &str = "0123456789abcdef0123456789abcdef01234567";
+    const B: &str = "89abcdef0123456789abcdef0123456789abcdef";
+
+    /// S10, S11 (the rule): the marker runs here only for the commit checked out.
+    #[test]
+    fn the_runner_marker_holds_only_for_the_commit_checked_out() {
+        assert_eq!(on_runner(None, Some(A)), Ok(false), "no marker: not on the runner");
+        assert_eq!(on_runner(Some(""), Some(A)), Ok(false), "an empty marker is no marker");
+        assert_eq!(on_runner(Some(A), Some(A)), Ok(true));
+        assert_eq!(on_runner(Some(&format!(" {A}\n")), Some(A)), Ok(true), "surrounding space is not part of the id");
+        let e = on_runner(Some(B), Some(A)).unwrap_err();
+        assert!(e.contains(ON_RUNNER_ENV) && e.contains(A) && e.contains(B), "{e}");
+        let e = on_runner(Some("1"), Some(A)).unwrap_err();
+        assert!(e.contains(ON_RUNNER_ENV) && e.contains("40"), "a marker that is not a commit id: {e}");
+        let e = on_runner(Some(A), None).unwrap_err();
+        assert!(e.contains(ON_RUNNER_ENV) && e.contains("HEAD"), "{e}");
+    }
+
+    /// S12 (the script): the batch exports the marker before the commands run.
+    #[test]
+    fn the_batch_script_exports_the_runner_marker() {
+        let s = batch_script_for("t", A, &["true".to_string()]);
+        let at = s.find(&format!("export {ON_RUNNER_ENV}=")).expect("the marker is exported");
+        assert!(at < s.find("bash -o pipefail").unwrap(), "before the first command: {s}");
+        assert!(s.contains(A), "{s}");
+        assert!(batch_script_for("t", "'; touch pwned; '", &["true".to_string()]).contains("''\\'';"), "the commit is quoted as one word");
     }
 }

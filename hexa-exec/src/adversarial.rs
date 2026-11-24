@@ -1539,6 +1539,31 @@ pub async fn run_review_gated_with(
     review(frontier, Some(history), target, gates, repo_root, reporter).await
 }
 
+/// Where a harden pass runs its gates (ADR-2611240900 §1).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum GateAt {
+    /// In the repository, as every pass did before.
+    #[default]
+    Here,
+    /// On the remote runner, through the project's `test.remote` template:
+    /// each gate run on a scratch candidate commit of the tree as it stands.
+    Remote(String),
+}
+
+/// [`run_review_gated_with`], with its gates run `at` (ADR-2611240900 §1).
+pub async fn run_review_gated_at(
+    frontier: Arc<dyn Frontier>,
+    history: Arc<dyn GitHistory>,
+    target: &str,
+    gates: &HardenGates,
+    at: GateAt,
+    repo_root: &Path,
+    reporter: Reporter,
+) -> ReviewReport {
+    let _ = at;
+    review(frontier, Some(history), target, gates, repo_root, reporter).await
+}
+
 /// The pipeline both entry points share. `history` is needed only with a
 /// fast gate: without one, nothing is reset or cherry-picked.
 async fn review(

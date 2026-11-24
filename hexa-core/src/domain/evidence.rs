@@ -368,6 +368,91 @@ mod tests {
         assert_eq!(first_failure("x\nthread 'a' panicked at src/a.rs:1:1:\n").as_deref(), Some("thread 'a' panicked at src/a.rs:1:1:"));
     }
 
+    // ── ADR-2611240900 §2: cargo-nextest, and colour ─────────────────────────
+    // Real output: cargo-nextest 0.9.152 and vitest 2.1.9, captured on max,
+    // 2026-11-24, from a crate with two passing, one failing and one ignored
+    // test, and a package with two passing tests and one failing.
+
+    const NX_GREEN: &str = include_str!("evidence_samples/nextest-green.txt");
+    const NX_RED: &str = include_str!("evidence_samples/nextest-red.txt");
+    const NX_RED_COLOUR: &str = include_str!("evidence_samples/nextest-red-colour.txt");
+    const NX_ZERO: &str = include_str!("evidence_samples/nextest-zero.txt");
+    const NX_ZERO_PASS: &str = include_str!("evidence_samples/nextest-zero-pass.txt");
+    const VT_GREEN_COLOUR: &str = include_str!("evidence_samples/vitest-green-colour.txt");
+    const VT_RED_COLOUR: &str = include_str!("evidence_samples/vitest-red-colour.txt");
+
+    /// The sample with every escape sequence taken out by hand, independently
+    /// of the reader: ESC, `[`, parameters, one final byte.
+    fn without_colour(s: &str) -> String {
+        let mut out = String::new();
+        let mut it = s.chars().peekable();
+        while let Some(c) = it.next() {
+            if c == '\u{1b}' && it.peek() == Some(&'[') {
+                it.next();
+                for d in it.by_ref() {
+                    if ('@'..='~').contains(&d) {
+                        break;
+                    }
+                }
+                continue;
+            }
+            out.push(c);
+        }
+        out
+    }
+
+    /// S06: A real cargo-nextest run is counted from its summary
+    #[test]
+    fn s06_a_real_nextest_run_is_counted_from_its_summary() {
+        assert_eq!(read_evidence(true, NX_GREEN, false), Evidence::Passed { tests: 2 }, "green: 2 passed, 2 skipped");
+        assert_eq!(count_tests(NX_RED), TestCounts { passed: 2, failed: 1, recognised: true }, "the summary, not the libtest lines inside it");
+        assert!(matches!(read_evidence(false, NX_RED, false), Evidence::Failed { .. }));
+        assert!(matches!(read_evidence(true, NX_RED, false), Evidence::Failed { .. }), "a counted failure fails even on exit 0");
+        assert_eq!(read_red_evidence("cargo nextest run", false, NX_RED), RedEvidence::Red { passed: 2, failed: 1 });
+        assert_eq!(first_failure(NX_RED).as_deref(), Some("FAIL [   0.002s] (2/3) sample tests::breaks"));
+        assert_eq!(read_gate_evidence("cargo nextest run", true, NX_GREEN, false), Evidence::Passed { tests: 2 });
+    }
+
+    /// S07: Coloured output reads as the same output without colour
+    #[test]
+    fn s07_coloured_output_reads_as_without_colour() {
+        assert!(VT_GREEN_COLOUR.contains('\u{1b}') && NX_RED_COLOUR.contains('\u{1b}'), "the samples carry colour");
+        assert_eq!(read_evidence(true, VT_GREEN_COLOUR, false), Evidence::Passed { tests: 2 }, "coloured vitest that passed");
+        assert_eq!(count_tests(VT_RED_COLOUR), TestCounts { passed: 2, failed: 1, recognised: true });
+        assert_eq!(read_red_evidence("npx vitest run", false, VT_RED_COLOUR), RedEvidence::Red { passed: 2, failed: 1 });
+        assert_eq!(count_tests(NX_RED_COLOUR), TestCounts { passed: 2, failed: 1, recognised: true });
+        for s in [VT_GREEN_COLOUR, VT_RED_COLOUR, NX_RED_COLOUR] {
+            let plain = without_colour(s);
+            assert_eq!(count_tests(s), count_tests(&plain));
+            assert_eq!(read_evidence(true, s, false), read_evidence(true, &plain, false));
+            assert_eq!(first_failure(s), first_failure(&plain));
+            assert!(first_failure(s).is_none_or(|l| !l.contains('\u{1b}')), "the first failure is shown without codes");
+        }
+        assert_eq!(first_failure(VT_RED_COLOUR).as_deref(), Some("× breaks 3ms"));
+    }
+
+    /// S08: A nextest run of zero tests is vacuous, and a cut-off run counts each test once
+    #[test]
+    fn s08_zero_nextest_tests_are_vacuous_and_a_cut_run_counts_once() {
+        assert_eq!(read_evidence(true, NX_ZERO_PASS, false), Evidence::Vacuous, "--no-tests=pass, exit 0");
+        assert!(matches!(read_evidence(false, NX_ZERO, false), Evidence::Failed { .. }), "exit 4");
+        assert_eq!(read_red_evidence("cargo nextest run", false, NX_ZERO), RedEvidence::Vacuous);
+        assert_eq!(read_red_evidence("cargo nextest run", true, NX_ZERO_PASS), RedEvidence::Vacuous);
+        let starting_only = "    Starting 0 tests across 1 binary (4 tests skipped)\n";
+        assert_eq!(read_evidence(true, starting_only, false), Evidence::Vacuous);
+        // Cut before the summary: the FAIL line is printed twice, the test failed once.
+        let cut = "    Starting 3 tests across 1 binary\n        PASS [   0.002s] (1/3) s t::a\n        FAIL [   0.002s] (2/3) s t::b\n\
+                   \n        PASS [   0.003s] (3/3) s t::c\n        FAIL [   0.002s] (2/3) s t::b\n";
+        assert_eq!(count_tests(cut), TestCounts { passed: 2, failed: 1, recognised: true });
+        let timed_out = "     Summary [   1.0s] 4 tests run: 2 passed (1 flaky), 1 failed, 1 timed out, 0 skipped\n";
+        assert_eq!(count_tests(timed_out), TestCounts { passed: 2, failed: 2, recognised: true });
+        let cancelled = "     Summary [   1.0s] 2/5 tests run: 1 passed, 1 failed, 0 skipped\n";
+        assert_eq!(count_tests(cancelled), TestCounts { passed: 1, failed: 1, recognised: true });
+        // nextest beside vitest sums both.
+        let both = format!("{NX_GREEN}\n Test Files  1 passed (1)\n      Tests  3 passed (3)\n");
+        assert_eq!(read_evidence(true, &both, false), Evidence::Passed { tests: 5 });
+    }
+
     #[test]
     fn a_cargo_test_line_marked_failed_fails_the_run() {
         let out = "running 2 tests\ntest a ... ok\ntest b ... FAILED\n";
