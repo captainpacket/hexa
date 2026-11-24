@@ -1,0 +1,247 @@
+{
+  "adr": "ADR-2611151330",
+  "feature": "build-keys",
+  "description": "Analyze cargo unit graphs to detect unstable native build scripts",
+  "universal": [
+    "§5",
+    "§6",
+    "§7"
+  ],
+  "accepted": {
+    "by": "gary (in conversation, 2026-11-23: \"accept the specs\"; recorded by the implementing agent)",
+    "sha256": "df3b42105a74b25cc1aa36ebed491a2f06ffd62f79080ffb3cd65fe9e2c8456c"
+  },
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "Command runs without compiling",
+      "given": "A cargo project with native build scripts",
+      "when": "User runs `hexa dev build-keys`",
+      "then": "The tool reads unit graphs and compares them without invoking the compiler"
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "Command fails when no graphs are produced",
+      "given": "A cargo project with no unit graphs",
+      "when": "User runs `hexa dev build-keys`",
+      "then": "The tool exits with code 2 and reports the error"
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "Selections from CLI override defaults",
+      "given": "A cargo project with default selections",
+      "when": "User runs `hexa dev build-keys --selection 'build -p foo'`",
+      "then": "Only the specified selection is analyzed"
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "Invalid selection is rejected",
+      "given": "A cargo project",
+      "when": "User runs `hexa dev build-keys --selection 'invalid-command'`",
+      "then": "The tool exits with code 2 and reports the invalid selection"
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "Unit graph is fetched with retries",
+      "given": "A cargo project with offline mode failing",
+      "when": "User runs `hexa dev build-keys`",
+      "then": "The tool retries without `--offline` and succeeds"
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "No graph yields error",
+      "given": "A cargo project where `cargo --unit-graph` fails",
+      "when": "User runs `hexa dev build-keys`",
+      "then": "The tool exits with code 2 and names the failing selection"
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§4"
+      ],
+      "kind": "example",
+      "description": "Native script is detected",
+      "given": "A cargo project with a build script depending on `cc`",
+      "when": "User runs `hexa dev build-keys`",
+      "then": "The script is identified as native and included in analysis"
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "Non-native script is ignored",
+      "given": "A cargo project with a build script depending on `log`",
+      "when": "User runs `hexa dev build-keys`",
+      "then": "The script is not analyzed as native"
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§5"
+      ],
+      "kind": "property",
+      "description": "Key is deterministic",
+      "given": "Any two identical unit graphs",
+      "when": "The tool computes keys for both",
+      "then": "The keys are identical"
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "Key includes features and profile settings",
+      "given": "A unit graph with a script's dependency tree",
+      "when": "The tool computes the key",
+      "then": "The key includes package id, target name, mode, sorted features, and profile settings except name"
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§6"
+      ],
+      "kind": "example",
+      "description": "Unstable script is reported",
+      "given": "A native script with two distinct keys",
+      "when": "The tool compares the keys",
+      "then": "The script is marked unstable with groups and differences"
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§6"
+      ],
+      "kind": "negative",
+      "description": "Stable script is not flagged",
+      "given": "A native script with one key",
+      "when": "The tool compares the keys",
+      "then": "The script is marked stable"
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§7"
+      ],
+      "kind": "property",
+      "description": "Every unstable finding carries a hint for each kind it shows, marked as a prediction",
+      "given": "Any unstable native script whose differing units have any mix of kinds",
+      "when": "The report is printed",
+      "then": "For each of `profile` and `features` present among its units the report carries that kind's hint, and every hint says it is a prediction from the unit graph"
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§8"
+      ],
+      "kind": "example",
+      "description": "Exit code 0 for stable scripts",
+      "given": "A project with no unstable scripts",
+      "when": "User runs `hexa dev build-keys`",
+      "then": "The tool exits with code 0"
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§8"
+      ],
+      "kind": "negative",
+      "description": "Exit code 1 for unstable scripts",
+      "given": "A project with at least one unstable script",
+      "when": "User runs `hexa dev build-keys`",
+      "then": "The tool exits with code 1"
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "§9"
+      ],
+      "kind": "example",
+      "description": "CI runs check when enabled",
+      "given": "A project with `.hexa/project.json` containing `build_keys.enabled: true`",
+      "when": "User runs `hexa dev ci`",
+      "then": "The build-keys check is executed and one line is printed"
+    },
+    {
+      "id": "S17",
+      "decision": [
+        "§9"
+      ],
+      "kind": "negative",
+      "description": "CI skips check when disabled",
+      "given": "A project with `.hexa/project.json` containing `build_keys.enabled: false`",
+      "when": "User runs `hexa dev ci`",
+      "then": "The build-keys check is not executed"
+    },
+    {
+      "id": "S18",
+      "decision": [
+        "§7"
+      ],
+      "kind": "negative",
+      "description": "A hint matches its kind and never claims more than a prediction",
+      "given": "A unit-graph comparison whose only difference is the profile",
+      "when": "The tool prints its hint",
+      "then": "The hint names the `[profile.<p>.build-override]` change, does not suggest a workspace-hack crate, and says it is a prediction from the unit graph rather than a measured result"
+    },
+    {
+      "id": "S19",
+      "decision": [
+        "§5"
+      ],
+      "kind": "negative",
+      "description": "The profile name is not part of the key",
+      "given": "Two selections whose trees for one native script are identical except that the profile is named `dev` in one and `test` in the other, with the same settings",
+      "when": "Keys are computed",
+      "then": "The two keys are equal and the script is not unstable"
+    },
+    {
+      "id": "S20",
+      "decision": [
+        "§6"
+      ],
+      "kind": "property",
+      "description": "Unstable is exactly two or more keys",
+      "given": "Any native script and any set of selections containing it",
+      "when": "The comparison runs",
+      "then": "It is `unstable` exactly when its keys take two or more distinct values; the groups partition those selections by key; at most ten differing units are listed, each with kind features, profile or presence"
+    },
+    {
+      "id": "S21",
+      "decision": [
+        "§7"
+      ],
+      "kind": "example",
+      "description": "A features difference gets the workspace-hack hint",
+      "given": "A native script whose trees differ only in a dependency's feature set between `build` and `test --no-run`",
+      "when": "The report is printed",
+      "then": "The hint says to pin the unified feature set as a build-dependency of a crate every selection includes, as a cargo-hakari `workspace-hack` crate does, and that it is a prediction from the unit graph"
+    }
+  ]
+}

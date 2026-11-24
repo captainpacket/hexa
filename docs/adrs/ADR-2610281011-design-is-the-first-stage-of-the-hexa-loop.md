@@ -1,11 +1,12 @@
 ---
 id: ADR-2610281011
-status: proposed
+status: accepted
 date: 2026-10-28
 ---
 # ADR-2610281011: design is the first stage of the hexa loop
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-10-28
 **Drivers:** ADR-2610271736 gave hexa the Elephant-Goldfish Model as five commands: `hexa design brainstorm|draft|review|resolve` and `hexa drift`. Nothing in hexa's own loop knows they exist. `hexa loop` records Decide → Gate → Build → Harden and has no design stage. `hexa go` never suggests a review or a drift check. `hexa hey` cannot route to either verb. The feature-sized prompt hook says "Decide (ADR …)", and the `/hexa-workflow` skill starts at the ADR. An approved design "enters hexa's pipeline as an ADR" (ADR-2610271736 §8), but nothing carries it there: the ADR is written by hand from a document the pipeline never reads again, and nothing checks that the design was reviewed in the form that became the decision. `hexa drift` checks every document every time, which costs one completion per document. That makes it too costly to run on every change, and a check nobody runs is no check.
 

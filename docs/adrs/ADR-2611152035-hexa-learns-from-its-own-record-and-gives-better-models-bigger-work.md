@@ -1,6 +1,7 @@
 # ADR-2611152035: hexa learns from its own record, and gives better models bigger work
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-11-15
 **Drivers:** The operator, watching `hexa harden` on a downstream project (harness, `apps/lintel/renderer`): "Is hexa learning from its mistakes or is it coding and then fixing and coding and then fixing?" Then: "As the models get better, we need hexa to also transform and take advantage more and more of the models. That means hexa has to learn."
 

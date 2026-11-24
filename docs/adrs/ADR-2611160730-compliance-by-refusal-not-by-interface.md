@@ -1,6 +1,7 @@
 # ADR-2611160730: Compliance by refusal, not by interface
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-11-16
 **Drivers:** An adversarial audit of how hexa is really used in the harness project (four independent read-only reviews, 2026-11-16). Agents route about 8% of edits through hexa and none of the code edits; the person had to say "use hexa for everything", and the agent stored that as a lesson and then kept editing by hand. The question raised was whether to drive hexa over MCP.
 **Supersedes:** none. Companion to ADR-2611152035 (hexa learns from its own record).

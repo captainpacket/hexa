@@ -1,0 +1,239 @@
+{
+  "adr": "ADR-2611160750",
+  "feature": "leases_follow_the_architecture",
+  "description": "Leases are now based on architectural layers and contracts, with dependency-aware overlap checks.",
+  "universal": [
+    "§2",
+    "§3",
+    "§4",
+    "§5",
+    "§6",
+    "§7"
+  ],
+  "accepted": {
+    "by": "gary (in conversation, 2026-11-23: \"accept the specs\"; recorded by the implementing agent)",
+    "sha256": "9c4d9ff259b6ac0ca8504ff4e606808ea9c4e12a8850ece605627a75b247813c"
+  },
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "A lease on a layer slice resolves to the files in that slice.",
+      "given": "A hexagonal project with a layer 'usecases/billing' containing files A, B, C.",
+      "when": "A user runs `hexa agent register --task t1 --lease usecases/billing`.",
+      "then": "The lease is granted for files A, B, C."
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "A lease on a non-existent layer slice is refused.",
+      "given": "A hexagonal project with no layer 'usecases/nonexistent'.",
+      "when": "A user runs `hexa agent register --task t1 --lease usecases/nonexistent`.",
+      "then": "The lease is refused with an error."
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "A contract lease is refused if its files are used by another live lease.",
+      "given": "A live lease on 'usecases/billing' that uses 'ports/billing.rs'.",
+      "when": "A user runs `hexa agent register --task t2 --lease ports/billing.rs`.",
+      "then": "The lease is refused, and the refusal names 'usecases/billing' as the consumer."
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "A contract lease is granted if its files are not used by any live lease.",
+      "given": "No live leases in the project.",
+      "when": "A user runs `hexa agent register --task t1 --lease ports/billing.rs`.",
+      "then": "The lease is granted."
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "An edit to a frozen contract file is refused.",
+      "given": "A live lease on 'usecases/billing' that freezes 'ports/billing.rs'.",
+      "when": "A user in another session edits 'ports/billing.rs'.",
+      "then": "The edit is refused by the hook with exit code 2, naming the lease that froze the file"
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "An edit to a non-frozen contract file is allowed.",
+      "given": "No live leases in the project.",
+      "when": "A user edits 'ports/billing.rs'.",
+      "then": "The edit is allowed."
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§4"
+      ],
+      "kind": "example",
+      "description": "Merge order sorts tasks by layer.",
+      "given": "Finished tasks: 'domain/task1', 'ports/task2', 'usecases/task3', 'adapters/task4'.",
+      "when": "A user runs `hexa dev worktree merge-order`.",
+      "then": "The tasks are merged in the order: 'domain/task1', 'ports/task2', 'usecases/task3', 'adapters/task4'."
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "Finishing first does not merge first",
+      "given": "Two finished tasks: one leasing `usecases/` that finished first, one leasing `domain/` that finished later",
+      "when": "A user runs `hexa dev worktree merge-order`.",
+      "then": "The order printed puts the `domain/` task before the `usecases/` task, and says the later task must rebase and re-pass its gate"
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "Hot shared files are leased for a single gated edit.",
+      "given": "A file 'mod.rs' that is shared across layers.",
+      "when": "A user runs `hexa do gate` to edit 'mod.rs'.",
+      "then": "The lease is granted for the duration of the gated edit."
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§5"
+      ],
+      "kind": "negative",
+      "description": "Hot shared files cannot be leased for a whole task.",
+      "given": "A file 'mod.rs' that is shared across layers.",
+      "when": "A user runs `hexa agent register --task t1 --lease mod.rs`.",
+      "then": "The lease is refused."
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§6"
+      ],
+      "kind": "example",
+      "description": "An unbound edit is refused when a second live session is detected.",
+      "given": "Two live sessions in the same repository.",
+      "when": "A user in an unbound session attempts to edit a file.",
+      "then": "The edit is refused, and the user is instructed to register."
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§6"
+      ],
+      "kind": "negative",
+      "description": "An unbound edit is allowed when there is only one live session.",
+      "given": "One live session in the repository.",
+      "when": "A user in an unbound session attempts to edit a file.",
+      "then": "The edit is allowed."
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§7"
+      ],
+      "kind": "example",
+      "description": "Two leased tasks, two worktrees, one ledger",
+      "given": "Two tasks registered from two worktrees of one repository",
+      "when": "`hexa agent list` runs in each worktree",
+      "then": "Each task records its own worktree, and both worktrees list the same two tasks"
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§2"
+      ],
+      "kind": "property",
+      "description": "A contract lease is refused exactly when a live lease consumes it",
+      "given": "Any set of live leases and a new lease on files under `ports/` or `domain/`",
+      "when": "`hexa agent register` is called after `hexa graph build`",
+      "then": "It is refused, naming the consuming lease, exactly when some file it covers is consumed by code under another live lease whose contract is not explicitly frozen for it; otherwise it is granted"
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§3"
+      ],
+      "kind": "property",
+      "description": "Another lease never edits a frozen file",
+      "given": "Any live use-case or adapter lease and the port and domain files the graph says it depends on",
+      "when": "Any other lease edits one of those files",
+      "then": "The hook refuses the edit; and two adapter leases never refuse each other through dependency"
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "§4"
+      ],
+      "kind": "property",
+      "description": "Merge order is layer order",
+      "given": "Any set of finished tasks in any finishing order",
+      "when": "`hexa dev worktree merge-order` runs",
+      "then": "Tasks are ordered domain, ports, use cases, adapters, composition root; within a layer, by finished time"
+    },
+    {
+      "id": "S17",
+      "decision": [
+        "§5"
+      ],
+      "kind": "property",
+      "description": "A hot shared file is never leased for a whole task",
+      "given": "Any composition root, `mod.rs`, `lib.rs`, manifest or lockfile",
+      "when": "A task registers a lease naming it",
+      "then": "The task lease is refused; that file is held only for the length of one `hexa do gate` edit and is free again when it ends"
+    },
+    {
+      "id": "S18",
+      "decision": [
+        "§6"
+      ],
+      "kind": "property",
+      "description": "An unbound edit is refused exactly when another session is live",
+      "given": "Any repository with any number of live sessions and an edit from a session bound to no task",
+      "when": "The edit hook runs",
+      "then": "The edit is refused with the command to register exactly when a second live session exists; a lone session is never asked"
+    },
+    {
+      "id": "S19",
+      "decision": [
+        "§7"
+      ],
+      "kind": "negative",
+      "description": "A second worktree never has a ledger of its own",
+      "given": "A task in worktree A leasing `usecases/billing`",
+      "when": "From worktree B, a task registers a lease on `usecases/billing`",
+      "then": "The registration is refused naming A's task, because B reads the same ledger as A"
+    },
+    {
+      "id": "S20",
+      "decision": [
+        "§7"
+      ],
+      "kind": "property",
+      "description": "Every worktree sees one ledger",
+      "given": "Any number of worktrees of one repository",
+      "when": "Tasks are registered and listed from any of them",
+      "then": "Every worktree reads and writes the ledger in the main checkout's `.hexa/`, and each leased task names its own worktree"
+    }
+  ]
+}
