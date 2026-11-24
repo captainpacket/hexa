@@ -6,7 +6,7 @@
 > [`ARCHITECTURE.md`](../../ARCHITECTURE.md); for *why* a decision was made,
 > read the ADR itself.
 
-**82 ADRs** across 1 epochs.
+**83 ADRs** across 1 epochs.
 
 ## Epoch: `single-agent` — **current**
 
@@ -17,6 +17,7 @@ _One gateway-mediated agent loop; code-graph context as the differentiator_
 | ADR-2611221600 | accepted | ADR-2611221600: Every hexa project gets agent orientation |  |
 | ADR-2611221610 | accepted | ADR-2611221610: The code graph is always built and fresh, and `hexa do gate` runs where the tests run |  |
 | ADR-2611191120 | accepted | ADR-2611191120: A test names its runner, and a project names where its tests run |  |
+| ADR-2611191500 | proposed | ADR-2611191500: What a `hexa harden` run costs, and how to cut it |  |
 | ADR-2611160730 | proposed | ADR-2611160730: Compliance by refusal, not by interface |  |
 | ADR-2611160750 | proposed | ADR-2611160750: Leases follow the architecture |  |
 | ADR-2611160910 | proposed | ADR-2611160910: An eval of how models use hexa |  |

@@ -174,7 +174,7 @@ async fn check(
 
     let code = exit_code(errors, warnings, strict);
     if code != 0 {
-        std::process::exit(code);
+        crate::commands::events::exit(code);
     }
     Ok(())
 }
