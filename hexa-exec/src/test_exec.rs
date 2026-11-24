@@ -543,7 +543,9 @@ pub async fn run_tree_remote(
             git_ok(root, &["rm", "-q", "--cached", "--ignore-unmatch", "--", p], &env)?;
         }
         let tree = git_ok(root, &["write-tree"], &env)?;
-        git_ok(root, &["commit-tree", &tree, "-p", &head, "-m", "hexa harden: a scratch candidate of the tree, gated on the remote runner (ADR-2611240900 §1)"], &[])
+        // A scratch commit that is only pushed to the runner and never kept, so it names hexa, not the operator: a host
+        // with no git identity (a CI runner) must still be able to gate a fix (spec_author's scratch commits do the same).
+        git_ok(root, &["-c", "user.name=hexa-harden", "-c", "user.email=harden@hexa.local", "commit-tree", &tree, "-p", &head, "-m", "hexa harden: a scratch candidate of the tree, gated on the remote runner (ADR-2611240900 §1)"], &[])
     })();
     let _ = std::fs::remove_file(&index);
     let candidate = built.map_err(|e| format!("the candidate commit could not be built: {e}"))?;
