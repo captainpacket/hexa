@@ -81,7 +81,11 @@ pub enum DoAction {
     },
     /// Gate the change already in your tree and commit ONLY the named files (ADR-2611160730 §3).
     /// No model is called: use it for a patch you wrote yourself. A failing or vacuous gate
-    /// commits nothing and leaves the change where it is.
+    /// commits nothing and leaves the change where it is. Under test.remote the gate runs on
+    /// the remote runner for a pushed candidate commit. The last stdout line is one JSON
+    /// result object: ok, commit, remote_head, tests, and on failure code, hint, field,
+    /// retryable (ADR-2611231400).
+    #[command(after_help = "Examples:\n  hexa do gate --files tests/t.rs -e 'cargo test --test t' -m 'test: first' --expect-red\n  hexa do gate --files src/a.rs -e 'cargo test --test t' -m 'feat: a'\n  hexa do gate --files src/a.rs -e 'cargo test --test t' -m 'feat: a' --dry-run")]
     Gate {
         /// The files the change is in (repeatable, or several after one --files). Only these are committed.
         #[arg(long = "files", value_name = "PATH", num_args = 1.., required = true)]
@@ -104,6 +108,16 @@ pub enum DoAction {
         /// and the branch moves to it only on a pass (ADR-2611221610 §7)
         #[arg(long)]
         local: bool,
+        /// A tests-first commit: commit the files only if the gate FAILS on test
+        /// assertions, with at least one test run. A compile error, zero tests or
+        /// a pass is refused. Never lands; prints the `hexa spec red` to run next
+        /// (ADR-2611231400 §4, §5)
+        #[arg(long, conflicts_with = "uncounted")]
+        expect_red: bool,
+        /// Say what would be committed, pushed and run, after the same checks,
+        /// and do none of it (ADR-2611231400 §6)
+        #[arg(long)]
+        dry_run: bool,
     },
     /// List recent direct runs (task, evidence verdict, commit) in this repository.
     Runs {
@@ -377,109 +391,8 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
                 }
             }
         }
-        DoAction::Gate { files, evidence, message, uncounted, no_land, local } => {
-            let top = std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).output()?;
-            if !top.status.success() {
-                anyhow::bail!("hexa do gate runs inside a git repository");
-            }
-            let root = std::path::PathBuf::from(String::from_utf8_lossy(&top.stdout).trim().to_string());
-            // Paths are given from where you stand; the gate runs and commits from the repository root.
-            let cwd = std::env::current_dir()?;
-            let mut rel: Vec<String> = Vec::new();
-            for f in &files {
-                match repo_relative(&root, &cwd, f) {
-                    // a path that is neither in the tree nor tracked (a deletion) is a mistake, not "no change": `--files a,b` used to report nothing to commit
-                    Some(p) if !root.join(&p).exists() && std::process::Command::new("git").args(["ls-files", "--error-unmatch", &p]).current_dir(&root).output().map(|o| !o.status.success()).unwrap_or(true) => {
-                        let hint = if f.contains(',') { "; give several files separated by spaces, not commas" } else { "" };
-                        anyhow::bail!("{f}: no such file in the tree or in git{hint}")
-                    }
-                    Some(p) => rel.push(p),
-                    None => anyhow::bail!("{f} is outside the repository ({}): only files in it can be gated and committed", root.display()),
-                }
-            }
-            // Under test.remote the gate runs on the remote runner, for a
-            // candidate commit of exactly these files (ADR-2611221610 §7).
-            let cfg = hexa_exec::test_exec::test_config(&root).map_err(|e| anyhow::anyhow!(e))?;
-            let remote = cfg.remote.clone().filter(|_| !local);
-            crate::commands::loop_cmd::note_run_gate(&evidence, "build", None);
-            if uncounted {
-                crate::commands::loop_cmd::note_gate_uncounted(&evidence);
-            }
-            crate::commands::events::start(&root);
-            crate::commands::events::step_start("gate");
-            println!("{} {}", "⬡ gate:".cyan().bold(), evidence);
-            println!("  {} {}", "files".dimmed(), rel.join(", "));
-            let started_at = chrono::Utc::now().to_rfc3339();
-            let clock = std::time::Instant::now();
-            let outcome = match &remote {
-                None => hexa_exec::direct_exec::gate_patch(&root, &rel, &evidence, &message, uncounted).await,
-                Some(template) => {
-                    match hexa_exec::test_exec::gate_patch_remote(&root, &rel, &evidence, &message, uncounted, template).await {
-                        Ok(g) => {
-                            println!(
-                                "  {} the remote runner's output (the evidence, noted on the commit under refs/notes/hexa-gate):",
-                                "\u{2192}".cyan()
-                            );
-                            for l in g.evidence.lines() {
-                                println!("    {l}");
-                            }
-                            match &g.pushed {
-                                Ok(r) => println!("  {} {} pushed to {}", "\u{2713}".green(), g.branch, r),
-                                Err(e) => println!("  {} {} not pushed: {}", "\u{26a0}".yellow(), g.branch, e),
-                            }
-                            Ok(g.commit.chars().take(7).collect())
-                        }
-                        Err(r) => {
-                            if let Some(out) = &r.output {
-                                println!("  {} the remote runner's output:", "\u{2192}".cyan());
-                                for l in out.lines() {
-                                    println!("    {l}");
-                                }
-                            }
-                            Err(r.why)
-                        }
-                    }
-                }
-            };
-            // `do runs` lists gate runs beside `do run`'s, from one feed.
-            hexa_exec::direct_exec::record_gate_run(
-                &hexa_exec::run_log(),
-                &root,
-                &rel,
-                &message,
-                &outcome,
-                started_at,
-                u64::try_from(clock.elapsed().as_millis()).unwrap_or(u64::MAX),
-            );
-            crate::commands::events::step_end("gate");
-            match outcome {
-                Ok(sha) => {
-                    println!("{} commit {} · {} file(s)", "✓ gated".green().bold(), sha.yellow(), rel.len());
-                    let mut result = json!({ "commit": sha, "files": rel });
-                    if !no_land {
-                        crate::commands::events::step_start("land");
-                        match crate::commands::land::land(&root, &evidence, uncounted, local).await {
-                            crate::commands::land::Landing::OnBase => {}
-                            crate::commands::land::Landing::Landed { base, sha } => {
-                                println!("{} on {} at {}", "✓ landed".green().bold(), base, sha.yellow());
-                                result["landed"] = json!({ "base": base, "sha": sha });
-                            }
-                            crate::commands::land::Landing::NotLanded { base, why } => {
-                                println!("{} on {}: {}", "⚠ not landed".yellow().bold(), base, why);
-                                result["not_landed"] = json!({ "base": base, "why": why });
-                            }
-                        }
-                        crate::commands::events::step_end("land");
-                    }
-                    crate::commands::events::finish(Some(result));
-                }
-                Err(e) => {
-                    println!("{}\n  {}", "✗ not committed".red().bold(), e.replace('\n', "\n  "));
-                    let code = if e.contains("nothing to commit") { "nothing_to_commit" } else { "gate_failed" };
-                    crate::commands::events::fail(code, &format!("not committed: {}", e.lines().next().unwrap_or("the gate did not pass")));
-                    anyhow::bail!("the gate did not pass");
-                }
-            }
+        DoAction::Gate { files, evidence, message, uncounted, no_land, local, expect_red, dry_run } => {
+            gate(files, evidence, message, uncounted, no_land, local, expect_red, dry_run).await?;
         }
         DoAction::Apply { description, file, also, evidence, patch, json: as_json } => {
             let patch = match patch {
@@ -577,6 +490,240 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+/// The result object `hexa do gate` ends with (ADR-2611231400 §1): printed as
+/// the last line of stdout.
+fn print_result(v: &serde_json::Value) {
+    println!("{}", serde_json::to_string(v).unwrap_or_else(|_| "{\"ok\":false}".to_string()));
+}
+
+fn tests_json(t: Option<hexa_core::ports::evidence::TestCounts>, uncounted: bool) -> serde_json::Value {
+    match t {
+        _ if uncounted => json!({ "uncounted": true }),
+        Some(t) => json!({ "passed": t.passed, "failed": t.failed }),
+        None => serde_json::Value::Null,
+    }
+}
+
+/// End a gate that did not finish: the human lines, the result object, the
+/// AG-UI failure, and a non-zero exit (ADR-2611231400 §1).
+fn gate_failed(mut base: serde_json::Value, f: hexa_exec::direct_exec::GateFailure, uncounted: bool, started: bool) -> anyhow::Result<()> {
+    if let Some(out) = &f.output {
+        println!("  {} the gate's output (last lines):", "\u{2192}".cyan());
+        for l in out.lines() {
+            println!("    {l}");
+        }
+    }
+    if let Some(first) = &f.first_failure {
+        println!("  {} first failure: {first}", "\u{2717}".red());
+    }
+    println!("{} [{}]\n  {}\n  {} {}", "\u{2717} not committed".red().bold(), f.code, f.why.replace('\n', "\n  "), "next:".dimmed(), f.hint);
+    base["ok"] = json!(false);
+    base["code"] = json!(f.code);
+    base["error"] = json!(f.why.lines().next().unwrap_or(""));
+    base["hint"] = json!(f.hint);
+    base["field"] = json!(f.field);
+    base["retryable"] = json!(f.retryable);
+    if let Some(c) = &f.commit {
+        base["commit"] = json!(c);
+    }
+    if f.tests.is_some() || (uncounted && f.output.is_some()) {
+        base["tests"] = tests_json(f.tests, uncounted);
+    }
+    if let Some(first) = &f.first_failure {
+        base["first_failure"] = json!(first);
+    }
+    if started {
+        crate::commands::events::fail(&f.code.replace('-', "_"), &format!("not committed: {}", f.why.lines().next().unwrap_or("the gate did not pass")));
+    }
+    print_result(&base);
+    anyhow::bail!("the gate did not pass ({})", f.code)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn gate(
+    files: Vec<String>,
+    evidence: String,
+    message: String,
+    uncounted: bool,
+    no_land: bool,
+    local: bool,
+    expect_red: bool,
+    dry_run: bool,
+) -> anyhow::Result<()> {
+    use hexa_exec::direct_exec::{Expect, GateFailure};
+    let expect = if expect_red { Expect::Red } else { Expect::Green };
+    let top = std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).output()?;
+    if !top.status.success() {
+        let base = json!({ "ok": false, "mode": if dry_run { "dry-run" } else if local { "local" } else { "remote" }, "expect": expect.as_str(), "files": files });
+        return gate_failed(base, *GateFailure::new("refused", "hexa do gate runs inside a git repository", "cd into the repository, then run the same command", None, false), uncounted, false);
+    }
+    let root = std::path::PathBuf::from(String::from_utf8_lossy(&top.stdout).trim().to_string());
+    let branch = std::process::Command::new("git")
+        .args(["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .current_dir(&root)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    // Under test.remote the gate runs on the remote runner, for a
+    // candidate commit of exactly these files (ADR-2611221610 §7).
+    let cfg = hexa_exec::test_exec::test_config(&root).map_err(|e| anyhow::anyhow!(e))?;
+    let remote = cfg.remote.clone().filter(|_| !local);
+    let mode = if dry_run { "dry-run" } else if remote.is_some() { "remote" } else { "local" };
+    let mut base = json!({ "ok": false, "mode": mode, "expect": expect.as_str(), "files": files, "branch": branch });
+
+    // Paths are given from where you stand; the gate runs and commits from the repository root.
+    let cwd = std::env::current_dir()?;
+    let mut rel: Vec<String> = Vec::new();
+    for f in &files {
+        match repo_relative(&root, &cwd, f) {
+            // a path that is neither in the tree nor tracked (a deletion) is a mistake, not "no change": `--files a,b` used to report nothing to commit
+            Some(p) if !root.join(&p).exists() && std::process::Command::new("git").args(["ls-files", "--error-unmatch", &p]).current_dir(&root).output().map(|o| !o.status.success()).unwrap_or(true) => {
+                let hint = if f.contains(',') { "give several files separated by spaces, not commas" } else { "name a file that is in the tree, or a tracked file you deleted" };
+                return gate_failed(base, *GateFailure::new("refused", format!("{f}: no such file in the tree or in git"), hint, Some("--files"), false), uncounted, false);
+            }
+            Some(p) => rel.push(p),
+            None => {
+                let why = format!("{f} is outside the repository ({}): only files in it can be gated and committed", root.display());
+                return gate_failed(base, *GateFailure::new("refused", why, "name files inside the repository", Some("--files"), false), uncounted, false);
+            }
+        }
+    }
+    base["files"] = json!(rel);
+    let lands = !no_land && !expect_red;
+
+    if dry_run {
+        println!("{} {} {}", "\u{2b21} gate:".cyan().bold(), evidence, "[dry run: nothing is pushed, run or committed]".dimmed());
+        return match hexa_exec::test_exec::gate_plan(&root, &rel, &evidence, remote.as_deref()).await {
+            Err(f) => gate_failed(base, *f, uncounted, false),
+            Ok(plan) => {
+                let then = match &plan.upstream {
+                    Some((r, m)) => format!(
+                        "on a {} verdict: move {} to the candidate, push it to {r} ({m}) and read it back{}",
+                        expect.as_str(),
+                        plan.branch,
+                        if lands { ", then land it on the base" } else { "; no landing" }
+                    ),
+                    None => format!(
+                        "on a {} verdict: commit the files on {}{}",
+                        expect.as_str(),
+                        plan.branch,
+                        if lands { ", then land it on the base" } else { "; no landing" }
+                    ),
+                };
+                let would = json!({
+                    "parent": plan.parent,
+                    "commit_files": plan.files,
+                    "push": plan.upstream.as_ref().map(|(r, _)| json!({ "remote": r, "ref": "refs/heads/hexa-gate/<first 12 of the candidate>" })),
+                    "run": plan.run.clone().unwrap_or_else(|| evidence.clone()),
+                    "then": then,
+                    "lands": lands,
+                });
+                println!("  {} commit {} on {} (parent {})", "would".dimmed(), plan.files.join(", "), plan.branch, &plan.parent[..12.min(plan.parent.len())]);
+                if let Some((r, _)) = &plan.upstream {
+                    println!("  {} push the candidate to {r} as refs/heads/hexa-gate/<first 12 of the candidate>", "would".dimmed());
+                }
+                println!("  {} run {}", "would".dimmed(), plan.run.as_deref().unwrap_or(&evidence));
+                println!("  {} {then}", "would".dimmed());
+                base["ok"] = json!(true);
+                base["branch"] = json!(plan.branch);
+                base["would"] = would;
+                print_result(&base);
+                Ok(())
+            }
+        };
+    }
+
+    crate::commands::loop_cmd::note_run_gate(&evidence, "build", None);
+    if uncounted {
+        crate::commands::loop_cmd::note_gate_uncounted(&evidence);
+    }
+    crate::commands::events::start(&root);
+    crate::commands::events::step_start("gate");
+    println!("{} {}{}", "\u{2b21} gate:".cyan().bold(), evidence, if expect_red { " [expect red]" } else { "" });
+    println!("  {} {}", "files".dimmed(), rel.join(", "));
+    let started_at = chrono::Utc::now().to_rfc3339();
+    let clock = std::time::Instant::now();
+    let outcome: Result<serde_json::Value, Box<GateFailure>> = match &remote {
+        None => hexa_exec::direct_exec::gate_patch_local(&root, &rel, &evidence, &message, uncounted, expect).await.map(|g| {
+            json!({ "commit": g.commit, "tests": tests_json(g.judged.tests, uncounted), "first_failure": g.judged.first_failure })
+        }),
+        Some(template) => hexa_exec::test_exec::gate_patch_remote(&root, &rel, &evidence, &message, uncounted, template, expect).await.map(|g| {
+            println!("  {} the remote runner's output (the evidence, noted on the commit under refs/notes/hexa-gate):", "\u{2192}".cyan());
+            for l in g.evidence.lines() {
+                println!("    {l}");
+            }
+            println!("  {} {} pushed to {}, which reports it at {}", "\u{2713}".green(), g.branch, g.remote, &g.remote_head[..12.min(g.remote_head.len())]);
+            json!({ "commit": g.commit, "remote": g.remote, "remote_head": g.remote_head,
+                    "tests": tests_json(g.judged.tests, uncounted), "first_failure": g.judged.first_failure })
+        }),
+    };
+    // `do runs` lists gate runs beside `do run`'s, from one feed.
+    let logged: Result<String, String> = match &outcome {
+        Ok(v) => Ok(v["commit"].as_str().unwrap_or("").chars().take(7).collect()),
+        Err(f) => Err(f.why.clone()),
+    };
+    hexa_exec::direct_exec::record_gate_run(
+        &hexa_exec::run_log(),
+        &root,
+        &rel,
+        &message,
+        &logged,
+        started_at,
+        u64::try_from(clock.elapsed().as_millis()).unwrap_or(u64::MAX),
+    );
+    crate::commands::events::step_end("gate");
+    let done = match outcome {
+        Err(f) => return gate_failed(base, *f, uncounted, true),
+        Ok(done) => done,
+    };
+    let sha = done["commit"].as_str().unwrap_or("").to_string();
+    for k in ["commit", "remote", "remote_head", "tests"] {
+        if !done[k].is_null() {
+            base[k] = done[k].clone();
+        }
+    }
+    base["ok"] = json!(true);
+    if let Some(t) = done["tests"].as_object() {
+        let counts = match (t.get("passed"), t.get("failed")) {
+            (Some(p), Some(f)) => format!(" · {p} passed, {f} failed"),
+            _ => " · uncounted".to_string(),
+        };
+        let what = if expect_red { "\u{2713} red, committed" } else { "\u{2713} gated" };
+        println!("{} commit {} · {} file(s){counts}", what.green().bold(), sha.chars().take(12).collect::<String>().yellow(), rel.len());
+    }
+    if expect_red {
+        if let Some(first) = done["first_failure"].as_str() {
+            base["first_failure"] = json!(first);
+        }
+        // The red's binding is `hexa spec red`'s to make (ADR-2611231400 §5).
+        let adr = crate::commands::loop_cmd::read_loop(&root)
+            .and_then(|e| e.get("adr").and_then(|a| a.as_str()).map(str::to_string))
+            .filter(|a| !a.trim().is_empty())
+            .unwrap_or_else(|| "<ADR>".to_string());
+        let next = format!("hexa spec red {adr} {sha}");
+        println!("  {} {next}   (binds each scenario with --test S=<file>::<name>; a red never lands)", "next:".dimmed());
+        base["next"] = json!(next);
+    } else if lands {
+        crate::commands::events::step_start("land");
+        match crate::commands::land::land(&root, &evidence, uncounted, local).await {
+            crate::commands::land::Landing::OnBase => {}
+            crate::commands::land::Landing::Landed { base: b, sha } => {
+                println!("{} on {} at {}", "\u{2713} landed".green().bold(), b, sha.yellow());
+                base["landed"] = json!({ "base": b, "sha": sha });
+            }
+            crate::commands::land::Landing::NotLanded { base: b, why } => {
+                println!("{} on {}: {}", "\u{26a0} not landed".yellow().bold(), b, why);
+                base["not_landed"] = json!({ "base": b, "why": why });
+            }
+        }
+        crate::commands::events::step_end("land");
+    }
+    crate::commands::events::finish(Some(base.clone()));
+    print_result(&base);
     Ok(())
 }
 

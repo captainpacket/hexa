@@ -431,24 +431,35 @@ pub async fn run_gate(dir: &Path, gate: &str, cfg: &TestConfig, local: bool) -> 
 /// How many lines of the remote run's output are kept as a gate's evidence.
 const EVIDENCE_LINES: usize = 30;
 
-/// A change `hexa do gate` committed after its gate passed on the remote runner.
+/// A change `hexa do gate` committed after its gate passed on the remote
+/// runner, and that the remote then reported holding (ADR-2611231400 §3).
 #[derive(Debug, Clone)]
 pub struct RemoteGated {
     /// The commit the runner tested, which is the commit the branch now points at.
     pub commit: String,
     /// The branch it went on.
     pub branch: String,
+    /// The remote it was pushed to.
+    pub remote: String,
+    /// The branch's head as `git ls-remote` read it back after the push.
+    pub remote_head: String,
     /// The last [`EVIDENCE_LINES`] lines of the runner's output.
     pub evidence: String,
-    /// `Err` when the branch could not be pushed; the commit stands locally.
-    pub pushed: Result<String, String>,
+    /// The verdict: counts, and for a red the first failing line.
+    pub judged: crate::direct_exec::Judged,
 }
 
-/// A remote `do gate` that did not commit: the reason, and the runner's output tail when it ran.
+/// What `hexa do gate --dry-run` would do (ADR-2611231400 §6).
 #[derive(Debug, Clone)]
-pub struct RemoteRefused {
-    pub why: String,
-    pub output: Option<String>,
+pub struct GatePlan {
+    /// HEAD's full id: the candidate's parent.
+    pub parent: String,
+    pub branch: String,
+    pub files: Vec<String>,
+    /// The upstream's remote and branch ref, under `test.remote`.
+    pub upstream: Option<(String, String)>,
+    /// The `test.remote` command, with `{commit}` shown as `<candidate>`.
+    pub run: Option<String>,
 }
 
 fn git_ok(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Result<String, String> {
@@ -465,13 +476,82 @@ fn git_ok(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> Result<String, Str
     }
 }
 
-/// `hexa do gate` under `test.remote` (ADR-2611221610 §7). The same checks as
-/// a local gate; then a candidate commit (HEAD's tree with `files` as they are
-/// in the working tree, HEAD its parent) is built without moving the branch,
-/// pushed to `refs/heads/hexa-gate/<id>` on the branch's remote, and the gate
-/// runs through `template` for it. Only a pass the evidence reader accepts
-/// moves the branch, by compare-and-swap, to that very commit; then the branch
-/// is pushed and the output's tail is noted on the commit under
+use crate::direct_exec::{Expect, GateFailure};
+
+/// HEAD's full id and its branch, or the refusal of a gate with nowhere to commit.
+fn head_and_branch(root: &Path) -> Result<(String, String), Box<GateFailure>> {
+    let head = full_commit(root, "HEAD").ok_or_else(|| {
+        GateFailure::new("refused", "HEAD is not a commit: there is nothing to build the candidate on", "make a first commit, then gate", None, false)
+    })?;
+    let branch = git_ok(root, &["symbolic-ref", "--quiet", "--short", "HEAD"], &[]).map_err(|_| {
+        GateFailure::new("refused", "HEAD is detached: a gate commits onto a branch", "`git switch -c <branch>`, then run the same command", None, false)
+    })?;
+    Ok((head, branch))
+}
+
+/// The remote and branch ref `branch` tracks. A branch with none is refused
+/// rather than guessed at (ADR-2611221610 §7), and so is a branch that tracks
+/// a branch of another name: pushing to that upstream would put the commit on
+/// another branch, typically the base (gaberger/hexa#75).
+fn upstream_of(root: &Path, branch: &str) -> Result<(String, String), Box<GateFailure>> {
+    let (remote, merge) = git_ok(root, &["config", &format!("branch.{branch}.remote")], &[])
+        .and_then(|r| git_ok(root, &["config", &format!("branch.{branch}.merge")], &[]).map(|m| (r, m)))
+        .map_err(|_| {
+            GateFailure::new(
+                "no-upstream",
+                format!(
+                    "refused: {branch} tracks no remote branch, so a remote gate (test.remote) has nowhere to push the candidate; nothing committed"
+                ),
+                format!("`git push -u origin {branch}` first, then run the same command; or gate here with --local"),
+                None,
+                false,
+            )
+        })?;
+    if merge != format!("refs/heads/{branch}") {
+        let theirs = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
+        return Err(GateFailure::new(
+            "no-upstream",
+            format!(
+                "refused: {branch} tracks {remote}/{theirs}, not a branch of its own, so a remote gate would push the commit to {theirs}; nothing committed"
+            ),
+            format!("`git push -u {remote} {branch}` first, so {branch} tracks its own name, then run the same command; or gate here with --local"),
+            None,
+            false,
+        ));
+    }
+    Ok((remote, merge))
+}
+
+/// The branch's head on `remote`, read back from the remote itself.
+fn remote_head(root: &Path, remote: &str, merge: &str) -> Option<String> {
+    git_ok(root, &["ls-remote", remote, merge], &[]).ok()?.split_whitespace().next().map(str::to_string)
+}
+
+/// What `hexa do gate` would do, after every check it makes before it builds
+/// a candidate, doing none of it (ADR-2611231400 §6). `template` is the
+/// `test.remote` template, or `None` for a gate run here.
+pub async fn gate_plan(root: &Path, files: &[String], evidence: &str, template: Option<&str>) -> Result<GatePlan, Box<GateFailure>> {
+    let paths = crate::direct_exec::gate_checks(root, files).await.map_err(GateFailure::from_checks)?;
+    let (parent, branch) = head_and_branch(root)?;
+    let (upstream, run) = match template {
+        None => (None, None),
+        Some(t) => {
+            let up = upstream_of(root, &branch)?;
+            check_remote_template(t).map_err(|e| GateFailure::new("refused", e, "fix test.remote in .hexa/project.json", None, false))?;
+            (Some(up), Some(fill(t, &[("commit", "<candidate>"), ("cmd", evidence)])))
+        }
+    };
+    Ok(GatePlan { parent, branch, files: paths, upstream, run })
+}
+
+/// `hexa do gate` under `test.remote` (ADR-2611221610 §7, ADR-2611231400).
+/// The same checks as a local gate; then a candidate commit (HEAD's tree with
+/// `files` as they are in the working tree, HEAD its parent) is built without
+/// moving the branch, pushed to `refs/heads/hexa-gate/<id>` on the branch's
+/// remote, and the gate runs through `template` for it. Only a verdict that
+/// meets `expect` moves the branch, by compare-and-swap, to that very commit;
+/// then the branch is pushed, its head is read back from the remote and must
+/// be the commit, and the output's tail is noted on the commit under
 /// `refs/notes/hexa-gate`. The temporary ref is deleted in every case. A
 /// failure, a vacuous run or a runner failure commits nothing and leaves the
 /// change in the tree.
@@ -482,24 +562,14 @@ pub async fn gate_patch_remote(
     message: &str,
     uncounted: bool,
     template: &str,
-) -> Result<RemoteGated, RemoteRefused> {
-    let refuse = |why: String| RemoteRefused { why, output: None };
-    let paths = crate::direct_exec::gate_checks(root, files).await.map_err(refuse)?;
-    let head = full_commit(root, "HEAD").ok_or_else(|| refuse("HEAD is not a commit: there is nothing to build the candidate on".into()))?;
-    let branch = git_ok(root, &["symbolic-ref", "--quiet", "--short", "HEAD"], &[])
-        .map_err(|_| refuse("HEAD is detached: a remote gate commits onto a branch".into()))?;
-    // Pushed only where the branch already goes: its upstream. A branch with
-    // none is refused rather than guessed at (ADR-2611221610 §7).
-    let upstream = git_ok(root, &["config", &format!("branch.{branch}.remote")], &[])
-        .and_then(|r| git_ok(root, &["config", &format!("branch.{branch}.merge")], &[]).map(|m| (r, m)));
-    let Ok((remote, merge)) = upstream else {
-        return Err(refuse(format!(
-            "refused: {branch} tracks no remote branch, so a remote gate (test.remote) has nowhere to push the candidate: \
-             `git push -u origin {branch}` first, or gate here with --local; nothing committed"
-        )));
-    };
+    expect: Expect,
+) -> Result<RemoteGated, Box<GateFailure>> {
+    let paths = crate::direct_exec::gate_checks(root, files).await.map_err(GateFailure::from_checks)?;
+    let (head, branch) = head_and_branch(root)?;
+    let (remote, merge) = upstream_of(root, &branch)?;
 
     // The candidate: HEAD's tree plus the named files, in a throwaway index.
+    let refuse = |why: String| GateFailure::new("refused", why, "read the git error, fix it, then run the same command again", None, true);
     let index = git_ok(root, &["rev-parse", "--git-path", "hexa-gate-index"], &[]).map_err(refuse)?;
     let index = if Path::new(&index).is_absolute() { PathBuf::from(index) } else { root.join(index) };
     let _ = std::fs::remove_file(&index);
@@ -511,49 +581,92 @@ pub async fn gate_patch_remote(
         add.extend(paths.iter().map(String::as_str));
         git_ok(root, &add, &env)?;
         let tree = git_ok(root, &["write-tree"], &env)?;
-        let how = if uncounted { "uncounted: its exit status alone decided" } else { "counted" };
+        let adr = if expect == Expect::Red { "ADR-2611231400 §4" } else { "ADR-2611221610 §7" };
         let msg = format!(
-            "{}\n\nGate: {evidence} ({how}; remote: test.remote; hexa do gate, ADR-2611221610 §7)",
-            message.trim()
+            "{}\n\nGate: {evidence} ({}; remote: test.remote; hexa do gate, {adr})",
+            message.trim(),
+            crate::direct_exec::gate_how(uncounted, expect)
         );
         git_ok(root, &["commit-tree", &tree, "-p", &head, "-m", &msg], &[])
     })();
     let _ = std::fs::remove_file(&index);
     let candidate = built.map_err(|e| refuse(format!("the candidate commit could not be built: {e}")))?;
+    let with_commit = |mut f: Box<GateFailure>| {
+        f.commit = Some(candidate.clone());
+        f
+    };
     let short: String = candidate.chars().take(12).collect();
     let temp = format!("refs/heads/hexa-gate/{short}");
-    git_ok(root, &["push", "-q", &remote, &format!("{candidate}:{temp}")], &[])
-        .map_err(|e| refuse(format!("the candidate {short} could not be pushed to {remote}: {e}; nothing committed")))?;
+    git_ok(root, &["push", "-q", &remote, &format!("{candidate}:{temp}")], &[]).map_err(|e| {
+        with_commit(GateFailure::new(
+            "push-refused",
+            format!("the candidate {short} could not be pushed to {remote} ({temp}): {e}; nothing committed, the change is left in the tree"),
+            format!("check that {remote} is reachable and accepts `refs/heads/hexa-gate/*`, then run the same command again"),
+            None,
+            true,
+        ))
+    })?;
     println!("  candidate {short} pushed to {remote} ({temp}); sending the gate to the remote runner (test.remote)");
     let ran = run_remote_full(root, template, &candidate, vec![evidence.to_string()]).await;
     let _ = git_ok(root, &["push", "-q", &remote, "--delete", &temp], &[]);
-    let (mut split, full) = ran.map_err(|e| refuse(format!("{e}\nnothing committed; the change is left in the tree")))?;
+    let (mut split, full) = ran.map_err(|e| {
+        let wrong = e.starts_with("runner failure");
+        with_commit(GateFailure::new(
+            if wrong { "remote-runner-wrong-commit" } else { "refused" },
+            format!("{e}\nnothing committed; the change is left in the tree"),
+            if wrong {
+                format!("the runner did not show it ran {short}: check that it is reachable and checks out the commit it is given (test.remote), then run again")
+            } else {
+                "fix test.remote in .hexa/project.json".to_string()
+            },
+            None,
+            wrong,
+        ))
+    })?;
     let (passed, output) = split.remove(0);
     let kept = tail(&full, EVIDENCE_LINES);
-    let verdict = hexa_core::ports::evidence::read_gate_evidence(evidence, passed, &output, uncounted);
-    if !verdict.passes() {
-        return Err(RemoteRefused {
-            why: format!(
-                "{}\nnothing committed; the change is left in the tree",
-                crate::direct_exec::evidence_failure(evidence, &verdict, &tail(&output, 40))
-            ),
-            output: Some(kept),
-        });
-    }
+    let judged = crate::direct_exec::judge_gate(evidence, passed, &output, uncounted, expect, true).map_err(|mut f| {
+        f.output = Some(kept.clone());
+        with_commit(f)
+    })?;
     // The branch moves to the commit that was tested, only if it is still where the candidate was built.
-    git_ok(root, &["update-ref", &format!("refs/heads/{branch}"), &candidate, &head], &[]).map_err(|e| RemoteRefused {
-        why: format!("the gate passed on {short}, but {branch} moved while it ran ({e}); nothing committed, the change is left in the tree"),
-        output: Some(kept.clone()),
+    git_ok(root, &["update-ref", &format!("refs/heads/{branch}"), &candidate, &head], &[]).map_err(|e| {
+        let mut f = GateFailure::new(
+            "branch-moved",
+            format!("the gate passed on {short}, but {branch} moved while it ran ({e}); nothing committed, the change is left in the tree"),
+            "run the same command again: it builds a new candidate on the branch as it is now",
+            None,
+            true,
+        );
+        f.output = Some(kept.clone());
+        with_commit(f)
     })?;
     let mut reset = vec!["reset", "-q", "--"];
     reset.extend(paths.iter().map(String::as_str));
     let _ = git_ok(root, &reset, &[]);
     let _ = git_ok(root, &["notes", "--ref=hexa-gate", "add", "-f", "-m", &kept, &candidate], &[]);
-    let pushed = git_ok(root, &["push", "-q", &remote, &format!("refs/heads/{branch}:{merge}")], &[]).map(|_| remote.clone());
-    if pushed.is_ok() {
-        let _ = git_ok(root, &["push", "-q", &remote, "refs/notes/hexa-gate"], &[]);
+    // Done only when the remote says so (ADR-2611231400 §3).
+    let not_there = |code: &'static str, why: String| {
+        let mut f = GateFailure::new(
+            code,
+            why,
+            format!("the commit stands on {branch} here: `git push {remote} {branch}`; if {remote} moved on, rebase and gate again"),
+            None,
+            true,
+        );
+        f.output = Some(kept.clone());
+        f.tests = judged.tests;
+        with_commit(f)
+    };
+    git_ok(root, &["push", "-q", &remote, &format!("refs/heads/{branch}:{merge}")], &[])
+        .map_err(|e| not_there("push-refused", format!("the gate passed on {short} and {branch} moved to it here, but {remote} refused the push: {e}")))?;
+    let _ = git_ok(root, &["push", "-q", &remote, "refs/notes/hexa-gate"], &[]);
+    let read = remote_head(root, &remote, &merge).unwrap_or_default();
+    if read != candidate {
+        let shown = if read.is_empty() { "nothing".to_string() } else { read.clone() };
+        return Err(not_there("remote-head-mismatch", format!("{branch} was pushed, but {remote} reports {merge} at {shown}, not {candidate}")));
     }
-    Ok(RemoteGated { commit: candidate, branch, evidence: kept, pushed })
+    Ok(RemoteGated { commit: candidate, branch, remote, remote_head: read, evidence: kept, judged })
 }
 
 #[cfg(test)]
@@ -692,5 +805,35 @@ mod tests {
             assert_eq!(got[0].1.trim_end_matches('\n'), cmd.trim_end_matches('\n'), "{script}");
             assert_inert(d.path(), cmd);
         }
+    }
+
+    /// A repository with branch `branch` whose upstream is `remote`'s `merge`.
+    fn tracking(branch: &str, merge: &str) -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        let git = |a: &[&str]| assert!(std::process::Command::new("git").args(a).current_dir(d.path()).status().unwrap().success(), "{a:?}");
+        git(&["init", "-q", "-b", branch]);
+        git(&["config", &format!("branch.{branch}.remote"), "origin"]);
+        git(&["config", &format!("branch.{branch}.merge"), merge]);
+        d
+    }
+
+    #[test]
+    fn a_branch_tracking_its_own_name_has_an_upstream() {
+        let d = tracking("feat", "refs/heads/feat");
+        assert_eq!(upstream_of(d.path(), "feat").unwrap(), ("origin".to_string(), "refs/heads/feat".to_string()));
+    }
+
+    /// gaberger/hexa#75: a worktree made with `git worktree add -b t3/x <dir>
+    /// origin/main` tracks origin/main, and the remote gate pushed its commit
+    /// to main. Pushing to the upstream is pushing to another branch: refused
+    /// by name, as a branch with no upstream of its own is (ADR-2611221610 §7).
+    #[test]
+    fn a_branch_tracking_another_branch_is_refused_by_name() {
+        let d = tracking("t3/dead-exports", "refs/heads/main");
+        let f = upstream_of(d.path(), "t3/dead-exports").unwrap_err();
+        assert_eq!(f.code, "no-upstream");
+        assert!(f.why.contains("t3/dead-exports") && f.why.contains("main"), "{}", f.why);
+        assert!(f.hint.contains("git push -u origin t3/dead-exports"), "{}", f.hint);
+        assert!(!f.retryable);
     }
 }

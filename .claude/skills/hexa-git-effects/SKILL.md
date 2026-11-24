@@ -78,6 +78,16 @@ For example, `hexa do gate --files src/a.rs src/b.rs -e "cargo test -p mycrate" 
 - **A failing, vacuous (0 tests) or unrecognised result commits nothing** and
   leaves your patch exactly where it is. Use `--uncounted` when the evidence is
   not a test runner.
+- **`--expect-red`** (a tests-first commit) commits only if the gate fails on
+  test assertions with at least one test run. A pass, zero tests or a compile
+  error commits nothing. A red commit never lands.
+- **Under `test.remote`** (unless `--local`) it pushes a candidate commit to
+  `refs/heads/hexa-gate/<id>` on the branch's upstream and deletes that ref
+  afterwards, whatever the outcome. On a verdict it accepts, it moves this branch
+  to the tested commit, pushes it, reads it back with `git ls-remote`, and adds
+  a git note under `refs/notes/hexa-gate`. A refused push (`push-refused`) leaves
+  the commit on this branch here, unpushed.
+- **`--dry-run`** pushes, runs and commits nothing. It prints the plan.
 - **Resets nothing, reverts nothing.**
 - **Recover:** `git reset --soft HEAD~1` while it is still the tip.
 

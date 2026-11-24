@@ -163,8 +163,15 @@ one bash script (`bash ci/check-x.sh`) counts as one test.
 `spec red` and `loop stage done` then send every test for the commit concerned
 through it, in one run, and refuse an unpushed commit or a tree that differs
 from HEAD. They never fall back to running here; `--local` runs here, on purpose.
-`hexa do gate` gates an uncommitted change, so it refuses under a remote unless
-given `--local`.
+`hexa do gate` sends its gate there too: it pushes a candidate commit of the
+named files to `refs/heads/hexa-gate/<id>`, runs the gate on the remote runner
+for that commit, and moves the branch only on a verdict it accepts, then pushes
+the branch and reads its head back (the branch must track a remote branch).
+Tests first: commit them while they fail with `--expect-red`, which refuses a
+pass, zero tests and a compile error, never lands, and prints the
+`hexa spec red <ADR> <sha>` to run next. `--dry-run` shows what it would push
+and run. The last stdout line is one JSON object: `ok`, `commit`,
+`remote_head`, `tests`, and on failure `code`, `hint`, `field`, `retryable`.
 
 ## 5. Harden, then ship
 
