@@ -1,11 +1,12 @@
 ---
 id: ADR-2610271110
-status: proposed
+status: accepted
 date: 2026-10-27
 ---
 # ADR-2610271110: A decision not yet built is declared, and the declaration may only shrink
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-10-27
 **Drivers:** Forgejo CI on `main` has failed on every commit since `a1b6d85` (2026-10-27), and three pull requests were merged over it. `hexa adr gates --ci` fails on two gates whose code was never written. ADR-2610161730 (Accepted 2026-10-16) names `cargo test -p hexa-exec --test delegate_scope`, and no such test exists. ADR-2610221834 (Proposed) names `hexa spec verify ADR-2610221834`, which fails by design until it is built. Both failures are true. But a gate that is red for a known reason hides the next red one: nobody reads why CI failed once it always fails.
 

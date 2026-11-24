@@ -1,11 +1,12 @@
 ---
 id: ADR-2610281628
-status: proposed
+status: accepted
 date: 2026-10-28
 ---
 # ADR-2610281628: an amended decision is re-proved where it changed
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-10-28
 **Drivers:** ADR-2610281516 changed how `claude-text` is called (JSON output, the prompt on stdin) and how a rejected test generation is handled (repaired, not refused at once). That supersedes five accepted scenarios of ADR-2610270901, which name `--output-format text` and "the prompt argument", and it breaks the sealed test of ADR-2610221540 S15b, whose fake backend serves exactly one reply. The scenarios had to change and the test had to be re-proved, but hexa had one way to do either: re-accepting a changed spec drops every scenario's test, red commit and seal, and regenerating the whole file cannot be red, because the unchanged scenarios' code already exists and passes.
 

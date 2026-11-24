@@ -1,6 +1,7 @@
 # ADR-2611151330: `hexa dev build-keys` catches a native build that recompiles depending on the command
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-11-15
 **Drivers:** In Strata, DuckDB's C++ (about 295 MB of objects, minutes of CPU) was compiled three times into one target directory in under a day, with identical output each time. Several agents work in several worktrees, each running a different cargo command (`build -p strata-server`, `test -p strata-conformance`, `clippy --workspace --all-targets`), so each rebuilt what the others had built. Nothing in the project's gates could see it, and finding the cause took a long investigation. The cause is a property of the dependency graph, so a check over the graph, with no compilation, finds it in seconds.
 

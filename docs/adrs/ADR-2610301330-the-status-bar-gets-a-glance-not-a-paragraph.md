@@ -1,11 +1,12 @@
 ---
 id: ADR-2610301330
-status: proposed
+status: accepted
 date: 2026-10-30
 ---
 # ADR-2610301330: The status bar gets a glance, not a paragraph
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-10-30
 **Drivers:** A user, on 2026-10-30, about the Claude Code status bar in a hexa project: "the status line looks like a giant runon sentence". The template `hexa init` installs runs `hexa loop 2>/dev/null | head -1`, so the bar shows the first line of the full report. With nothing recorded that line is advice, `⬡ Loop (ccs): nothing recorded. Decide → Gate → Build → Harden. Record with `hexa loop adr <ID>` and `hexa loop gate '<command>'`.`. With a gate recorded it is the gate command verbatim, pipes and all: `⬡ Loop (ccs): stage gate · ADR none · gate cargo test --test domain compose_status 2>&1 | grep -E "test result: ok. [1-9]"`.
 
