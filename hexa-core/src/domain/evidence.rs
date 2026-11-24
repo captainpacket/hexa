@@ -249,13 +249,22 @@ fn tally(output: &str) -> Tally {
 
         // go test: "--- PASS: T", "--- FAIL: T", "ok  \tpkg\t0.01s", "FAIL\tpkg", the
         // bare "FAIL" summary, and the zero-test markers.
+        // A `t.Run` subtest (`--- PASS: TestX/case`) is part of the test before
+        // the `/`, whose own line counts it (ADR-2611230833 §2).
+        let go_subtest = |l: &str| {
+            l.split_once(": ").map(|(_, rest)| rest).and_then(|rest| rest.split_whitespace().next()).is_some_and(|name| name.contains('/'))
+        };
         if line.starts_with("--- PASS") {
-            t.saw(1, 0);
+            if !go_subtest(line) {
+                t.saw(1, 0);
+            }
             go_listed = true;
             continue;
         }
         if line.starts_with("--- FAIL") {
-            t.saw(0, 1);
+            if !go_subtest(line) {
+                t.saw(0, 1);
+            }
             go_listed = true;
             continue;
         }

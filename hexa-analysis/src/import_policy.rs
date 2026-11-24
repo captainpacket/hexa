@@ -275,10 +275,14 @@ pub fn judge(
     if origin == Origin::Internal {
         return Verdict::OutOfScope;
     }
-    // A Go import path names one package, and Go packages do not nest:
-    // `net` is not `net/netip`. A Go `deny` entry denies the package it names
-    // and no other (ADR-2611221933 §1); every other match is by prefix.
-    let denies = |d: &String| if lang == Language::Go { raw == d } else { covers(raw, d, lang) };
+    // A Go standard-library package is one package: `net` is not
+    // `net/netip`. A Go `deny` entry naming one (no dot in its first path
+    // element) denies that package only; one naming a module covers the
+    // packages below it, as every other match does (ADR-2611221933 §1).
+    let go_stdlib = |d: &str| !d.split('/').next().unwrap_or("").contains('.');
+    let denies = |d: &String| {
+        if lang == Language::Go && go_stdlib(d) { raw == d } else { covers(raw, d, lang) }
+    };
     if deny.iter().any(denies) {
         return Verdict::DeniedByDeny;
     }
