@@ -1,11 +1,12 @@
 ---
 id: ADR-2610281516
-status: proposed
+status: accepted
 date: 2026-10-28
 ---
 # ADR-2610281516: inference is measured, cached, and repaired rather than repeated
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-10-28
 **Drivers:** On 2026-10-28 one design review of a 676-line draft took 14 completions and 9–11 minutes; stage 8 sent byte-for-byte the prompt stage 5 had sent, and three synthesizer calls deduplicated a single reviewer's list. Generating the example app's tests took 16 full regenerations, about two minutes each, and most were rejected for one compile error in the test file — a borrow-check slip a single follow-up would have fixed. None of this shows in `hexa spend`: `claude-text` records 0 tokens and no cost, so the cost of a hexa run is invisible. Its prompt also travels as one argv argument, which Linux caps at 128 KiB.
 

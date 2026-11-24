@@ -1,6 +1,7 @@
 # ADR-2611051850: hexa keeps the record and the rules for concurrent agents
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-11-05
 **Drivers:** In a strata session on 2026-11-02..05, several agents worked at once and hexa could not say how many. Five failures came from one gap: hexa has no record of who is doing what, and no rule about which files a piece of work may touch. (1) The only count was `ps | grep hexa` plus `ls ~/.hexa/runs/` (issue #49). (2) `hexa do run` committed an untracked Forgejo runner credential, `.runner`, next to the file it was asked to edit, and it was pushed (issue #36). (3) The sealed-file guard read a spec's deleted sealed file as an edit and refused every `hexa do` and `hexa harden` commit until the stale spec JSON was deleted by hand (issue #50). (4) Two parallel agents were kept apart by hand, by file boundary, with nothing enforcing it. (5) `pid_start` reads `/proc`, so on macOS it is always null and pid-reuse protection does nothing (issue #40).
 

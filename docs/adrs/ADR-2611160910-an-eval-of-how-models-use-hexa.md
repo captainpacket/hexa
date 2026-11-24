@@ -1,6 +1,7 @@
 # ADR-2611160910: An eval of how models use hexa
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-11-16
 **Drivers:** The audit behind ADR-2611160730 found that agents used about 8% of hexa, and that guidance alone (CLAUDE.md, skills) changed nothing. ADR-2611160730 changes the hooks, the verbs and the guidance. Nothing measures whether those changes move a model's behaviour, so every claim that they do is a guess.
 **Supersedes:** none. Measures ADR-2611160730.
