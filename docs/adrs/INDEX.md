@@ -6,7 +6,7 @@
 > [`ARCHITECTURE.md`](../../ARCHITECTURE.md); for *why* a decision was made,
 > read the ADR itself.
 
-**88 ADRs** across 1 epochs.
+**87 ADRs** across 1 epochs.
 
 ## Epoch: `single-agent` — **current**
 
@@ -15,7 +15,6 @@ _One gateway-mediated agent loop; code-graph context as the differentiator_
 | ADR | Status | Title | Superseded-By |
 |-----|--------|-------|---------------|
 | ADR-2611240900 | accepted | ADR-2611240900: The lifecycle runs its gates where the project says tests run |  |
-| ADR-2611240930 | proposed | ADR-2611240930: A task can wait on a condition outside the session |  |
 | ADR-2611231400 | accepted | ADR-2611231400: A remote gate commits red or green, tries itself first, and says what it did in one object |  |
 | ADR-2611221600 | accepted | ADR-2611221600: Every hexa project gets agent orientation |  |
 | ADR-2611221610 | accepted | ADR-2611221610: The code graph is always built and fresh, and `hexa do gate` runs where the tests run |  |
