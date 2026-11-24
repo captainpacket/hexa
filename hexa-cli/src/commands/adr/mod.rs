@@ -548,7 +548,7 @@ async fn doctor_run(
 
     let code = doctor::exit_code(&findings, strict);
     if code != 0 {
-        std::process::exit(code);
+        crate::commands::events::exit(code);
     }
     Ok(())
 }
@@ -1356,8 +1356,38 @@ async fn search(query: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Every status hexa reads in an ADR; `adr doctor` accepts these and no other.
+const ADR_STATUSES: [&str; 7] =
+    ["Proposed", "Accepted", "Completed", "Deprecated", "Superseded", "Abandoned", "Rejected"];
+
+/// The template `hexa adr schema` prints when a project has no `TEMPLATE.md`
+/// of its own: the required sections, in order.
+const BUILT_IN_ADR_TEMPLATE: &str = "# ADR-{YYMMDDHHMM}: {Title}
+
+**Status:** Proposed
+**Date:** {YYYY-MM-DD}
+**Drivers:** {what triggered this}
+
+## Context
+
+## Decision
+
+1. {the first decision}
+
+## Consequences
+
+## Implementation
+
+## References
+";
+
 async fn schema() -> anyhow::Result<()> {
-    let adr_dir = find_adr_dir().ok_or_else(|| anyhow::anyhow!("No docs/adrs/ directory found"))?;
+    // Before the first ADR there is no folder yet: say where it will be, so
+    // the schema still answers the question it exists for (gaberger/hexa#25).
+    let (adr_dir, exists) = match find_adr_dir() {
+        Some(d) => (d, true),
+        None => (PathBuf::from("docs").join("adrs"), false),
+    };
 
     // Generate timestamp-based ID (YYMMDDHHMM) — no reservation needed
     let timestamp_id = generate_timestamp_adr_id();
@@ -1369,12 +1399,16 @@ async fn schema() -> anyhow::Result<()> {
     println!("  {:<20} {}", "Next ID:".bold(), format!("ADR-{}", timestamp_id).green());
     println!("  {:<20} {}", "Readable:".bold(), human_readable.dimmed());
     println!("  {:<20} {}", "Format:".bold(), "YYMMDDHHMM (timestamp, no reservation needed)".dimmed());
-    println!("  {:<20} {}", "Directory:".bold(), adr_dir.display());
+    if exists {
+        println!("  {:<20} {}", "Directory:".bold(), adr_dir.display());
+    } else {
+        println!("  {:<20} {} {}", "Directory:".bold(), adr_dir.display(), "(not there yet: write the first ADR in it)".dimmed());
+    }
     println!("  {:<20} ADR-{{YYMMDDHHMM}}-{{kebab-slug}}.md", "Filename pattern:".bold());
     println!();
 
     println!("{}", "── Valid statuses ──".bold());
-    println!("  Proposed | Accepted | Deprecated | Superseded | Abandoned");
+    println!("  {}", ADR_STATUSES.join(" | "));
     println!();
 
     println!("{}", "── Required sections ──".bold());
@@ -1391,16 +1425,16 @@ async fn schema() -> anyhow::Result<()> {
 
     println!("{}", "── Template ──".bold());
     // Read and display the template
+    // The project's own TEMPLATE.md wins; without one, the built-in template.
     let template_path = adr_dir.join("TEMPLATE.md");
-    if template_path.exists() {
-        let template = tokio::fs::read_to_string(&template_path).await?;
-        // Replace the placeholder number with the actual next number
-        let filled = template.replace("{YYMMDDHHMM}", &timestamp_id)
-            .replace("{NNN}", &timestamp_id);
-        println!("{}", filled);
+    let template = if template_path.exists() {
+        tokio::fs::read_to_string(&template_path).await?
     } else {
-        println!("  {} TEMPLATE.md not found", "\u{26a0}".yellow());
-    }
+        BUILT_IN_ADR_TEMPLATE.to_string()
+    };
+    // Replace the placeholder number with the actual next number
+    let filled = template.replace("{YYMMDDHHMM}", &timestamp_id).replace("{NNN}", &timestamp_id);
+    println!("{}", filled);
 
     // Output machine-readable JSON for inference engines
     println!("{}", "── Machine-readable (JSON) ──".bold());
@@ -1410,7 +1444,7 @@ async fn schema() -> anyhow::Result<()> {
         "id_readable": human_readable,
         "directory": adr_dir.to_string_lossy(),
         "filename_pattern": "ADR-{YYMMDDHHMM}-{kebab-slug}.md",
-        "valid_statuses": ["Proposed", "Accepted", "Completed", "Deprecated", "Superseded", "Abandoned", "Rejected"],
+        "valid_statuses": ADR_STATUSES,
         "required_sections": ["Context", "Decision", "Consequences", "Implementation", "References"],
         "frontmatter_fields": {
             "Status": "required — one of valid_statuses",
