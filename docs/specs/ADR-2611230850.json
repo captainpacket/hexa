@@ -29,7 +29,7 @@
       "when": "`hexa scaffold --lang python` runs for `my-app`",
       "then": "it writes exactly these files: `pyproject.toml`; the package `my_app/`, holding `__init__.py`, `domain/count.py`, `ports/store.py`, `usecases/increment.py`, `adapters/secondary/memory.py` and `composition_root.py`; `tests/__init__.py`; and `tests/test_increment.py`",
       "test": "hexa-cli/tests/adr_2611230850_spec_2.rs::s01_python_scaffold_writes_complete_layout",
-      "red": "b2d7a17"
+      "red": "9de471a"
     },
     {
       "id": "S02",
@@ -361,7 +361,7 @@
       "file": "hexa-cli/tests/adr_2611230850_spec.rs",
       "from": "f724e84d69e21643c854f2734c973b77c675a4f62098ced69e38be2852c3c40d",
       "reason": "Fixture defects only, no assertion changed: S18 and S20 looked for each file's layer in hexa analyze --json, which names a file's layer only on a violation edge, so a clean scaffold showed none; they now ask the grade's own classifier (LayerMap::classify). S23 and S24 ran hexa scaffold without the description and --target it requires: S23 uses hexa init --scaffold (offline, the same --lang default), and S24 gives hexa scaffold its arguments, which refuses an unknown language before writing anything or calling a model. 23 fail without the fix, 24 pass with it",
-      "to": "1b18646333d6cc2596b70faf516c96bfce522d9af67620f9885d9e52e5971538"
+      "to": "114075b28d2b437337843f7d3b1ea19fb14106a4956755c630221d0f5b4877a9"
     }
   ]
 }
