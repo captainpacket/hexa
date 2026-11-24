@@ -1,0 +1,31 @@
+[1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+────────────
+[32;1m Nextest run[0m ID [1mc922755c-ca81-41ee-9d5f-b459393b9729[0m with nextest profile: [1mdefault[0m
+[32;1m    Starting[0m [1m3[0m tests across [1m1[0m binary ([1m1[0m test [33;1mskipped[0m)
+[32;1m        PASS[0m [   0.002s] (1/3) [35;1msample[0m [36mtests[0m[36m::[0m[34;1madds[0m
+[32;1m        PASS[0m [   0.002s] (2/3) [35;1msample[0m [36mtests[0m[36m::[0m[34;1malso_adds[0m
+[31;1m        FAIL[0m [   0.002s] (3/3) [35;1msample[0m [36mtests[0m[36m::[0m[34;1mbreaks[0m
+[31;1m [0m [31;1mstdout[0m [31;1m───[0m
+
+    running 1 test
+    test tests::breaks ... FAILED
+
+    failures:
+
+    failures:
+        tests::breaks
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+    [0m
+[31;1m [0m [31;1mstderr[0m [31;1m───[0m
+
+    [0m[31;1mthread 'tests::breaks' (175) panicked at src/lib.rs:5:27:[0m
+    [31;1massertion `left == right` failed: on purpose[0m
+      left: 2
+     right: 3
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace[0m
+
+────────────
+[31;1m     Summary[0m [   0.002s] [1m3[0m tests run: [1m2[0m [32;1mpassed[0m, [1m1[0m [31;1mfailed[0m, [1m1[0m [33;1mskipped[0m
+[31;1m        FAIL[0m [   0.002s] (3/3) [35;1msample[0m [36mtests[0m[36m::[0m[34;1mbreaks[0m
+[31;1merror[0m: test run failed

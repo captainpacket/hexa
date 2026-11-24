@@ -1,0 +1,183 @@
+{
+  "adr": "ADR-2611240900",
+  "feature": "remote-lifecycle",
+  "description": "The lifecycle runs its gates where the project says tests run",
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "harden under test.remote gates each fix on the remote runner and keeps only the fixes that passed there",
+      "given": "a repository with a bare origin, a fake runner that clones the commit it is sent and sets ON_FAKE_RUNNER=1, and a gate that passes only when ON_FAKE_RUNNER=1 and the target holds no BROKEN line",
+      "when": "a harden pass with HardenGates.remote set fixes bug-1 well and bug-2 by writing BROKEN",
+      "then": "bug-1 is committed and bug-2 is reverted; the final gate passed; every gate ran on the runner (its log names each candidate) and none here; no refs/heads/hexa-gate/* is left on origin; the committed tree is a tree the runner tested"
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "With a fast gate, each fix's fast gate and each batch's full gate run on the remote runner",
+      "given": "the same repository and runner, a fast gate with {touched} that also requires ON_FAKE_RUNNER=1, batches of 2",
+      "when": "a pass with HardenGates.remote set fixes two bugs well",
+      "then": "both are committed, the batch's full gate passed, and no gate ran here"
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "Without a remote, the same gate runs here, where it is red, and the pass stops at the baseline",
+      "given": "the same repository, HardenGates.remote unset",
+      "when": "the pass runs",
+      "then": "the baseline is red, nothing is fixed or committed, and the runner was never called"
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "A runner that does not run the candidate keeps no fix and leaves no scratch ref",
+      "given": "a dishonest runner that prints another commit id",
+      "when": "a pass with HardenGates.remote set runs with --no-baseline",
+      "then": "nothing is committed, a note names the runner failure, and no refs/heads/hexa-gate/* is left on origin"
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "An untracked file the operator had before the pass is not pushed to the runner",
+      "given": "an untracked file secret.txt in the tree before the pass",
+      "when": "a pass with HardenGates.remote set gates a fix",
+      "then": "no commit the runner tested holds secret.txt"
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "A real cargo-nextest run is counted from its summary",
+      "given": "the nextest samples in evidence_samples (green: 2 passed, 2 skipped; red: 2 passed, 1 failed, 1 skipped)",
+      "when": "the reader reads each",
+      "then": "green is Passed{2}; red counts {passed 2, failed 1} and is Red{2,1} for --expect-red; its first failure is the FAIL line; the libtest lines inside nextest's captured output are not counted again"
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "Coloured output reads as the same output without colour",
+      "given": "the coloured vitest samples (green: 2 passed; red: 1 failed, 2 passed) and the coloured nextest red sample",
+      "when": "the reader reads each",
+      "then": "the vitest green is Passed{2}, the vitest red counts {passed 2, failed 1}, the nextest coloured red counts {passed 2, failed 1}; each equals the reading of the sample with its escape codes removed"
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "A nextest run of zero tests is vacuous, and a cut-off run counts each test once",
+      "given": "the nextest zero samples, and a red run cut before its summary",
+      "when": "the reader reads each",
+      "then": "both zero samples are vacuous (exit 0) or failed (exit 4) and Vacuous for --expect-red; the cut-off run counts the FAIL test once though it is printed twice"
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "A loop gate of hexa spec verify under test.remote costs one remote run and passes there",
+      "given": "a project with an accepted spec of two passing bash tests, test.remote set to an honest runner, hexa on the runner's PATH",
+      "when": "`hexa loop stage done` runs with the gate `hexa spec verify <ADR>`",
+      "then": "it passes; the runner was invoked once; the nested spec verify ran the tests in the runner's clone"
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "HEXA_ON_RUNNER equal to HEAD runs the tests in this checkout",
+      "given": "a project with test.remote set to a template that always fails",
+      "when": "`hexa spec verify <ADR>` runs with HEXA_ON_RUNNER set to HEAD's full id",
+      "then": "it passes, the tests ran here, and the template was not called"
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "HEXA_ON_RUNNER naming another commit is refused",
+      "given": "the same project",
+      "when": "`hexa spec verify <ADR>` runs with HEXA_ON_RUNNER set to another commit's id",
+      "then": "it exits non-zero naming HEXA_ON_RUNNER and both ids, and nothing ran"
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "The batch script exports HEXA_ON_RUNNER for each command",
+      "given": "a batch script for commit C with one command `printf %s \"$HEXA_ON_RUNNER\"`",
+      "when": "it runs",
+      "then": "the command's segment is C"
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "stage done refuses with head-not-pushed when the remote does not hold HEAD, though the local tracking ref does",
+      "given": "a project under test.remote on main, pushed, whose origin then loses refs/heads/main",
+      "when": "`hexa loop stage done` runs",
+      "then": "it exits non-zero naming head-not-pushed and `git push`, and the runner was not called"
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "stage done refuses an unpushed HEAD with the named code",
+      "given": "a project under test.remote with a commit not pushed",
+      "when": "`hexa loop stage done` runs",
+      "then": "it exits non-zero naming head-not-pushed, and the runner was not called"
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§4"
+      ],
+      "kind": "example",
+      "description": "stage done sends the evidence command with the gate, in one run",
+      "given": "a project under test.remote with an ADR, a gate and an evidence command that prints EVIDENCE-OK and touches a file",
+      "when": "`hexa loop stage done` runs",
+      "then": "it passes; the runner was invoked once; the ADR holds EVIDENCE-OK; the file was not touched here"
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "loop task done runs no gate, here or remote",
+      "given": "a project under test.remote with a loop gate that touches a file, and one task",
+      "when": "`hexa loop task done 1` runs",
+      "then": "the task is done, the file was not touched, and the runner was not called"
+    }
+  ]
+}
