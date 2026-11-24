@@ -1,7 +1,6 @@
 # ADR-2611230831: hexa says what is true (II)
 
 **Status:** Completed
-> 2026-11-23 Amended (pre-PR review): §4 narrowed. As first written it restored SIGPIPE's default for the whole process, so a write into a child that had exited killed hexa silently, with no message.
 > 2026-11-23 Completed: landed on main at c998137; gate `cargo test -p hexa-cli --test adr_2611230831_spec` passed (hexa loop stage done)
 > 2026-11-23 Accepted: Accepted in craigjohnson's session: a bug fix under his rule (no architectural change); he accepted the spec, and its sealed tests pass on main
 **Date:** 2026-11-23
@@ -24,7 +23,7 @@
 1. **`hexa doctor` asks git whether `.claude/worktrees` is ignored.** The check is `git check-ignore`'s answer for the path, so `.gitignore`, `.git/info/exclude` and the global excludes file all count; outside a git repository it reads `.gitignore` as before.
 2. **`hexa spec draft` says to commit the spec before accepting it.** Its closing line names the spec file, says to commit it, and then says `hexa spec accept <ADR>`.
 3. **A library word in the objective outranks an API word.** An objective that names a library, crate, package, SDK or framework, and no web framework is detected, is a library even when it also names an API; the web-framework and CLI checks come first as today.
-4. **A print to a closed stdout or stderr ends hexa quietly.** On Unix, when printing hexa's own output to stdout or stderr fails because the reader closed the pipe, hexa ends by `SIGPIPE`'s default disposition, with no panic message and no core file. `SIGPIPE` otherwise stays ignored, as Rust sets it, so a write to a child process that has exited (a prompt into `claude -p`) returns an error that hexa reports.
+4. **A write to a closed pipe ends hexa quietly.** On Unix, `hexa` restores the default `SIGPIPE` disposition at start, so a reader that closes the pipe ends the process with no panic message and no core file.
 5. **Nothing else changes.** What doctor checks besides this path, what `spec accept` refuses, the output types of objectives naming no library word, and every exit status other than a closed pipe's, are as before.
 
 ## Consequences
