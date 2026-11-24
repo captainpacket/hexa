@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-11-24
-**Drivers:** Peer repositories (forward-go-sdk) report `hexa spec verify --ci` failing only on pending scenarios: one ADR there has 5 pending and another 31, each a test that exists, is sealed and passes, guarding behaviour that was already true. The same gap is recorded as `guard-test-is-a-mirror`, and its guide names the missing verb: a `guard` scenario kind that `--prove` requires green at the red commit. The same shape is pending in this repository (14 on ADR-2611221933, 2 on ADR-2611230850, 3 on ADR-2611231735).
+**Drivers:** Peer repositories (a Go SDK) report `hexa spec verify --ci` failing only on pending scenarios: one ADR there has 5 pending and another 31, each a test that exists, is sealed and passes, guarding behaviour that was already true. The same gap is recorded as `guard-test-is-a-mirror`, and its guide names the missing verb: a `guard` scenario kind that `--prove` requires green at the red commit. The same shape is pending in this repository (14 on ADR-2611221933, 2 on ADR-2611230850, 3 on ADR-2611231735).
 **Supersedes:** none. Amends ADR-2611161600 (§3 and the guard consequence) and ADR-2610301500 (the `guard-test-is-a-mirror` row).
 
 ## Context

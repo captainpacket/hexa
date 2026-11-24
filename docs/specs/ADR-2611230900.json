@@ -214,7 +214,7 @@
       ],
       "kind": "example",
       "description": "A path policy that names no layer stays path-only",
-      "given": "analyze.layers {\"forward_netbox/utilities\": \"domain\", \"forward_netbox/core\": \"domain\"}, and a policy with layer \"forward_netbox/utilities\" that denies requests. forward_netbox/utilities/a.py and forward_netbox/core/b.py both import requests",
+      "given": "analyze.layers {\"netbox_plugin/utilities\": \"domain\", \"netbox_plugin/core\": \"domain\"}, and a policy with layer \"netbox_plugin/utilities\" that denies requests. netbox_plugin/utilities/a.py and netbox_plugin/core/b.py both import requests",
       "when": "hexa analyze runs",
       "then": "That policy reports a.py and does not report b.py",
       "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s16_path_policy_naming_no_layer_stays_path_only",

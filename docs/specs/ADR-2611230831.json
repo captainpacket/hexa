@@ -10,12 +10,11 @@
   ],
   "accepted": {
     "by": "craigjohnson",
-    "sha256": "94fd323c04dfd0e5377405e39a6c1544adc107236785a8a0e5bfe8d555eff23d"
+    "sha256": "f20e297be1234a97e840094980dba5e80501cc84ccb9a131482e263b3fe8dfe3"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611230831_spec.rs": "77576e4f6c20a5d9bc897062b2398b854fa6a27355a98e251b6fb6b5d9e7c734"
+    "hexa-cli/tests/adr_2611230831_spec.rs": "a7d28c464b813011467cbd7c30d2378fd85320263e6c389a2fa817fff946a8f5"
   },
-  "red": "0eada88",
   "specs": [
     {
       "id": "S01",
@@ -27,7 +26,8 @@
       "given": "A git repository with a .claude/worktrees directory, no mention of it in the root .gitignore, and the line `.claude/worktrees` in .git/info/exclude",
       "when": "`hexa doctor` is run in the repository",
       "then": "Doctor does not warn that .claude/worktrees is not ignored",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_1::s01_git_info_exclude_counts"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_1::s01_git_info_exclude_counts",
+      "red": "0eada88"
     },
     {
       "id": "S02",
@@ -39,7 +39,8 @@
       "given": "A git repository with a .claude/worktrees directory, no mention of it in .gitignore or .git/info/exclude, and core.excludesFile pointing at a file that lists `.claude/worktrees`",
       "when": "`hexa doctor` is run",
       "then": "Doctor does not warn that .claude/worktrees is not ignored",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_1::s02_global_excludes_counts"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_1::s02_global_excludes_counts",
+      "red": "0eada88"
     },
     {
       "id": "S03",
@@ -106,7 +107,8 @@
       "given": "Any git repository and any combination of .gitignore, .git/info/exclude and global excludes contents",
       "when": "`hexa doctor` is run",
       "then": "Doctor warns that .claude/worktrees is not ignored if and only if `git check-ignore .claude/worktrees` reports it is not ignored",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_1::s08_doctor_agrees_with_git"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_1::s08_doctor_agrees_with_git",
+      "red": "0eada88"
     },
     {
       "id": "S09",
@@ -118,7 +120,8 @@
       "given": "A repository with an ADR that has no spec yet",
       "when": "`hexa spec draft <ADR>` completes successfully",
       "then": "Its closing output names the written spec file's path, tells the user to commit that file, and after that names `hexa spec accept <ADR>`",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_1::s09_draft_closing_line_names_file_commit_accept"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_1::s09_draft_closing_line_names_file_commit_accept",
+      "red": "0eada88"
     },
     {
       "id": "S10",
@@ -130,7 +133,8 @@
       "given": "A spec just written by `hexa spec draft <ADR>`",
       "when": "The user commits the named spec file as instructed and then runs `hexa spec accept <ADR>`",
       "then": "`hexa spec accept` does not refuse on the grounds that the spec is untracked or modified",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_1::s10_following_instruction_accept_not_refused_as_uncommitted"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_1::s10_following_instruction_accept_not_refused_as_uncommitted",
+      "red": "0eada88"
     },
     {
       "id": "S11",
@@ -142,7 +146,8 @@
       "given": "A repository with an ADR that has no spec yet",
       "when": "`hexa spec draft <ADR>` completes",
       "then": "Its closing output does not tell the user to run `hexa spec accept <ADR>` without first committing the spec",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s11_draft_closing_says_commit_before_accept"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s11_draft_closing_says_commit_before_accept",
+      "red": "0eada88"
     },
     {
       "id": "S12",
@@ -163,10 +168,11 @@
       ],
       "kind": "example",
       "description": "An SDK for an API is a library",
-      "given": "A project with no detected web framework and the objective \"a Python SDK for the Forward API\"",
+      "given": "A project with no detected web framework and the objective \"a Python SDK for the Example API\"",
       "when": "Its output type is inferred",
       "then": "The output type is library, and no constraint such as \"Return JSON responses with appropriate HTTP status codes\" appears in session context",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s13_sdk_for_an_api_is_a_library"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s13_sdk_for_an_api_is_a_library",
+      "red": "0eada88"
     },
     {
       "id": "S14",
@@ -178,7 +184,8 @@
       "given": "A project with no detected web framework whose objective names one of library, crate, package, SDK or framework together with one of api, server, rest, http or endpoint, and no CLI word",
       "when": "Its output type is inferred",
       "then": "The output type is library",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s14_each_library_word_outranks_each_api_word"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s14_each_library_word_outranks_each_api_word",
+      "red": "0eada88"
     },
     {
       "id": "S15",
@@ -190,7 +197,8 @@
       "given": "A project in which a web framework is detected and whose objective reads \"a client library for the HTTP API\"",
       "when": "Its output type is inferred",
       "then": "The output type is a web API, as before, not a library",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s15_detected_web_framework_still_wins"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s15_detected_web_framework_still_wins",
+      "red": "0eada88"
     },
     {
       "id": "S16",
@@ -202,7 +210,8 @@
       "given": "A project with no detected web framework whose objective names a command-line tool and also names an SDK and an API",
       "when": "Its output type is inferred",
       "then": "The output type is whatever the CLI check yields today, not library",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s16_cli_check_still_comes_first"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s16_cli_check_still_comes_first",
+      "red": "0eada88"
     },
     {
       "id": "S17",
@@ -215,7 +224,8 @@
       "given": "A project with no detected web framework and the objective \"a REST server exposing HTTP endpoints\"",
       "when": "Its output type is inferred",
       "then": "The output type is a web API, as before",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s17_api_objective_without_library_word_is_web_api"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s17_api_objective_without_library_word_is_web_api",
+      "red": "0eada88"
     },
     {
       "id": "S18",
@@ -227,7 +237,8 @@
       "given": "Any objective containing at least one library word, with no web framework detected and the CLI check not matching",
       "when": "Its output type is inferred",
       "then": "The output type is library, whatever API words the objective also contains",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s18_library_words_outrank_api_words_for_every_objective"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s18_library_words_outrank_api_words_for_every_objective",
+      "red": "0eada88"
     },
     {
       "id": "S19",
@@ -239,7 +250,8 @@
       "given": "A Unix system with core dumps enabled and a project whose `hexa analyze .` output is longer than ten lines",
       "when": "`hexa analyze . | head` is run",
       "then": "head prints its lines, hexa prints no panic message on stderr, and no core file appears in the working directory",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s19_analyze_into_head_leaves_no_core"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s19_analyze_into_head_leaves_no_core",
+      "red": "0eada88"
     },
     {
       "id": "S20",
@@ -251,7 +263,8 @@
       "given": "A Unix system with core dumps enabled and an ADR whose `hexa spec show <ADR>` output is longer than ten lines",
       "when": "`hexa spec show <ADR> | head` is run",
       "then": "hexa prints no panic message and no core file appears in the working directory",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s20_spec_show_into_head_leaves_no_core"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_2::s20_spec_show_into_head_leaves_no_core",
+      "red": "0eada88"
     },
     {
       "id": "S21",
@@ -263,7 +276,8 @@
       "given": "A Unix system and a hexa command writing to a pipe whose reader has closed",
       "when": "hexa writes to the pipe",
       "then": "hexa does not report a panic, does not abort and does not leave a core file; it ends by the default SIGPIPE disposition",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_3::s21_closed_pipe_does_not_panic"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_3::s21_closed_pipe_does_not_panic",
+      "red": "0eada88"
     },
     {
       "id": "S22",
@@ -287,7 +301,8 @@
       "given": "Any hexa subcommand that writes to stdout on Unix, and a reader that closes the pipe after any number of bytes",
       "when": "hexa next writes",
       "then": "The process ends with no panic message and no core file",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_3::s23_every_command_ends_quietly_on_closed_pipe"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_3::s23_every_command_ends_quietly_on_closed_pipe",
+      "red": "0eada88"
     },
     {
       "id": "S24",
@@ -299,7 +314,8 @@
       "given": "A repository in which a doctor check other than the .claude/worktrees ignore check fails",
       "when": "`hexa doctor` is run",
       "then": "That check reports the same result as before this ADR",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_3::s24_other_doctor_checks_report_as_before"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_3::s24_other_doctor_checks_report_as_before",
+      "red": "0eada88"
     },
     {
       "id": "S25",
@@ -322,7 +338,8 @@
       "given": "A hexa command that fails for a reason other than a closed pipe, such as `hexa spec show` for an ADR that does not exist",
       "when": "It is run with stdout attached to a terminal or a fully read pipe",
       "then": "It exits with the same non-zero status as before this ADR",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_3::s26_failing_commands_keep_exit_status"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_3::s26_failing_commands_keep_exit_status",
+      "red": "0eada88"
     },
     {
       "id": "S27",
@@ -334,7 +351,8 @@
       "given": "Any objective that contains none of library, crate, package, SDK or framework",
       "when": "Its output type is inferred",
       "then": "The output type is the same as before this ADR",
-      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_3::s27_objectives_without_library_word_keep_output_type"
+      "test": "hexa-cli/tests/adr_2611230831_spec.rs::part_3::s27_objectives_without_library_word_keep_output_type",
+      "red": "0eada88"
     },
     {
       "id": "S28",
@@ -351,12 +369,12 @@
   "amendments": [
     {
       "at": "2026-11-23T15:14:03.661667036+00:00",
-      "base_commit": "748feb02886d62d724e676c029d9085bb93e5cb6",
+      "base_commit": "0eada884acb91051e2260e3f699dce53d7cbb5f1",
       "by": "Claude Code agent",
       "file": "hexa-cli/tests/adr_2611230831_spec.rs",
-      "from": "bec01c445b0450e44a33afe11210fb2f7ecd41fd48cc76ecd4a8537d275ad256",
+      "from": "0232bc6277dd3d0034662ecff2995cc16a87ca95de98a63e99c51a7f8b60b586",
       "reason": "Fixture defects only, no assertion changed: the fingerprint fixtures wrote the workplan objective under 'objective', which the extractor never reads (it reads 'description'); S26 used 'spec show' of a missing ADR as its failing command, which exits 0 before and after this ADR ('spec verify' of one fails); S09/S10's repository had no test home, and ran a real model call: it now has a Cargo.toml and a fake claude on PATH replying with a complete spec, as other spec draft tests do. 13 fail without the fix, 19 pass with it",
-      "to": "77576e4f6c20a5d9bc897062b2398b854fa6a27355a98e251b6fb6b5d9e7c734"
+      "to": "a7d28c464b813011467cbd7c30d2378fd85320263e6c389a2fa817fff946a8f5"
     }
   ]
 }

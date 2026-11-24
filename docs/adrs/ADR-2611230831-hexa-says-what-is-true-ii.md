@@ -7,7 +7,7 @@
 **Drivers:** Four more places, found by projects adopting hexa, where hexa printed something untrue or crashed on a harmless use. ADR-2611221646 fixed five of the same kind. CLAUDE.md: "A gate that degrades silently is worse than no gate."
 - `hexa doctor` warned ".claude/worktrees exists and is not in .gitignore" in a repository that ignores it through `.git/info/exclude`; `git check-ignore .claude/worktrees` says it is ignored.
 - `hexa spec draft` ends "Read every scenario … Then `hexa spec accept <ADR>`", but `hexa spec accept` refuses a spec that is not committed (ADR-2611161600 §1), so following the instruction fails.
-- A Python client library whose objective reads "a Python SDK for the Forward API" was described in every session's context as a web API, with "Return JSON responses with appropriate HTTP status codes" injected as a constraint.
+- A Python client library whose objective reads "a Python SDK for the Example API" was described in every session's context as a web API, with "Return JSON responses with appropriate HTTP status codes" injected as a constraint.
 - `hexa analyze . | head` and `hexa spec show <ADR> | head` left a 75–100 MB core file in the working directory when `head` closed the pipe.
 **Supersedes:** none. Defects in what hexa reports; no gate becomes looser.
 
