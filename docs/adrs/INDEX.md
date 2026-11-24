@@ -6,7 +6,7 @@
 > [`ARCHITECTURE.md`](../../ARCHITECTURE.md); for *why* a decision was made,
 > read the ADR itself.
 
-**85 ADRs** across 1 epochs.
+**88 ADRs** across 1 epochs.
 
 ## Epoch: `single-agent` — **current**
 
@@ -20,6 +20,7 @@ _One gateway-mediated agent loop; code-graph context as the differentiator_
 | ADR-2611221600 | accepted | ADR-2611221600: Every hexa project gets agent orientation |  |
 | ADR-2611221610 | accepted | ADR-2611221610: The code graph is always built and fresh, and `hexa do gate` runs where the tests run |  |
 | ADR-2611191120 | accepted | ADR-2611191120: A test names its runner, and a project names where its tests run |  |
+| ADR-2611191500 | proposed | ADR-2611191500: What a `hexa harden` run costs, and how to cut it |  |
 | ADR-2611160730 | accepted | ADR-2611160730: Compliance by refusal, not by interface |  |
 | ADR-2611160750 | accepted | ADR-2611160750: Leases follow the architecture |  |
 | ADR-2611160910 | accepted | ADR-2611160910: An eval of how models use hexa |  |
@@ -41,9 +42,11 @@ _One gateway-mediated agent loop; code-graph context as the differentiator_
 | ADR-2610301500 | accepted | ADR-2610301500: A dead end gives a guide, and the guide records the gap |  |
 | ADR-2610281011 | accepted | ADR-2610281011: design is the first stage of the hexa loop |  |
 | ADR-2610281442 | accepted | ADR-2610281442: a sealed test can pass, and its writer sees the API it tests |  |
+| ADR-2610281500 | proposed | ADR-2610281500: managed mode, hexa driven by a harness that owns every model call |  |
 | ADR-2610281516 | accepted | ADR-2610281516: inference is measured, cached, and repaired rather than repeated |  |
 | ADR-2610281552 | accepted | ADR-2610281552: a new project is consistent on day one |  |
 | ADR-2610281628 | accepted | ADR-2610281628: an amended decision is re-proved where it changed |  |
+| ADR-2610281700 | proposed | ADR-2610281700: `hexa do apply`, a gated change without a model |  |
 | ADR-2610270853 | accepted | ADR-2610270853: hexa knows which build it is and says when it is behind |  |
 | ADR-2610270901 | accepted | ADR-2610270901: `claude-text` serves Claude as a tool-less completion |  |
 | ADR-2610271110 | accepted | ADR-2610271110: A decision not yet built is declared, and the declaration may only shrink |  |

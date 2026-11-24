@@ -66,7 +66,7 @@ impl Egm {
         let files: BTreeMap<String, Vec<u8>> = files.into_iter().collect();
         let present: Vec<String> = files.keys().cloned().collect();
         let read = |p: &str| files.get(p).cloned();
-        let sha = |b: &[u8]| format!("{:x}", Sha256::digest(b));
+        let sha = |b: &[u8]| -> String { Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect() };
         design::verify_pin(&pin, &present, &read, &sha).map_err(|bad| {
             format!("the vendored EGM does not match its pin; update EGM by a new pin, never an edit: {}", bad.join("; "))
         })?;
@@ -777,7 +777,7 @@ fn committed(root: &Path, rel: &str) -> bool {
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 // ------------------------------------------------------------------ the loop's design step
