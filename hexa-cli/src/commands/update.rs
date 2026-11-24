@@ -250,7 +250,7 @@ async fn download_text(client: &reqwest::Client, url: &str) -> anyhow::Result<St
 fn verify_sha256(data: &[u8], filename: &str, sums_text: &str) -> anyhow::Result<()> {
     let mut hasher = Sha256::new();
     hasher.update(data);
-    let computed = format!("{:x}", hasher.finalize());
+    let computed: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
 
     for line in sums_text.lines() {
         let parts: Vec<&str> = line.splitn(2, ' ').collect();
