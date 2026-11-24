@@ -348,6 +348,8 @@ async fn session_start(project_dir: &Path) -> Result<()> {
     for l in awareness_lines(project_dir) {
         println!("  {l}");
     }
+    // The code graph, rebuilt in the background when the tree moved (ADR-2611221610 §5).
+    println!("  {}", crate::commands::graph::refresh_for_session(project_dir));
     let mut st = SessionState::load_or_new();
     st.project = crate::commands::loop_cmd::project_name(project_dir);
     st.name = session_key();
@@ -815,6 +817,10 @@ async fn pre_edit(project_dir: &Path) -> Result<()> {
                 return Ok(());
             }
 
+            // The file's graph neighbourhood, once per file per session,
+            // before any rule below can stop the edit (ADR-2611221610 §6).
+            print_edit_context(project_dir, path);
+
             // The layer rules, on what the edit would leave.
             validate_boundary_edit(project_dir, file_path, &input).await?;
 
@@ -1030,6 +1036,38 @@ fn source_gate_check(project_dir: &Path, targets: &[PathBuf], mode: &str, what: 
     }
 }
 
+/// Print the compact graph context for an edit to `path`, the first time
+/// this session edits it (ADR-2611221610 §6). Silent with no graph, for a file
+/// the graph does not hold, and for a file already shown.
+fn print_edit_context(project_dir: &Path, path: &Path) {
+    let abs = if path.is_absolute() { path.to_path_buf() } else { project_dir.join(path) };
+    let root = source_gate::canonical_lenient(project_dir);
+    let abs = source_gate::canonical_lenient(&abs);
+    let Ok(rel) = abs.strip_prefix(&root) else { return };
+    let rel = rel.to_string_lossy().replace('\\', "/");
+    if !project_dir.join(hexa_graph::GRAPH_FILE).is_file() && !project_dir.join(hexa_graph::LEGACY_GRAPH_FILE).is_file() {
+        return;
+    }
+    let key: String = session_key().chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
+    let seen_file = project_dir.join(".hexa/graph/seen").join(key);
+    let seen = std::fs::read_to_string(&seen_file).unwrap_or_default();
+    if seen.lines().any(|l| l == rel) {
+        return;
+    }
+    let lines = crate::commands::graph::edit_context(project_dir, &rel);
+    if lines.is_empty() {
+        return;
+    }
+    for l in &lines {
+        println!("{l}");
+    }
+    println!();
+    if let Some(d) = seen_file.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let _ = std::fs::write(&seen_file, format!("{seen}{rel}\n"));
+}
+
 /// Hold a hand `git commit` of project source to `hexa do gate`
 /// (ADR-2611160910 finding 1). The usage eval's first baseline found that no
 /// commit went through hexa: the model ran `git add <f> && git commit` every
@@ -1078,8 +1116,15 @@ fn commit_gate_check(project_dir: &Path, command: &str, cwd: &Path, mode: &str) 
         } else {
             ""
         };
+        // Under test.remote the gate runs on the remote runner (ADR-2611221610 §9).
+        let remote = hexa_exec::test_exec::test_config(&root).ok().and_then(|c| c.remote).is_some();
+        let where_ = if remote {
+            "It pushes a candidate commit, runs the gate on the remote runner (test.remote), and commits those files only if it exits 0 there."
+        } else {
+            "It runs the gate on the change in your tree and commits only those files, and only if it passes."
+        };
         let msg = format!(
-            "`git commit` would commit project source by hand ({}). Commit it through the gate instead: `{suggestion}`. It runs the gate on the change in your tree and commits only those files, and only if it passes.{record} `git commit` is for docs, ADRs and other prose.",
+            "`git commit` would commit project source by hand ({}). Commit it through the gate instead: `{suggestion}`. {where_}{record} `git commit` is for docs, ADRs and other prose.",
             files.join(", ")
         );
         if mode == "mandatory" {

@@ -73,6 +73,11 @@ pub enum DoAction {
         /// Keep the commit on its branch: do not land it on the base (ADR-2611161800 §4)
         #[arg(long)]
         no_land: bool,
+        /// Gate here even when .hexa/project.json sets test.remote; without it
+        /// the gate runs on the remote runner for a pushed candidate commit,
+        /// and the branch moves to it only on a pass (ADR-2611221610 §7)
+        #[arg(long)]
+        local: bool,
     },
     /// List recent direct runs (task, evidence verdict, commit) in this repository.
     Runs {
@@ -288,7 +293,7 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
                 }
             }
         }
-        DoAction::Gate { files, evidence, message, uncounted, no_land } => {
+        DoAction::Gate { files, evidence, message, uncounted, no_land, local } => {
             let top = std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).output()?;
             if !top.status.success() {
                 anyhow::bail!("hexa do gate runs inside a git repository");
@@ -308,6 +313,10 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
                     None => anyhow::bail!("{f} is outside the repository ({}): only files in it can be gated and committed", root.display()),
                 }
             }
+            // Under test.remote the gate runs on the remote runner, for a
+            // candidate commit of exactly these files (ADR-2611221610 §7).
+            let cfg = hexa_exec::test_exec::test_config(&root).map_err(|e| anyhow::anyhow!(e))?;
+            let remote = cfg.remote.clone().filter(|_| !local);
             crate::commands::loop_cmd::note_run_gate(&evidence, "build", None);
             if uncounted {
                 crate::commands::loop_cmd::note_gate_uncounted(&evidence);
@@ -318,7 +327,36 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
             println!("  {} {}", "files".dimmed(), rel.join(", "));
             let started_at = chrono::Utc::now().to_rfc3339();
             let clock = std::time::Instant::now();
-            let outcome = hexa_exec::direct_exec::gate_patch(&root, &rel, &evidence, &message, uncounted).await;
+            let outcome = match &remote {
+                None => hexa_exec::direct_exec::gate_patch(&root, &rel, &evidence, &message, uncounted).await,
+                Some(template) => {
+                    match hexa_exec::test_exec::gate_patch_remote(&root, &rel, &evidence, &message, uncounted, template).await {
+                        Ok(g) => {
+                            println!(
+                                "  {} the remote runner's output (the evidence, noted on the commit under refs/notes/hexa-gate):",
+                                "\u{2192}".cyan()
+                            );
+                            for l in g.evidence.lines() {
+                                println!("    {l}");
+                            }
+                            match &g.pushed {
+                                Ok(r) => println!("  {} {} pushed to {}", "\u{2713}".green(), g.branch, r),
+                                Err(e) => println!("  {} {} not pushed: {}", "\u{26a0}".yellow(), g.branch, e),
+                            }
+                            Ok(g.commit.chars().take(7).collect())
+                        }
+                        Err(r) => {
+                            if let Some(out) = &r.output {
+                                println!("  {} the remote runner's output:", "\u{2192}".cyan());
+                                for l in out.lines() {
+                                    println!("    {l}");
+                                }
+                            }
+                            Err(r.why)
+                        }
+                    }
+                }
+            };
             // `do runs` lists gate runs beside `do run`'s, from one feed.
             hexa_exec::direct_exec::record_gate_run(
                 &hexa_exec::run_log(),
@@ -336,7 +374,7 @@ pub async fn run(action: DoAction) -> anyhow::Result<()> {
                     let mut result = json!({ "commit": sha, "files": rel });
                     if !no_land {
                         crate::commands::events::step_start("land");
-                        match crate::commands::land::land(&root, &evidence, uncounted).await {
+                        match crate::commands::land::land(&root, &evidence, uncounted, local).await {
                             crate::commands::land::Landing::OnBase => {}
                             crate::commands::land::Landing::Landed { base, sha } => {
                                 println!("{} on {} at {}", "✓ landed".green().bold(), base, sha.yellow());

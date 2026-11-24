@@ -1,5 +1,5 @@
-//! `hexa doctor`: is hexa installed, is this project initialised, and is
-//! there a path to a model. Every failure is listed in the summary, and the
+//! `hexa doctor`: is hexa installed, is this project initialised, can it
+//! orient an agent (ADR-2611221600 §6), and is there a path to a model. Every failure is listed in the summary, and the
 //! verdict is derived from the list.
 
 pub mod claude_memory;
@@ -81,6 +81,25 @@ pub async fn run_doctor(_verbose: bool, _fix: bool) -> anyhow::Result<()> {
         }
     }
     println!();
+
+    // Agent orientation (ADR-2611221600 §6): only in an initialised project;
+    // outside one, the line above already says to run `hexa init`.
+    let orientation = crate::commands::orientation::checks(&cwd);
+    if !orientation.is_empty() {
+        use hexa_core::ports::orientation::CheckState;
+        println!("  {}", "Agent orientation:".bold());
+        for c in &orientation {
+            match c.state {
+                CheckState::Ok => println!("    {} {}: {}", "\u{2713}".green(), c.name, c.what),
+                CheckState::Unknown => println!("    {} {}: {} (`{}` builds it)", "?".yellow(), c.name, c.what, c.fix),
+                CheckState::Failing => {
+                    println!("    {} {}: {} — fix: {}", "\u{2717}".red(), c.name, c.what, c.fix);
+                    failures.push(format!("{} — fix: {}", c.what, c.fix));
+                }
+            }
+        }
+        println!();
+    }
 
     // Claude Code memory: advisory, never a failure (docs: code.claude.com/docs/en/memory).
     println!("  {}", "Claude Code memory:".bold());
