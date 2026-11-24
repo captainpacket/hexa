@@ -10,9 +10,11 @@
   ],
   "accepted": {
     "by": "craigjohnson",
-    "sha256": "1e59a1bbb95c0164943a127037c0a3d0f65b49897c30a9512395d0b37447cec0"
+    "sha256": "0c92ad283280fb6d3d7e6b663872831c5595ff7bd9a7f193bdb3791ad89ef346"
   },
-  "red": "0ab2027",
+  "sealed": {
+    "hexa-cli/tests/adr_2611230900_spec.rs": "a09885c745f3bdb33ef368c31fa9aac50ddc07e5a39267a851152ee193037150"
+  },
   "specs": [
     {
       "id": "S01",
@@ -177,9 +179,11 @@
       ],
       "kind": "example",
       "description": "Allow and severity apply to declared files as written",
-      "given": "A Go project whose analyze.layers declares pkg/model as domain, and a /domain/ policy with allow = [\"example.com/ok\"], no deny, and severity warning; pkg/model/a.go imports example.com/ok and example.com/ext",
+      "given": "analyze.layers {\"pkg/model\": \"domain\"}. A domain policy allows only \"fmt\" and is at severity \"warning\". pkg/model/a.go imports \"fmt\" and \"net\"",
       "when": "hexa analyze runs",
-      "then": "example.com/ok has no finding (allowed); example.com/ext has exactly one finding, a warning; and the score is the same as for the same project whose a.go imports nothing"
+      "then": "There is no finding for \"fmt\". There is one warning for \"net\", and the health score is unchanged by it",
+      "test": "hexa-cli/tests/adr_2611230900_spec.rs::part_2::s13_allow_and_severity_apply_to_declared_files",
+      "red": "0ab2027"
     },
     {
       "id": "S14",
@@ -248,12 +252,12 @@
   "amendments": [
     {
       "at": "2026-11-23T15:59:20.447678037+00:00",
-      "base_commit": "ea59473b9b4a8c6a2e6e6811b76832e19ebadb5e",
+      "base_commit": "0ab20276be2e5e880257c035afb51d2918a55284",
       "by": "Claude Code agent",
       "file": "hexa-cli/tests/adr_2611230900_spec.rs",
-      "from": "b894cdf10ff35ba03b2e17126568c451e928c5268fee47ea1037a1bb8f99c71d",
+      "from": "9deaaac6176ef68f657ac0413cf7e741f14d0f81082c1e301e6854e384f9e1ad",
       "reason": "Fixture defects, plus one corrected example: the rules were written to .hexa/rules.toml, which hexa never reads (it reads .hexa/ADR-rules.toml), and each [[import_policy]] lacked the required adr, id and message fields, so no policy ran and the control cases failed too; S13 used the standard-library net as the import the allow list omits, but the standard library is permitted unless denied (before and after this ADR), so it now uses an external import, example.com/ext, which keeps S13's point (allow and severity apply to declared files). Without the fix 9 fail and 8 guards pass; with it 17 pass",
-      "to": "1f72a05cd87ea71394fa179844ec101f810ac298185881dc5c84cb4424ab4111"
+      "to": "a09885c745f3bdb33ef368c31fa9aac50ddc07e5a39267a851152ee193037150"
     }
   ]
 }
