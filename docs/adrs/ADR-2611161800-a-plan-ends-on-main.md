@@ -1,6 +1,7 @@
 # ADR-2611161800: A plan ends on main
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-11-16
 **Drivers:** "When looking at the work done by hexa, it often just leaves work in an unfinished state, hasn't completely finished all of the open plan records and merged them into the main branch. hexa has to go and make sure that all work is completed." Then: "hexa needs to create a plan, and the end of the plan is to finish all the tasks and then to close out the ADR and commit everything into the main branch. The goal should be always to have a continuous integration such that the branch can create all the updates from all the agents."
 **Supersedes:** none. Builds on the loop (ADR-2611160730 §4), `hexa do gate` (ADR-2611160730 §3), the task ledger and `hexa dev worktree merge`/`cleanup`, and `hexa adr complete`.

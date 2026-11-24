@@ -1,11 +1,12 @@
 ---
 id: ADR-2610281552
-status: proposed
+status: accepted
 date: 2026-10-28
 ---
 # ADR-2610281552: a new project is consistent on day one
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-10-28
 **Drivers:** A project made by `hexa dev new --lang rust` on 2026-10-28 failed `hexa adr doctor` with 12 errors before a line was written: the shipped `.hexa/ADR-rules.toml` and the `/hexa-adr-create` skill cite hexa's own decisions (`ADR-2609121400`, `ADR-2609211430`, `ADR-2609211600`, `ADR-2026-04-05-0900`), which are not in the new project's ledger. The same project had no `.gitignore`, so its first `git add -A` committed `target/`.
 

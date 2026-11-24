@@ -1,6 +1,7 @@
 # ADR-2611151030: `hexa adr board` shows which decisions are done, how far each is, and who is on it
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-11-15
 **Drivers:** Kairos and Strata are built by several agents and people at once, in several checkouts (a main checkout, git worktrees, a second repository). Two things went wrong together. (1) Work collided: two sessions edited the same ADR or the same files, and nobody could see it until the merge. (2) hexa could not say what was finished. In kairos, `hexa adr list` shows `proposed` for ADRs whose phases are built and tested (kairos ADRs numbered 2611121443, the P5 predict phase, and 2611130723, policy definitions; they live in the kairos repository, not this one), and `accepted` for ADRs with no sign they were built; `hexa adr gates` reports 11 of 14 recorded gates as failed because it cannot read `cargo test ... | grep -q` output, so it cannot be used as a progress number either. The owner asked for one panel: every ADR, proposed or in progress, with a progress figure, so "when are we done" has an answer.
 
