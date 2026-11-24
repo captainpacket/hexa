@@ -64,4 +64,9 @@
 - **`hexa loop task done`** is pinned by S16: it runs no gate, here or remote.
 - **Not built, recorded as workplan drafts:** the SubagentStop hook's local gate rerun, `hexa build`'s local gates, and the line datum's `ci/remote-gate.sh` needs (`export HEXA_ON_RUNNER="$(git rev-parse HEAD)"`).
 
-**Built:** decisions 1 to 4, 2026-11-24, on `feat/remote-lifecycle`. Red at `7d62175`: hexa-core 7 passed and 5 failed, harden 1 passed and 4 failed, CLI 1 passed and 7 failed, each on its assertion. Green at `33155d4` on max: 12, 5 and 8 passed. The spec is drafted and awaits `hexa spec accept ADR-2611240900`.
+**Built:** decisions 1 to 4, 2026-11-24, on `feat/remote-lifecycle`. Red at `7d62175`: hexa-core 7 passed and 5 failed, harden 1 passed and 4 failed, CLI 1 passed and 7 failed, each on its assertion. Green at `33155d4` on max: 12, 5 and 8 passed. The spec was accepted by Gary Berger on 2026-11-24 (`f0c5d2f`). `hexa spec red` bound S01, S02, S04, S05 and S09 to S15 at `7d62175`, each seen failing there on the runner, and `hexa spec seal` sealed `hexa-cli/tests/adr_2611240900_spec.rs` and `hexa-exec/tests/harden_remote_gate.rs`.
+
+## Addendum, 2026-11-24: the scenarios not bound red
+
+- **S03 and S16 are guards.** Their tests passed at `7d62175`, before the code (the 1 passed in harden and the 1 passed in the CLI above): with no remote the gate already ran here, and `loop task done` already ran no gate. They pin behaviour this ADR must keep, not behaviour it adds, so they stay pending as guards (ADR-2611161600 §3) and run in the suite as ordinary tests.
+- **S06 to S08 have no sealed test.** Their tests are unit tests in `hexa-core/src/domain/evidence.rs` (the 5 failed in hexa-core at `7d62175`), and a sealed test cannot live in a source file (ADR-2611191120 §8). Moving them to `hexa-core/tests/` now would have no commit where they were red. They stay pending, run in `cargo test -p hexa-core`, and are bound the next time the evidence reader changes: the new test file is written first, red, then the change.

@@ -6,6 +6,10 @@
     "by": "Gary Berger",
     "sha256": "681bb852740ee7ca8904a43b90d701a0e4fbc6ff2ba4f842eace6955ac5e08d9"
   },
+  "sealed": {
+    "hexa-cli/tests/adr_2611240900_spec.rs": "141b0819ddd1e1e7f2893dc2ba28bf5079886bb7e1411cfb9b2d585526a88100",
+    "hexa-exec/tests/harden_remote_gate.rs": "e71d3d77d1ffc86107095f87aa1b0beb1855969de0c42d68854b90342c16813a"
+  },
   "specs": [
     {
       "id": "S01",
@@ -16,7 +20,9 @@
       "description": "harden under test.remote gates each fix on the remote runner and keeps only the fixes that passed there",
       "given": "a repository with a bare origin, a fake runner that clones the commit it is sent and sets ON_FAKE_RUNNER=1, and a gate that passes only when ON_FAKE_RUNNER=1 and the target holds no BROKEN line",
       "when": "a harden pass with HardenGates.remote set fixes bug-1 well and bug-2 by writing BROKEN",
-      "then": "bug-1 is committed and bug-2 is reverted; the final gate passed; every gate ran on the runner (its log names each candidate) and none here; no refs/heads/hexa-gate/* is left on origin; the committed tree is a tree the runner tested"
+      "then": "bug-1 is committed and bug-2 is reverted; the final gate passed; every gate ran on the runner (its log names each candidate) and none here; no refs/heads/hexa-gate/* is left on origin; the committed tree is a tree the runner tested",
+      "test": "hexa-exec/tests/harden_remote_gate.rs::s01_each_fix_is_gated_on_the_runner_and_only_a_pass_is_kept",
+      "red": "7d62175"
     },
     {
       "id": "S02",
@@ -27,7 +33,9 @@
       "description": "With a fast gate, each fix's fast gate and each batch's full gate run on the remote runner",
       "given": "the same repository and runner, a fast gate with {touched} that also requires ON_FAKE_RUNNER=1, batches of 2",
       "when": "a pass with HardenGates.remote set fixes two bugs well",
-      "then": "both are committed, the batch's full gate passed, and no gate ran here"
+      "then": "both are committed, the batch's full gate passed, and no gate ran here",
+      "test": "hexa-exec/tests/harden_remote_gate.rs::s02_fast_and_batch_gates_run_on_the_runner",
+      "red": "7d62175"
     },
     {
       "id": "S03",
@@ -49,7 +57,9 @@
       "description": "A runner that does not run the candidate keeps no fix and leaves no scratch ref",
       "given": "a dishonest runner that prints another commit id",
       "when": "a pass with HardenGates.remote set runs with --no-baseline",
-      "then": "nothing is committed, a note names the runner failure, and no refs/heads/hexa-gate/* is left on origin"
+      "then": "nothing is committed, a note names the runner failure, and no refs/heads/hexa-gate/* is left on origin",
+      "test": "hexa-exec/tests/harden_remote_gate.rs::s04_a_runner_failure_keeps_no_fix",
+      "red": "7d62175"
     },
     {
       "id": "S05",
@@ -60,7 +70,9 @@
       "description": "An untracked file the operator had before the pass is not pushed to the runner",
       "given": "an untracked file secret.txt in the tree before the pass",
       "when": "a pass with HardenGates.remote set gates a fix",
-      "then": "no commit the runner tested holds secret.txt"
+      "then": "no commit the runner tested holds secret.txt",
+      "test": "hexa-exec/tests/harden_remote_gate.rs::s05_the_operators_untracked_file_is_not_pushed",
+      "red": "7d62175"
     },
     {
       "id": "S06",
@@ -104,7 +116,9 @@
       "description": "A loop gate of hexa spec verify under test.remote costs one remote run and passes there",
       "given": "a project with an accepted spec of two passing bash tests, test.remote set to an honest runner, hexa on the runner's PATH",
       "when": "`hexa loop stage done` runs with the gate `hexa spec verify <ADR>`",
-      "then": "it passes; the runner was invoked once; the nested spec verify ran the tests in the runner's clone"
+      "then": "it passes; the runner was invoked once; the nested spec verify ran the tests in the runner's clone",
+      "test": "hexa-cli/tests/adr_2611240900_spec.rs::s09_a_nested_spec_verify_costs_one_remote_run",
+      "red": "7d62175"
     },
     {
       "id": "S10",
@@ -115,7 +129,9 @@
       "description": "HEXA_ON_RUNNER equal to HEAD runs the tests in this checkout",
       "given": "a project with test.remote set to a template that always fails",
       "when": "`hexa spec verify <ADR>` runs with HEXA_ON_RUNNER set to HEAD's full id",
-      "then": "it passes, the tests ran here, and the template was not called"
+      "then": "it passes, the tests ran here, and the template was not called",
+      "test": "hexa-cli/tests/adr_2611240900_spec.rs::s10_the_marker_for_head_runs_the_tests_here",
+      "red": "7d62175"
     },
     {
       "id": "S11",
@@ -126,7 +142,9 @@
       "description": "HEXA_ON_RUNNER naming another commit is refused",
       "given": "the same project",
       "when": "`hexa spec verify <ADR>` runs with HEXA_ON_RUNNER set to another commit's id",
-      "then": "it exits non-zero naming HEXA_ON_RUNNER and both ids, and nothing ran"
+      "then": "it exits non-zero naming HEXA_ON_RUNNER and both ids, and nothing ran",
+      "test": "hexa-cli/tests/adr_2611240900_spec.rs::s11_a_marker_for_another_commit_is_refused",
+      "red": "7d62175"
     },
     {
       "id": "S12",
@@ -137,7 +155,9 @@
       "description": "The batch script exports HEXA_ON_RUNNER for each command",
       "given": "a batch script for commit C with one command `printf %s \"$HEXA_ON_RUNNER\"`",
       "when": "it runs",
-      "then": "the command's segment is C"
+      "then": "the command's segment is C",
+      "test": "hexa-cli/tests/adr_2611240900_spec.rs::s12_the_batch_exports_the_marker_for_the_commit",
+      "red": "7d62175"
     },
     {
       "id": "S13",
@@ -148,7 +168,9 @@
       "description": "stage done refuses with head-not-pushed when the remote does not hold HEAD, though the local tracking ref does",
       "given": "a project under test.remote on main, pushed, whose origin then loses refs/heads/main",
       "when": "`hexa loop stage done` runs",
-      "then": "it exits non-zero naming head-not-pushed and `git push`, and the runner was not called"
+      "then": "it exits non-zero naming head-not-pushed and `git push`, and the runner was not called",
+      "test": "hexa-cli/tests/adr_2611240900_spec.rs::s13_a_head_the_remote_lost_is_not_pushed",
+      "red": "7d62175"
     },
     {
       "id": "S14",
@@ -159,7 +181,9 @@
       "description": "stage done refuses an unpushed HEAD with the named code",
       "given": "a project under test.remote with a commit not pushed",
       "when": "`hexa loop stage done` runs",
-      "then": "it exits non-zero naming head-not-pushed, and the runner was not called"
+      "then": "it exits non-zero naming head-not-pushed, and the runner was not called",
+      "test": "hexa-cli/tests/adr_2611240900_spec.rs::s14_an_unpushed_head_is_refused_by_code",
+      "red": "7d62175"
     },
     {
       "id": "S15",
@@ -170,7 +194,9 @@
       "description": "stage done sends the evidence command with the gate, in one run",
       "given": "a project under test.remote with an ADR, a gate and an evidence command that prints EVIDENCE-OK and touches a file",
       "when": "`hexa loop stage done` runs",
-      "then": "it passes; the runner was invoked once; the ADR holds EVIDENCE-OK; the file was not touched here"
+      "then": "it passes; the runner was invoked once; the ADR holds EVIDENCE-OK; the file was not touched here",
+      "test": "hexa-cli/tests/adr_2611240900_spec.rs::s15_the_evidence_goes_with_the_gate",
+      "red": "7d62175"
     },
     {
       "id": "S16",
