@@ -1,0 +1,32 @@
+   Compiling sample v0.1.0 (/w/nx)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+────────────
+ Nextest run ID 190f44c8-d63a-4165-a616-a45753a9bcfc with nextest profile: default
+    Starting 3 tests across 1 binary (1 test skipped)
+        PASS [   0.002s] (1/3) sample tests::also_adds
+        FAIL [   0.002s] (2/3) sample tests::breaks
+  stdout ───
+
+    running 1 test
+    test tests::breaks ... FAILED
+
+    failures:
+
+    failures:
+        tests::breaks
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'tests::breaks' (125) panicked at src/lib.rs:5:27:
+    assertion `left == right` failed: on purpose
+      left: 2
+     right: 3
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        PASS [   0.003s] (3/3) sample tests::adds
+────────────
+     Summary [   0.004s] 3 tests run: 2 passed, 1 failed, 1 skipped
+        FAIL [   0.002s] (2/3) sample tests::breaks
+error: test run failed

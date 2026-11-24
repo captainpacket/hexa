@@ -798,7 +798,27 @@ fn record_evidence(dir: &Path, adr_id: &str, command: &str) -> Result<PathBuf, S
             tail.join("\n")
         ));
     }
-    let stdout = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
+    append_evidence(dir, adr_id, command, &String::from_utf8_lossy(&out.stdout))
+}
+
+/// Append evidence that already ran, on the remote runner, to the ADR
+/// (ADR-2611240900 §4): `ok` is its exit status, `output` its segment.
+fn record_remote_evidence(dir: &Path, adr_id: &str, command: &str, ok: bool, output: &str) -> Result<PathBuf, String> {
+    let path = adr_path(dir, adr_id).ok_or_else(|| format!("no {adr_id} in docs/adrs/ to append evidence to"))?;
+    if !ok {
+        let tail: Vec<&str> = output.lines().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect();
+        return Err(format!(
+            "evidence command failed on the remote runner; nothing appended to {}\n{}",
+            path.display(),
+            tail.join("\n")
+        ));
+    }
+    append_evidence(dir, adr_id, command, output)
+}
+
+fn append_evidence(dir: &Path, adr_id: &str, command: &str, stdout: &str) -> Result<PathBuf, String> {
+    let path = adr_path(dir, adr_id).ok_or_else(|| format!("no {adr_id} in docs/adrs/ to append evidence to"))?;
+    let stdout = stdout.trim_end().to_string();
     let _hold = lock_for_write(dir)?;
     let git = |args: &[&str]| {
         std::process::Command::new("git")
@@ -1410,9 +1430,20 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
                 // Here, or through test.remote for HEAD (ADR-2611191120 §4); a
                 // refusal or a runner failure is never a gate result (§5).
                 let cfg = hexa_exec::test_exec::test_config(&cwd).map_err(|e| anyhow::anyhow!(e))?;
-                let (passed, output) = hexa_exec::test_exec::run_gate(&cwd, gate, &cfg, local)
+                // Under test.remote the evidence goes with the gate, in one
+                // run for HEAD, and is never run here (ADR-2611240900 §4).
+                let remote = cfg.remote.is_some() && !local;
+                let to_record = st.as_ref().and_then(|s| {
+                    let adr = s.get("adr").and_then(|v| v.as_str()).filter(|a| !a.is_empty())?;
+                    let cmd = s.get("evidence").and_then(|v| v.as_str()).filter(|e| !e.is_empty())?;
+                    Some((adr.to_string(), cmd.to_string()))
+                });
+                let also: Vec<String> = to_record.iter().filter(|_| remote).map(|(_, c)| c.clone()).collect();
+                let mut ran = hexa_exec::test_exec::run_gate_and(&cwd, gate, &also, &cfg, local)
                     .await
                     .map_err(|e| anyhow::anyhow!("the stage stays where it was: {e}"))?;
+                let evidence_ran = (ran.len() > 1).then(|| ran.remove(1));
+                let (passed, output) = ran.remove(0);
                 let verdict = hexa_core::ports::evidence::read_gate_evidence(gate, passed, &output, uncounted);
                 println!("  {}", gate_line(&verdict));
                 if !verdict.passes() {
@@ -1428,7 +1459,11 @@ pub async fn run(action: Option<LoopAction>) -> anyhow::Result<()> {
                     let evidence = st.get("evidence").and_then(|v| v.as_str()).filter(|e| !e.is_empty());
                     match (adr, evidence) {
                         (Some(adr), Some(cmd)) => {
-                            let path = record_evidence(&cwd, adr, cmd).map_err(|e| anyhow::anyhow!(e))?;
+                            let path = match &evidence_ran {
+                                Some((ok, out)) => record_remote_evidence(&cwd, adr, cmd, *ok, out),
+                                None => record_evidence(&cwd, adr, cmd),
+                            }
+                            .map_err(|e| anyhow::anyhow!(e))?;
                             println!("  evidence appended to {}", path.display());
                         }
                         // Recorded evidence that cannot be recorded anywhere is

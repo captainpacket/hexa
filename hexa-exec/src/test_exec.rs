@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use hexa_core::ports::test_runner::{
-    batch_script, check_remote_template, fill, judge_counted, judge_script, judge_vitest, parse_test_ref, remote_command,
+    batch_script_for, check_remote_template, fill, on_runner, ON_RUNNER_ENV, judge_counted, judge_script, judge_vitest, parse_test_ref, remote_command,
     runner_for, runner_ran, shell_quote, split_batch, vitest_pattern, Runner, Verdict,
 };
 
@@ -127,6 +127,14 @@ pub fn test_config(root: &Path) -> Result<TestConfig, String> {
         let t = r.as_str().ok_or("test.remote in .hexa/project.json must be a command template string")?;
         check_remote_template(t)?;
         cfg.remote = Some(t.to_string());
+    }
+    // On the remote runner itself, its tests run here (ADR-2611240900 §3).
+    if cfg.remote.is_some() {
+        let marker = std::env::var(ON_RUNNER_ENV).ok();
+        let head = full_commit(root, "HEAD");
+        if on_runner(marker.as_deref(), head.as_deref())? {
+            cfg.remote = None;
+        }
     }
     Ok(cfg)
 }
@@ -337,7 +345,7 @@ async fn run_remote_full(
     cmds: Vec<String>,
 ) -> Result<(Vec<(bool, String)>, String), String> {
     let n = run_tag();
-    let full = remote_command(template, commit, &batch_script(&n, &cmds))?;
+    let full = remote_command(template, commit, &batch_script_for(&n, commit, &cmds))?;
     let (_, out) = crate::direct_exec::run_evidence(&full, dir).await;
     if !runner_ran(&out, commit) {
         return Err(format!(
@@ -416,16 +424,139 @@ pub fn link_node_modules(root: &Path, wt: &Path) {
 /// Run a gate command for HEAD of `dir` (§4): here, or through the remote.
 /// `Err` is a refusal or a runner failure, never a gate result.
 pub async fn run_gate(dir: &Path, gate: &str, cfg: &TestConfig, local: bool) -> Result<(bool, String), String> {
+    run_gate_and(dir, gate, &[], cfg, local).await.map(|mut v| v.remove(0))
+}
+
+/// The code a refusal of an unpushed HEAD carries (ADR-2611240900 §4).
+const HEAD_NOT_PUSHED: &str = "head-not-pushed";
+
+/// Run `gate`, then each of `also`, for HEAD of `dir`: here one after another,
+/// or through the remote in **one** run (ADR-2611191120 §4, ADR-2611240900 §4).
+/// Under the remote, HEAD must be on the remote, as the remote itself reports
+/// it. One `(exit 0, output)` per command, the gate's first.
+pub async fn run_gate_and(dir: &Path, gate: &str, also: &[String], cfg: &TestConfig, local: bool) -> Result<Vec<(bool, String)>, String> {
+    let mut cmds = vec![gate.to_string()];
+    cmds.extend(also.iter().cloned());
     match cfg.remote.as_deref().filter(|_| !local) {
-        None => Ok(crate::direct_exec::run_evidence(gate, dir).await),
+        None => {
+            let mut out = Vec::with_capacity(cmds.len());
+            for c in &cmds {
+                out.push(crate::direct_exec::run_evidence(c, dir).await);
+            }
+            Ok(out)
+        }
         Some(template) => {
             let head = full_commit(dir, "HEAD").ok_or("HEAD is not a commit: there is nothing for the remote runner to check out")?;
+            remote_holds(dir, &head)?;
             remote_preflight(dir, &head, true)?;
             println!("  sending the gate to the remote runner for {}", &head[..12]);
-            let mut out = run_remote(dir, template, &head, vec![gate.to_string()]).await?;
-            Ok(out.remove(0))
+            run_remote(dir, template, &head, cmds).await
         }
     }
+}
+
+/// Refuse, with [`HEAD_NOT_PUSHED`], a `commit` the remote does not hold
+/// (ADR-2611240900 §4). The branch's upstream head is read from the remote
+/// itself (`git ls-remote`): it must be `commit`, or a commit `commit` is an
+/// ancestor of. A branch with no upstream falls back to the local
+/// remote-tracking refs (ADR-2611191120 §5).
+fn remote_holds(dir: &Path, commit: &str) -> Result<(), String> {
+    let short: String = commit.chars().take(12).collect();
+    let branch = git(dir, &["symbolic-ref", "--quiet", "--short", "HEAD"]);
+    let upstream = branch.as_deref().and_then(|b| {
+        let remote = git(dir, &["config", &format!("branch.{b}.remote")])?;
+        let merge = git(dir, &["config", &format!("branch.{b}.merge")])?;
+        Some((b.to_string(), remote, merge))
+    });
+    let Some((branch, remote, merge)) = upstream else {
+        let tracked = git(dir, &["for-each-ref", "--contains", commit, "--count=1", "--format=%(refname)", "refs/remotes"])
+            .is_some_and(|s| !s.is_empty());
+        if tracked {
+            return Ok(());
+        }
+        return Err(format!(
+            "{HEAD_NOT_PUSHED}: {short} is on no remote branch, so the remote runner (test.remote) cannot check it out. \
+             Push it (`git push -u origin <branch>`), or run here with --local"
+        ));
+    };
+    let theirs = git(dir, &["ls-remote", &remote, &merge])
+        .ok_or_else(|| format!("{HEAD_NOT_PUSHED}: {remote} could not be read (`git ls-remote {remote} {merge}` failed), so it is not known to hold {short}. Check that {remote} is reachable, then run again"))?;
+    let theirs = theirs.split_whitespace().next().unwrap_or("").to_string();
+    let push = format!("`git push {remote} {branch}`");
+    if theirs.is_empty() {
+        return Err(format!(
+            "{HEAD_NOT_PUSHED}: {remote} has no {merge}, so the remote runner (test.remote) cannot check out {short}, whatever the local tracking ref says. {push}, or run here with --local"
+        ));
+    }
+    if theirs == commit {
+        return Ok(());
+    }
+    let ancestor = std::process::Command::new("git")
+        .args(["merge-base", "--is-ancestor", commit, &theirs])
+        .current_dir(dir)
+        .status()
+        .is_ok_and(|s| s.success());
+    if ancestor {
+        return Ok(());
+    }
+    let theirs_short: String = theirs.chars().take(12).collect();
+    Err(format!(
+        "{HEAD_NOT_PUSHED}: {remote} reports {merge} at {theirs_short}, which does not hold {short}. {push} \
+         (if {remote} moved on, `git pull --rebase` first), or run here with --local"
+    ))
+}
+
+/// The remote a scratch candidate is pushed to: the branch's upstream remote,
+/// else `origin` (ADR-2611240900 §1).
+pub fn scratch_remote(root: &Path) -> Option<String> {
+    let from_branch = git(root, &["symbolic-ref", "--quiet", "--short", "HEAD"]).and_then(|b| git(root, &["config", &format!("branch.{b}.remote")]));
+    from_branch.or_else(|| git(root, &["remote"]).and_then(|r| r.lines().any(|l| l.trim() == "origin").then(|| "origin".to_string())))
+}
+
+/// Run `cmd` through `template` for the tree of `root` as it stands
+/// (ADR-2611240900 §1): a scratch candidate (HEAD's tree, every tracked change,
+/// and the untracked files not in `leave_out`, HEAD its parent) is built in a
+/// throwaway index, pushed to `refs/heads/hexa-gate/<first 12>` on
+/// [`scratch_remote`], run, and the ref deleted on every path. Nothing moves
+/// here: not the branch, not the index. `Ok` is the command's (exit 0, output)
+/// and the candidate's id; `Err` is a refusal or a runner failure, never a
+/// gate result.
+pub async fn run_tree_remote(
+    root: &Path,
+    template: &str,
+    cmd: &str,
+    leave_out: &std::collections::BTreeSet<String>,
+) -> Result<(bool, String, String), String> {
+    let remote = scratch_remote(root).ok_or_else(|| {
+        "runner failure: this repository has no remote to push the candidate to, so the remote runner (test.remote) cannot see it: `git remote add origin <url>`, or run here with --local".to_string()
+    })?;
+    let head = full_commit(root, "HEAD").ok_or("HEAD is not a commit: there is nothing to build a candidate on")?;
+    let index = git_ok(root, &["rev-parse", "--git-path", "hexa-tree-index"], &[])?;
+    let index = if Path::new(&index).is_absolute() { PathBuf::from(index) } else { root.join(index) };
+    let _ = std::fs::remove_file(&index);
+    let idx = index.to_string_lossy().to_string();
+    let env = [("GIT_INDEX_FILE", idx.as_str())];
+    let built = (|| -> Result<String, String> {
+        git_ok(root, &["read-tree", "HEAD"], &env)?;
+        git_ok(root, &["add", "-A", "--", "."], &env)?;
+        for p in leave_out {
+            git_ok(root, &["rm", "-q", "--cached", "--ignore-unmatch", "--", p], &env)?;
+        }
+        let tree = git_ok(root, &["write-tree"], &env)?;
+        // A scratch commit that is only pushed to the runner and never kept, so it names hexa, not the operator: a host
+        // with no git identity (a CI runner) must still be able to gate a fix (spec_author's scratch commits do the same).
+        git_ok(root, &["-c", "user.name=hexa-harden", "-c", "user.email=harden@hexa.local", "commit-tree", &tree, "-p", &head, "-m", "hexa harden: a scratch candidate of the tree, gated on the remote runner (ADR-2611240900 §1)"], &[])
+    })();
+    let _ = std::fs::remove_file(&index);
+    let candidate = built.map_err(|e| format!("the candidate commit could not be built: {e}"))?;
+    let short: String = candidate.chars().take(12).collect();
+    let temp = format!("refs/heads/hexa-gate/{short}");
+    git_ok(root, &["push", "-q", &remote, &format!("{candidate}:{temp}")], &[])
+        .map_err(|e| format!("runner failure: the candidate {short} could not be pushed to {remote} ({temp}): {e}"))?;
+    let ran = run_remote(root, template, &candidate, vec![cmd.to_string()]).await;
+    let _ = git_ok(root, &["push", "-q", &remote, "--delete", &temp], &[]);
+    let (ok, out) = ran?.remove(0);
+    Ok((ok, out, candidate))
 }
 
 /// How many lines of the remote run's output are kept as a gate's evidence.

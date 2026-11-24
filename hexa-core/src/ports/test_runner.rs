@@ -5,6 +5,6 @@
 //! `do gate`, `land`) is bound by them, so they are part of their contract.
 
 pub use crate::domain::test_runner::{
-    batch_script, check_remote_template, fill, is_test_file, judge_counted, judge_script, judge_vitest, parse_test_ref,
-    remote_command, runner_for, runner_ran, shell_quote, split_batch, vitest_pattern, Runner, TestRef, Verdict,
+    batch_script, batch_script_for, check_remote_template, fill, is_test_file, judge_counted, judge_script, judge_vitest, on_runner, parse_test_ref,
+    remote_command, runner_for, runner_ran, shell_quote, split_batch, vitest_pattern, Runner, TestRef, Verdict, ON_RUNNER_ENV,
 };
