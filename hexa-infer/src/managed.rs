@@ -292,6 +292,8 @@ pub fn active_or_error() -> Result<Option<&'static Managed>, &'static ManagedErr
 
 unsafe extern "C" {
     fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+    // Linux only: macOS and the BSDs have no prctl, and a reference to it fails the link.
+    #[cfg(target_os = "linux")]
     fn prctl(option: i32, ...) -> i32;
 }
 
@@ -314,6 +316,13 @@ fn read_inherited_fd(fd: i32) -> std::io::Result<Vec<u8>> {
 }
 
 /// PR_SET_DUMPABLE=0: no core dump, and no ptrace or /proc/self/mem by the same user (§7).
+///
+/// Linux only. Elsewhere it does nothing: macOS has no PR_SET_DUMPABLE (its nearest is
+/// ptrace(PT_DENY_ATTACH), a different promise), and calling prctl there failed the link.
+#[cfg(not(target_os = "linux"))]
+fn forbid_dumping() {}
+
+#[cfg(target_os = "linux")]
 fn forbid_dumping() {
     const PR_SET_DUMPABLE: i32 = 4;
     // SAFETY: prctl(PR_SET_DUMPABLE, 0) changes only this process's dumpable flag.
