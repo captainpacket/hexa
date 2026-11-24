@@ -1,6 +1,7 @@
 # ADR-2611231735: hexa runs Codex as an agent backend, as it runs Claude Code
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-24 Accepted: Codex runs as an agent backend like Claude Code: same spawner, bypass flag fixed, refused as test writer; built gate-first and verified against the real CLI
 **Date:** 2026-11-23
 **Drivers:** Craig has `codex` (codex-cli 0.171.0, logged in with a ChatGPT plan, no API key) and asked hexa to use it. hexa reaches a subscription agent CLI only through `claude -p` (`ClaudeCodeInferenceAdapter`). A second agent CLI is configuration for the operator and a new adapter for hexa, so it is a new provider and a decision, not a bug fix. It departs from the Python-and-bug-fixes scope Craig set on 2026-11-22; he lifted it for this on 2026-11-23.
 **Supersedes:** none. Extends ADR-2610221540 §2 (an agent CLI is never the spec author) to a second CLI.
