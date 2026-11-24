@@ -1036,7 +1036,6 @@ async fn exec_attempts(deps: &ExecDeps, task: &DirectTask, repo_root: &std::path
     }
 
     snapshot.restore();
-    result.edit_applied = false;
     result.error = Some(format!(
         "exhausted {} attempts without passing evidence; {} is restored as the run found it. last: {}",
         max_attempts,
