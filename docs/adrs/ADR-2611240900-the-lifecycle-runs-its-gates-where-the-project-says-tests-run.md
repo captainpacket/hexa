@@ -64,7 +64,7 @@
 - **`hexa loop task done`** is pinned by S16: it runs no gate, here or remote.
 - **Not built, recorded as workplan drafts:** the SubagentStop hook's local gate rerun, `hexa build`'s local gates, and the line datum's `ci/remote-gate.sh` needs (`export HEXA_ON_RUNNER="$(git rev-parse HEAD)"`).
 
-**Built:** decisions 1 to 4, 2026-11-24, on `feat/remote-lifecycle`. Red at `7d62175`: hexa-core 7 passed and 5 failed, harden 1 passed and 4 failed, CLI 1 passed and 7 failed, each on its assertion. Green at `33155d4` on max: 12, 5 and 8 passed. The spec was accepted by Gary Berger on 2026-11-24 (`f0c5d2f`). `hexa spec red` bound S01, S02, S04, S05 and S09 to S15 at `7d62175`, each seen failing there on the runner, and `hexa spec seal` sealed `hexa-cli/tests/adr_2611240900_spec.rs` and `hexa-exec/tests/harden_remote_gate.rs`.
+**Built:** decisions 1 to 4, 2026-11-24, on `feat/remote-lifecycle`. Red at `7d62175`: hexa-core 7 passed and 5 failed, harden 1 passed and 4 failed, CLI 1 passed and 7 failed, each on its assertion. Green at `33155d4` on max: 12, 5 and 8 passed. The spec was accepted by Gary Berger on 2026-11-24 (`f0c5d2f`). `hexa spec red` bound S01, S02, S04, S05 and S09 to S15 at `7d62175`, and `hexa spec seal` sealed `hexa-cli/tests/adr_2611240900_spec.rs` and `hexa-exec/tests/harden_remote_gate.rs`. That binding ran on a Mac, because this repository declares no `test.remote`; it was rechecked on tt (Linux): at `7d62175` the 11 tests each panic on their assertion (harden 1 passed and 4 failed, CLI 1 passed and 7 failed), and `hexa spec verify ADR-2611240900 --local` at `ba61981` passes 11, fails 0, with 5 pending.
 
 ## Addendum, 2026-11-24: the scenarios not bound red
 
