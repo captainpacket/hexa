@@ -490,9 +490,11 @@ fn head_and_branch(root: &Path) -> Result<(String, String), Box<GateFailure>> {
 }
 
 /// The remote and branch ref `branch` tracks. A branch with none is refused
-/// rather than guessed at (ADR-2611221610 §7).
+/// rather than guessed at (ADR-2611221610 §7), and so is a branch that tracks
+/// a branch of another name: pushing to that upstream would put the commit on
+/// another branch, typically the base (gaberger/hexa#75).
 fn upstream_of(root: &Path, branch: &str) -> Result<(String, String), Box<GateFailure>> {
-    git_ok(root, &["config", &format!("branch.{branch}.remote")], &[])
+    let (remote, merge) = git_ok(root, &["config", &format!("branch.{branch}.remote")], &[])
         .and_then(|r| git_ok(root, &["config", &format!("branch.{branch}.merge")], &[]).map(|m| (r, m)))
         .map_err(|_| {
             GateFailure::new(
@@ -504,7 +506,20 @@ fn upstream_of(root: &Path, branch: &str) -> Result<(String, String), Box<GateFa
                 None,
                 false,
             )
-        })
+        })?;
+    if merge != format!("refs/heads/{branch}") {
+        let theirs = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
+        return Err(GateFailure::new(
+            "no-upstream",
+            format!(
+                "refused: {branch} tracks {remote}/{theirs}, not a branch of its own, so a remote gate would push the commit to {theirs}; nothing committed"
+            ),
+            format!("`git push -u {remote} {branch}` first, so {branch} tracks its own name, then run the same command; or gate here with --local"),
+            None,
+            false,
+        ));
+    }
+    Ok((remote, merge))
 }
 
 /// The branch's head on `remote`, read back from the remote itself.
@@ -790,5 +805,35 @@ mod tests {
             assert_eq!(got[0].1.trim_end_matches('\n'), cmd.trim_end_matches('\n'), "{script}");
             assert_inert(d.path(), cmd);
         }
+    }
+
+    /// A repository with branch `branch` whose upstream is `remote`'s `merge`.
+    fn tracking(branch: &str, merge: &str) -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        let git = |a: &[&str]| assert!(std::process::Command::new("git").args(a).current_dir(d.path()).status().unwrap().success(), "{a:?}");
+        git(&["init", "-q", "-b", branch]);
+        git(&["config", &format!("branch.{branch}.remote"), "origin"]);
+        git(&["config", &format!("branch.{branch}.merge"), merge]);
+        d
+    }
+
+    #[test]
+    fn a_branch_tracking_its_own_name_has_an_upstream() {
+        let d = tracking("feat", "refs/heads/feat");
+        assert_eq!(upstream_of(d.path(), "feat").unwrap(), ("origin".to_string(), "refs/heads/feat".to_string()));
+    }
+
+    /// gaberger/hexa#75: a worktree made with `git worktree add -b t3/x <dir>
+    /// origin/main` tracks origin/main, and the remote gate pushed its commit
+    /// to main. Pushing to the upstream is pushing to another branch: refused
+    /// by name, as a branch with no upstream of its own is (ADR-2611221610 §7).
+    #[test]
+    fn a_branch_tracking_another_branch_is_refused_by_name() {
+        let d = tracking("t3/dead-exports", "refs/heads/main");
+        let f = upstream_of(d.path(), "t3/dead-exports").unwrap_err();
+        assert_eq!(f.code, "no-upstream");
+        assert!(f.why.contains("t3/dead-exports") && f.why.contains("main"), "{}", f.why);
+        assert!(f.hint.contains("git push -u origin t3/dead-exports"), "{}", f.hint);
+        assert!(!f.retryable);
     }
 }
