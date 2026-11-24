@@ -1,0 +1,235 @@
+{
+  "adr": "ADR-2611161830",
+  "feature": "AG-UI Event Stream",
+  "description": "hexa emits AG-UI 1.1 event streams for all working verbs",
+  "universal": [
+    "§8",
+    "§9"
+  ],
+  "accepted": {
+    "by": "gary (in conversation, 2026-11-23: \"accept the specs\"; recorded by the implementing agent)",
+    "sha256": "54250b3e8292686de6f2ba636bd5712036d5fda1466f9751b348cfe51de75b5f"
+  },
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "JSON lines transport with --events flag",
+      "given": "hexa finish --events",
+      "when": "the command runs",
+      "then": "stdout is one JSON object per line, terminated by newline"
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "rejects invalid arguments before RUN_STARTED",
+      "given": "hexa finish --events --invalid-arg",
+      "when": "the command is invoked",
+      "then": "stderr contains the refusal, exit code is non-zero, no RUN_STARTED emitted"
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "run lifecycle for successful finish",
+      "given": "hexa finish --events",
+      "when": "the command runs in a repo with open work",
+      "then": "first event is RUN_STARTED, last is RUN_FINISHED with result"
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "run lifecycle for gate failure",
+      "given": "A repository whose gate script reports one failing test",
+      "when": "`hexa do gate --events --files a.txt -e 'sh fail.sh' -m 'x'` runs",
+      "then": "The last event is `RUN_ERROR` with code `gate_failed`; no `RUN_FINISHED` is sent and nothing is committed"
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "steps for gate verb",
+      "given": "A changed file and a gate script that reports one passing test",
+      "when": "`hexa do gate --events --files a.txt -e 'sh gate.sh' -m 'x'` runs",
+      "then": "`STEP_STARTED gate`, `STEP_FINISHED gate`, `STEP_STARTED land`, `STEP_FINISHED land` come in that order, all before `RUN_FINISHED`"
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§4"
+      ],
+      "kind": "example",
+      "description": "state snapshot at run start",
+      "given": "hexa finish --events",
+      "when": "the command runs",
+      "then": "first event after RUN_STARTED is STATE_SNAPSHOT with loop adr, gate, stage, checklist"
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "activity snapshot for open work",
+      "given": "hexa finish --events",
+      "when": "the command runs in a repo with open work",
+      "then": "one ACTIVITY_SNAPSHOT with activityType hexa.open_work lists the items"
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§6"
+      ],
+      "kind": "example",
+      "description": "subagent lifecycle for harden reviewer",
+      "given": "A harden run that starts one reviewer",
+      "when": "It runs with `--events`",
+      "then": "`SUBAGENT_STARTED` carries `name` and `description`, it is followed by `SUBAGENT_FINISHED` or `SUBAGENT_ERROR`, and every event of that reviewer carries the same `subagentRunId`"
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§7"
+      ],
+      "kind": "example",
+      "description": "usage on terminal event",
+      "given": "A run whose spend ledger records input, output and cached tokens for two models of one provider",
+      "when": "The run ends",
+      "then": "`usage` on the terminal event holds one `TokenUsage` per model, and each model's cached tokens are part of its input total, never added on top"
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§8"
+      ],
+      "kind": "property",
+      "description": "emitter refuses invalid events",
+      "given": "any event before RUN_STARTED or after run close",
+      "when": "the emitter is asked to emit it",
+      "then": "The emitter refuses it and does not write it; the same holds for a step opened twice, a step closed that was never opened, and an optional field sent as `null`"
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§9"
+      ],
+      "kind": "property",
+      "description": "all events validate against vendored schema",
+      "given": "every event hexa builds",
+      "when": "jsonschema crate validates it",
+      "then": "validation passes"
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "A run never ends with a step still open",
+      "given": "A `do gate` run whose gate fails inside the `gate` step",
+      "when": "The run ends",
+      "then": "`STEP_FINISHED gate` is sent before `RUN_ERROR`; no `STEP_STARTED` is left without its `STEP_FINISHED`"
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "A change during the run is a delta, never a second snapshot",
+      "given": "`hexa loop task done 1 --events` in a loop with one open task",
+      "when": "The task is checked off",
+      "then": "Exactly one `STATE_SNAPSHOT` is sent, at the start; the change is a `STATE_DELTA` RFC 6902 patch against it"
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§5"
+      ],
+      "kind": "negative",
+      "description": "The open-work list is activity, not transcript",
+      "given": "`hexa finish --events` in a repository with open work",
+      "when": "The command runs",
+      "then": "The open items appear only in the `hexa.open_work` `ACTIVITY_SNAPSHOT`; no `TEXT_MESSAGE_*` event carries them"
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§6"
+      ],
+      "kind": "negative",
+      "description": "The parent run's own events carry no subagentRunId",
+      "given": "A harden run with `--events` that starts one reviewer",
+      "when": "The run's own steps and terminal event are sent",
+      "then": "None of them carries a `subagentRunId`; only the reviewer's events do"
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "§7"
+      ],
+      "kind": "negative",
+      "description": "An absent count is never sent as zero",
+      "given": "A spend record for one model with input and output tokens and no cached or reasoning count",
+      "when": "The terminal event carries usage",
+      "then": "That model's `TokenUsage` has no cached or reasoning field at all, rather than a field holding 0"
+    },
+    {
+      "id": "S17",
+      "decision": [
+        "§8"
+      ],
+      "kind": "example",
+      "description": "An early return closes the run itself",
+      "given": "A verb that returns an error while its first step is open",
+      "when": "The verb returns",
+      "then": "The emitter sends `STEP_FINISHED` for the open step and then `RUN_ERROR`, though the verb wrote neither"
+    },
+    {
+      "id": "S18",
+      "decision": [
+        "§8"
+      ],
+      "kind": "negative",
+      "description": "No verb writes event JSON itself",
+      "given": "The source of every verb that supports `--events`",
+      "when": "It is searched for code that builds or prints event JSON outside the emitter",
+      "then": "None is found: every event goes through the one emitter type"
+    },
+    {
+      "id": "S19",
+      "decision": [
+        "§9"
+      ],
+      "kind": "example",
+      "description": "hexa's events validate against the vendored schema",
+      "given": "The vendored `schema.json`, with its source and licence in PROVENANCE.md, and the events of `hexa finish --events`",
+      "when": "Each event is validated with the `jsonschema` crate",
+      "then": "Every event validates"
+    },
+    {
+      "id": "S20",
+      "decision": [
+        "§9"
+      ],
+      "kind": "negative",
+      "description": "The oracle rejects a malformed event",
+      "given": "A `RUN_STARTED` event with `threadId` left out",
+      "when": "It is validated against the vendored schema",
+      "then": "Validation fails, so a test built on the schema catches an event hexa gets wrong"
+    }
+  ]
+}

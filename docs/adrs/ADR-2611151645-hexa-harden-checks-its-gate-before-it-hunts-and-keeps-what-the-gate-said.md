@@ -1,6 +1,7 @@
 # ADR-2611151645: `hexa harden` checks its gate before it hunts, and keeps what the gate said
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-11-15
 **Drivers:** Two `hexa harden` runs on kairos (`src/usecases/worker.rs`, then `src/domain/passkey.rs`) spent 10m41s and 15m36s of inference on 10 confirmed-real findings. Every fix "did not pass the gate" and was reverted, and the final gate, run on the reverted tree, failed too, so the gate was red whatever the fixes did. Nothing says why: `run_evidence` returns the gate's output, and `harden` discards it (`let (passed, _) = …`). The same gate passes in 15 seconds on a clean `main` afterwards, so what made it red at the time is unknown. A run that cannot say whether its gate was ever green cannot judge a fix.
 

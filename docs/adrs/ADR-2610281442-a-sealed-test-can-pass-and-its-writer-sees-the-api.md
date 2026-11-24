@@ -1,11 +1,12 @@
 ---
 id: ADR-2610281442
-status: proposed
+status: accepted
 date: 2026-10-28
 ---
 # ADR-2610281442: a sealed test can pass, and its writer sees the API it tests
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-10-28
 **Drivers:** Running the whole loop on an example app (`~/projects/hexa-egm-example`, 2026-10-28) sealed tests that no implementation can pass. The test writer is shown only the port and domain files an ADR names, so for a decision about a use-case constructor it sealed a helper that is an unconditional `todo!`/`panic!` — 11 tests of 41, in 4 of 7 generations. A test that panics fails before the code and after it alike, so the red check accepted it: a vacuous gate, which ADR-2610221540 forbids. Once the code existed, the broken tests could not be replaced either: `hexa spec tests` requires every new test to fail at HEAD, and HEAD held the code. The same wall holds ADR-2610271736's S24.
 
