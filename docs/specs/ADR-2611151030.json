@@ -1,0 +1,420 @@
+{
+  "adr": "ADR-2611151030",
+  "feature": "hexa adr board",
+  "description": "Shows ADR progress, state, and collaboration across checkouts",
+  "universal": [
+    "§2",
+    "§3",
+    "§4",
+    "§5",
+    "§6",
+    "§7",
+    "§8",
+    "§9",
+    "§10",
+    "§11",
+    "§12"
+  ],
+  "accepted": {
+    "by": "gary (in conversation, 2026-11-23: \"accept the specs\"; recorded by the implementing agent)",
+    "sha256": "9e537633be3342c833a668bcc66aa05e19a574f56a25194ee1b1d7f3868ee895"
+  },
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "Command outputs JSON when stdout is not a terminal",
+      "given": "hexa adr board is run with stdout redirected to a file",
+      "when": "the command executes",
+      "then": "the output is valid JSON containing the board data"
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "Command fails when no ADRs are found",
+      "given": "docs/adrs/ directory exists but contains no ADR files",
+      "when": "hexa adr board is run",
+      "then": "the command exits with code 1 and outputs {ok:false, code: 'no_adrs', message: '...', hint: '...'}"
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§2"
+      ],
+      "kind": "property",
+      "description": "A heading is a unit exactly when it matches the phase-id pattern",
+      "given": "Any heading line under `## Phases`",
+      "when": "Units are counted",
+      "then": "It is a unit exactly when it is `### <id>.` with `<id>` one to three letters, a number and optionally one lowercase letter (`R1`, `P2a`, `F1` are; `R`, `ABCD1`, `R1A`, `Decision gate (R1)` are not)"
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "Non-phase headings are not counted as units",
+      "given": "an ADR with '### Decision gate (R1)' under '## Phases'",
+      "when": "units are counted",
+      "then": "the decision gate heading is not counted as a unit"
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "Phase is built when its section contains '**Built'",
+      "given": "an ADR with '### R1. Title\\n**Built 2026-11-14.'",
+      "when": "the phase is analyzed",
+      "then": "the phase is marked as built"
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "Phase is not built without evidence",
+      "given": "an ADR with '### R1. Title' and no '**Built' line",
+      "when": "the phase is analyzed",
+      "then": "the phase is marked as not built"
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§4"
+      ],
+      "kind": "example",
+      "description": "State is computed from status and units",
+      "given": "An ADR with status Accepted and two phases, neither built",
+      "when": "the state is computed",
+      "then": "Its state is `accepted`"
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "Retired status is not counted in progress",
+      "given": "an ADR with status 'superseded'",
+      "when": "the summary is computed",
+      "then": "the ADR is not counted in units or built"
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "Summary rounds down and excludes retired/unknown",
+      "given": "Two ADRs: one Accepted with 1 of 2 phases built, one Superseded with 3 phases",
+      "when": "the summary is computed",
+      "then": "`units` is 2, `built` is 1, `percent` is 50, and the Superseded ADR counts only in `by_state.retired`"
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§6"
+      ],
+      "kind": "example",
+      "description": "Drift is detected when status is behind evidence",
+      "given": "a 'proposed' ADR with a built phase",
+      "when": "the analysis is run",
+      "then": "the drift list contains 'status-behind-evidence'"
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§6"
+      ],
+      "kind": "negative",
+      "description": "--strict exits 1 when drift is found",
+      "given": "an ADR with drift",
+      "when": "hexa adr board --strict is run",
+      "then": "the command exits with code 1"
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§7"
+      ],
+      "kind": "example",
+      "description": "Elsewhere entries show differences between checkouts",
+      "given": "two worktrees with the same ADR but different status",
+      "when": "the board is computed",
+      "then": "the elsewhere entry has kind: 'status'"
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§7"
+      ],
+      "kind": "negative",
+      "description": "Uncommitted changes are only noted for 'text' differences",
+      "given": "a worktree with uncommitted changes to an ADR",
+      "when": "the board is computed",
+      "then": "the elsewhere entry has kind: 'text' and uncommitted: true"
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§8"
+      ],
+      "kind": "example",
+      "description": "Tasks are joined to ADRs by name or ID",
+      "given": "a task in .hexa/tasks.json with name 'ADR-2611151030'",
+      "when": "the board is computed",
+      "then": "the ADR row shows claimed_by with the task's owner"
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§9"
+      ],
+      "kind": "example",
+      "description": "Gate presence is shown",
+      "given": "One ADR that records a gate and one that records none",
+      "when": "The board is computed",
+      "then": "The first row shows `gate: recorded` and the second `gate: none`"
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "§10"
+      ],
+      "kind": "negative",
+      "description": "Honest failure: no ADRs is an error, not silence",
+      "given": "docs/adrs/ directory is empty",
+      "when": "hexa adr board is run",
+      "then": "the command exits with code 1 and outputs an error message"
+    },
+    {
+      "id": "S17",
+      "decision": [
+        "§11"
+      ],
+      "kind": "example",
+      "description": "--product reads a separate repository's ADRs",
+      "given": "a kairos repository with its own ADRs",
+      "when": "hexa adr board --product /path/to/kairos is run",
+      "then": "the output contains a separate board for kairos with its own summary"
+    },
+    {
+      "id": "S18",
+      "decision": [
+        "§11"
+      ],
+      "kind": "negative",
+      "description": "--also is for same-repo checkouts only",
+      "given": "a directory with ADRs from a different product",
+      "when": "hexa adr board --also /path/to/other is run",
+      "then": "a warning is output suggesting to use --product instead"
+    },
+    {
+      "id": "S19",
+      "decision": [
+        "§12"
+      ],
+      "kind": "example",
+      "description": "HTML page is static and inert",
+      "given": "an ADR with '<script>alert(1)</script>' in its text",
+      "when": "--html FILE is used",
+      "then": "the script tag is escaped and not executed in the output"
+    },
+    {
+      "id": "S20",
+      "decision": [
+        "§12"
+      ],
+      "kind": "negative",
+      "description": "The HTML page carries no script and no external reference",
+      "given": "An ADR whose title is `<img src=x onerror=alert(1)>` and whose body links `https://example.com/style.css`",
+      "when": "`hexa adr board --html FILE` writes the page",
+      "then": "FILE contains no `<script`, no `src=` or `href=` pointing outside the file, and no unescaped `<` or `>` from the ADR's text; the CSS is inline"
+    },
+    {
+      "id": "S21",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "Phases are units; a phase-less ADR is one unit",
+      "given": "An ADR whose `## Phases` has `### P1.`, `### P2a.` and `### Notes`, and an ADR with no `## Phases`",
+      "when": "Units are counted",
+      "then": "The first ADR has two units, P1 and P2a; the second has one"
+    },
+    {
+      "id": "S22",
+      "decision": [
+        "§3"
+      ],
+      "kind": "property",
+      "description": "Status alone never builds a unit",
+      "given": "Any Accepted or Proposed ADR with any phases and no `**Built` line anywhere",
+      "when": "The board is computed",
+      "then": "No unit of it is built; and a header `**Built:** P2` builds P2 only, never P2a"
+    },
+    {
+      "id": "S23",
+      "decision": [
+        "§4"
+      ],
+      "kind": "example",
+      "description": "Some units built is building",
+      "given": "An Accepted ADR with phases P1 and P2, only P1 carrying a `**Built` line",
+      "when": "The board is computed",
+      "then": "Its state is `building`"
+    },
+    {
+      "id": "S24",
+      "decision": [
+        "§4"
+      ],
+      "kind": "property",
+      "description": "Every ADR has exactly one state, and it follows its units",
+      "given": "Any ADR",
+      "when": "The board is computed",
+      "then": "Its state is exactly one of built, building, accepted, proposed, retired, unknown: retired for Superseded, Rejected, Deprecated or Abandoned; unknown when the status line cannot be read, with a warning naming it; otherwise built when every unit is built, building when some are, and accepted or proposed by status when none are"
+    },
+    {
+      "id": "S25",
+      "decision": [
+        "§5"
+      ],
+      "kind": "negative",
+      "description": "Unknown and retired ADRs never move the percentage",
+      "given": "An ADR whose status line cannot be read, with three phases, beside a fully built ADR",
+      "when": "The summary is computed",
+      "then": "`percent` is 100 and the unreadable ADR counts only in `by_state.unknown`"
+    },
+    {
+      "id": "S26",
+      "decision": [
+        "§5"
+      ],
+      "kind": "property",
+      "description": "The percentage rounds down, and 100 means done",
+      "given": "Any set of ADRs",
+      "when": "The summary is computed",
+      "then": "`percent` equals floor(100 * built / units) over ADRs neither retired nor unknown, so it is 100 only when every such unit is built"
+    },
+    {
+      "id": "S27",
+      "decision": [
+        "§6"
+      ],
+      "kind": "property",
+      "description": "Drift is exactly a Proposed status behind its evidence",
+      "given": "Any ADR",
+      "when": "The board is computed",
+      "then": "It is `status-behind-evidence` exactly when its status is Proposed and its state is building or built; `--strict` exits 1 exactly when at least one ADR is"
+    },
+    {
+      "id": "S28",
+      "decision": [
+        "§7"
+      ],
+      "kind": "property",
+      "description": "An elsewhere entry names the first difference and whether it is in flight",
+      "given": "Any ADR present in the current checkout and in another worktree or `--also` checkout",
+      "when": "The board is computed",
+      "then": "An `elsewhere` entry exists exactly when the copies differ; its `kind` is status if the status word differs, else progress if units built differ, else text; `uncommitted` is true exactly when `git status --porcelain` shows that ADR file changed in that checkout; an unreadable checkout is a warning, never left out silently"
+    },
+    {
+      "id": "S29",
+      "decision": [
+        "§8"
+      ],
+      "kind": "negative",
+      "description": "A finished or unrelated task is not attached",
+      "given": "A `done` task whose name contains the ADR's id, and a `running` task whose name, gate and leases contain neither the ADR's full id nor its ten-digit number",
+      "when": "The board is computed",
+      "then": "Neither task appears in that ADR's `claimed_by`"
+    },
+    {
+      "id": "S30",
+      "decision": [
+        "§8"
+      ],
+      "kind": "property",
+      "description": "A live task is attached exactly when it names the ADR",
+      "given": "Any `claimed` or `running` task in `.hexa/tasks.json`",
+      "when": "The board is computed",
+      "then": "It appears in an ADR's `claimed_by`, with name, owner and status, exactly when its name, gate or a lease contains that ADR's full id or ten-digit number"
+    },
+    {
+      "id": "S31",
+      "decision": [
+        "§9"
+      ],
+      "kind": "negative",
+      "description": "The board never runs a gate",
+      "given": "An ADR whose recorded gate is a command that would create a marker file",
+      "when": "The board is computed",
+      "then": "The marker file does not exist afterwards"
+    },
+    {
+      "id": "S32",
+      "decision": [
+        "§9"
+      ],
+      "kind": "property",
+      "description": "Every row says whether a gate is recorded",
+      "given": "Any ADR",
+      "when": "The board is computed",
+      "then": "Its row has `gate` equal to `recorded` or `none`, and no gate result"
+    },
+    {
+      "id": "S33",
+      "decision": [
+        "§10"
+      ],
+      "kind": "example",
+      "description": "A warning is shown, not swallowed",
+      "given": "`docs/adrs/` holding one readable ADR and one whose status line cannot be read",
+      "when": "`hexa adr board --json` runs",
+      "then": "Both ADRs are listed, the second with state `unknown`, and `warnings` names it"
+    },
+    {
+      "id": "S34",
+      "decision": [
+        "§10"
+      ],
+      "kind": "property",
+      "description": "No ADRs is an error, never an empty board",
+      "given": "Any directory with no `docs/adrs/`, or one with no ADR file in it",
+      "when": "`hexa adr board` runs",
+      "then": "It exits 1 with `{ok:false, code:\"no_adrs\"}` and never prints a board with zero units"
+    },
+    {
+      "id": "S35",
+      "decision": [
+        "§11"
+      ],
+      "kind": "property",
+      "description": "Products never mix",
+      "given": "Any `--product DIR` alongside this repository",
+      "when": "The board is computed",
+      "then": "DIR's ADRs appear only on DIR's own board with its own summary, worktrees and ledger; this repository's units, built and percent are the same as without `--product`"
+    },
+    {
+      "id": "S36",
+      "decision": [
+        "§12"
+      ],
+      "kind": "property",
+      "description": "Every ADR value is escaped in the page",
+      "given": "Any ADR text containing `<`, `>`, `&` or quotes",
+      "when": "`--html FILE` writes the page",
+      "then": "Every such character from ADR text appears escaped in FILE, which contains no `<script` and no reference to anything outside itself"
+    }
+  ]
+}

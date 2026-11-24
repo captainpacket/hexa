@@ -15,6 +15,11 @@ needs to be started.
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the map. This file is the
 operator's manual.
 
+[`AGENTS.md`](AGENTS.md), imported below, is the guide every agent reads (ADR-2611221600). Where it is
+more general than this manual, this manual wins.
+
+@AGENTS.md
+
 ## System components
 
 | Component | Role |

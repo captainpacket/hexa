@@ -609,7 +609,7 @@ fn persist_run_async(runs: &dyn crate::ports::RunLog, run: DirectRun) {
 /// reported 8% pass over 5 real runs. `runs_from_rows` drops those rows
 /// before assigning display ids, so ids number only real runs
 /// (ADR-2609151100).
-pub fn runs_snapshot(runs: &dyn crate::ports::RunLog) -> Vec<DirectRun> {
+pub(crate) fn runs_snapshot(runs: &dyn crate::ports::RunLog) -> Vec<DirectRun> {
     runs_from_rows(runs.recent(RUN_HISTORY))
 }
 
@@ -673,11 +673,6 @@ pub fn runs_for_repo(runs: &dyn crate::ports::RunLog, repo: Option<&str>) -> (Ve
     let mine: Vec<DirectRun> = all.into_iter().filter(|r| r.repo == repo).collect();
     let hidden = total - mine.len();
     (mine, hidden)
-}
-
-/// Aggregate counters for an at-a-glance monitor header.
-pub fn runs_summary(runs: &dyn crate::ports::RunLog) -> Value {
-    summary_of(&runs_snapshot(runs))
 }
 
 /// Count `runs` into the monitor-header shape: total, passed, failed,
@@ -1761,25 +1756,7 @@ pub async fn gate_patch(
     message: &str,
     uncounted: bool,
 ) -> Result<String, String> {
-    let Some((first, rest)) = files.split_first() else {
-        return Err("name the files the change is in: --files <path>…".to_string());
-    };
-    validate_also_paths(files)?;
-    refuse_credentials(first, rest)?;
-    let paths: Vec<String> = files.iter().map(|p| normalize_also(p)).collect();
-    let dirty = dirty_paths(repo_root).await;
-    let unchanged: Vec<&str> = paths.iter().filter(|p| !dirty.contains(p)).map(String::as_str).collect();
-    if !unchanged.is_empty() {
-        return Err(format!("nothing to commit in {}: no change against HEAD", unchanged.join(", ")));
-    }
-    let broken = broken_seals(repo_root);
-    if !broken.is_empty() {
-        return Err(format!(
-            "refused: sealed test(s) or spec record(s) changed: {}. A sealed test changes through the spec, never in a fix \
-             (ADR-2610221540 §6); nothing committed",
-            broken.join(", ")
-        ));
-    }
+    let paths = gate_checks(repo_root, files).await?;
     let (passed, output) = run_evidence(evidence, repo_root).await;
     // A gate that is one bash script counts as one test (ADR-2611191120 §7).
     let verdict = hexa_core::ports::evidence::read_gate_evidence(evidence, passed, &output, uncounted);
@@ -1819,6 +1796,115 @@ pub async fn gate_patch(
         .await
         .map_err(|e| e.to_string())?;
     Ok(String::from_utf8_lossy(&head.stdout).trim().to_string())
+}
+
+/// What `hexa do gate` checks before any gate runs, locally or remotely
+/// (ADR-2611160730 §3, ADR-2611221610 §7, §8): a file is named, no path escapes
+/// the repository, none is a credential, each has a change, and no sealed test
+/// or spec record changed, except an amendment `hexa spec amend` recorded and
+/// the gate commits with its record. Returns the repo-relative paths.
+pub async fn gate_checks(repo_root: &std::path::Path, files: &[String]) -> Result<Vec<String>, String> {
+    let Some((first, rest)) = files.split_first() else {
+        return Err("name the files the change is in: --files <path>…".to_string());
+    };
+    validate_also_paths(files)?;
+    refuse_credentials(first, rest)?;
+    let paths: Vec<String> = files.iter().map(|p| normalize_also(p)).collect();
+    let dirty = dirty_paths(repo_root).await;
+    let unchanged: Vec<&str> = paths.iter().filter(|p| !dirty.contains(p)).map(String::as_str).collect();
+    if !unchanged.is_empty() {
+        return Err(format!("nothing to commit in {}: no change against HEAD", unchanged.join(", ")));
+    }
+    let broken = broken_seals_for_gate(repo_root, &paths);
+    if !broken.is_empty() {
+        return Err(format!(
+            "refused: sealed test(s) or spec record(s) changed: {}. A sealed test changes through the spec, never in a fix \
+             (ADR-2610221540 §6): record a reviewed edit with `hexa spec amend`, then name the test and its spec record in \
+             --files (ADR-2611221610 §8); nothing committed",
+            broken.join(", ")
+        ));
+    }
+    Ok(paths)
+}
+
+/// [`broken_seals`], less what a recorded amendment covers (ADR-2611221610 §8):
+/// a changed spec record named in `named` whose only differences from HEAD's
+/// copy are its `sealed` map and amendments appended to `amendments`, each
+/// moved seal reached from HEAD's by the new amendments in order; with it,
+/// each named sealed file whose content is the hash the record now seals.
+fn broken_seals_for_gate(repo_root: &std::path::Path, named: &[String]) -> Vec<String> {
+    let broken = broken_seals(repo_root);
+    if broken.is_empty() {
+        return broken;
+    }
+    let mut covered: Vec<String> = Vec::new();
+    for record in broken.iter().filter(|p| is_spec_record(p) && named.contains(p)) {
+        let Some(moved) = recorded_amendments(repo_root, record) else { continue };
+        covered.push(record.clone());
+        for (file, sealed) in moved {
+            let now = std::fs::read(repo_root.join(&file)).ok().map(|b| sha256_hex(&b));
+            if named.contains(&file) && now.as_deref() == Some(sealed.as_str()) {
+                covered.push(file);
+            }
+        }
+    }
+    broken.into_iter().filter(|p| !covered.contains(p)).collect()
+}
+
+/// The `(file, new seal)` pairs a spec record's amendments moved since HEAD,
+/// or `None` when the record changed in any other way or the chain does not
+/// hold (ADR-2611221610 §8).
+fn recorded_amendments(repo_root: &std::path::Path, record: &str) -> Option<Vec<(String, String)>> {
+    let head = std::process::Command::new("git")
+        .args(["show", &format!("HEAD:{record}")])
+        .current_dir(repo_root)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let mut old: Value = serde_json::from_slice(&head.stdout).ok()?;
+    let mut new: Value = serde_json::from_slice(&std::fs::read(repo_root.join(record)).ok()?).ok()?;
+    let take = |v: &mut Value, k: &str| v.as_object_mut().and_then(|o| o.remove(k)).unwrap_or(Value::Null);
+    let (old_sealed, new_sealed) = (take(&mut old, "sealed"), take(&mut new, "sealed"));
+    let (old_am, new_am) = (take(&mut old, "amendments"), take(&mut new, "amendments"));
+    if old != new {
+        return None;
+    }
+    let old_sealed = old_sealed.as_object().cloned().unwrap_or_default();
+    let new_sealed = new_sealed.as_object().cloned()?;
+    let old_am = old_am.as_array().cloned().unwrap_or_default();
+    let new_am = new_am.as_array().cloned()?;
+    if new_am.len() <= old_am.len() || new_am[..old_am.len()] != old_am[..] {
+        return None;
+    }
+    let mut keys_old: Vec<&String> = old_sealed.keys().collect();
+    let mut keys_new: Vec<&String> = new_sealed.keys().collect();
+    keys_old.sort();
+    keys_new.sort();
+    if keys_old != keys_new {
+        return None;
+    }
+    let added = &new_am[old_am.len()..];
+    if added.iter().any(|a| a["file"].as_str().is_none_or(|f| !new_sealed.contains_key(f))) {
+        return None;
+    }
+    let mut moved = Vec::new();
+    for (file, was) in &old_sealed {
+        let mut expected = was.as_str()?.to_string();
+        for a in added.iter().filter(|a| a["file"].as_str() == Some(file.as_str())) {
+            if a["from"].as_str() != Some(expected.as_str()) {
+                return None;
+            }
+            expected = a["to"].as_str()?.to_string();
+        }
+        let now = new_sealed.get(file)?.as_str()?;
+        if now != expected {
+            return None;
+        }
+        if now != was.as_str()? {
+            moved.push((file.clone(), now.to_string()));
+        }
+    }
+    (!moved.is_empty()).then_some(moved)
 }
 
 /// The tracked files the operator had already changed before the run, in the

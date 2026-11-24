@@ -5,8 +5,12 @@
 //! that makes a project hexa-aware.
 //!
 //! Two modes:
-//! - **Config-only** (default): `.hexa/`, `.claude/`, `CLAUDE.md`
-//! - **Scaffold** (`--scaffold`): Also creates `src/` hexa layer directories
+//! - **Config-only** (default): `.hexa/`, `.claude/`, `AGENTS.md`, `CLAUDE.md`
+//! - **Scaffold** (`--scaffold`): Also writes a runnable skeleton, with a
+//!   README in each layer directory (ADR-2611221600 §5)
+//!
+//! AGENTS.md is the guide every agent reads; CLAUDE.md imports it and adds
+//! only what Claude Code uses (ADR-2611221600 §1, §2).
 //!
 //! ## Template sourcing
 //!
@@ -137,7 +141,10 @@ pub async fn run(args: InitArgs) -> Result<()> {
     }
     written.push(".claude/settings.json".into());
 
-    // ── 4. CLAUDE.md ──────────────────────────────────────────────
+    // ── 4. AGENTS.md, then CLAUDE.md, which imports it ────────────
+    // After project.json: "where builds run" is read from it.
+    super::refresh::write_agents_md(&target, &project_name)?;
+    written.push("AGENTS.md".into());
     if !args.no_claude_md {
         create_claude_md(&target, &project_name)?;
         written.push("CLAUDE.md".into());
@@ -188,8 +195,12 @@ pub async fn run(args: InitArgs) -> Result<()> {
     println!("  {} .hexa/project.json", "\u{2713}".green());
     println!("  {} .hexa/ADR-rules.toml (enforcement rules)", "\u{2713}".green());
     println!("  {} .claude/settings.json", "\u{2713}".green());
+    println!(
+        "  {} AGENTS.md (the guide every agent reads)",
+        "\u{2713}".green()
+    );
     if !args.no_claude_md {
-        println!("  {} CLAUDE.md", "\u{2713}".green());
+        println!("  {} CLAUDE.md (imports AGENTS.md)", "\u{2713}".green());
     }
     println!("  {} docs/adrs/", "\u{2713}".green());
     if args.scaffold {
@@ -213,11 +224,24 @@ pub async fn run(args: InitArgs) -> Result<()> {
             if skills > 0 {
                 println!("  {} .claude/skills/ ({} files)", "\u{2713}".green(), skills);
             }
+            let agents = created
+                .iter()
+                .filter(|f| f.starts_with(".claude/agents/"))
+                .count();
+            if agents > 0 {
+                println!(
+                    "  {} .claude/agents/ (hexa-lead, hexa-builder)",
+                    "\u{2713}".green()
+                );
+            }
         }
         Err(e) => {
             println!("  {} skills: not written ({})", "\u{2717}".yellow(), e);
         }
     }
+
+    // The code graph from the first session on (ADR-2611221610 §4).
+    crate::commands::graph::build_after_init(&target).await;
 
     println!();
     println!(
@@ -366,6 +390,35 @@ pub fn create_claude_settings(target: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Every hook command hexa's template installs, by event (ADR-2611221600 §6:
+/// `hexa doctor` checks each is present).
+pub(crate) fn template_hook_commands() -> Vec<(String, String)> {
+    let template: serde_json::Value =
+        serde_json::from_str(&settings_template()).unwrap_or_default();
+    let mut out = Vec::new();
+    if let Some(hooks) = template.get("hooks").and_then(|h| h.as_object()) {
+        for (event, entries) in hooks {
+            for cmd in hook_commands(entries.as_array().map(Vec::as_slice).unwrap_or_default()) {
+                out.push((event.clone(), cmd));
+            }
+        }
+    }
+    out
+}
+
+/// The hook commands of every event in a settings object, by event.
+pub(crate) fn settings_hook_commands(settings: &serde_json::Value) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if let Some(hooks) = settings.get("hooks").and_then(|h| h.as_object()) {
+        for (event, entries) in hooks {
+            for cmd in hook_commands(entries.as_array().map(Vec::as_slice).unwrap_or_default()) {
+                out.push((event.clone(), cmd));
+            }
+        }
+    }
+    out
+}
+
 /// Hook commands hexa's template once installed and no longer does. Each is
 /// broken, so init removes an entry running exactly one of these:
 /// - Claude Code sets no `$TOOL_INPUT_PATH` (hook input is JSON on stdin), so
@@ -482,11 +535,26 @@ fn create_claude_md(target: &Path, project_name: &str) -> Result<()> {
     // Don't overwrite existing CLAUDE.md — append hexa rules instead
     if claude_md_path.exists() {
         let existing = fs::read_to_string(&claude_md_path)?;
-        if existing.contains(super::refresh::START_MARKER)
-            || existing.contains("Hexagonal Architecture Rules")
-        {
-            // Already carries a hexa section. `hexa refresh` updates it; init
-            // must not append a second copy.
+        // Already marker-wrapped: bring the managed section current, so the
+        // rollout (`hexa init --force`) leaves CLAUDE.md importing AGENTS.md.
+        let body = super::refresh::claude_section();
+        match hexa_core::ports::orientation::replace_managed(
+            &existing,
+            &hexa_core::ports::orientation::CLAUDE_MD,
+            &body,
+        ) {
+            Ok(Some(updated)) => {
+                if updated != existing {
+                    fs::write(&claude_md_path, updated).context("Failed to update CLAUDE.md")?;
+                }
+                return Ok(());
+            }
+            Err(e) => anyhow::bail!("CLAUDE.md: {e}; fix the markers by hand"),
+            Ok(None) => {}
+        }
+        if existing.contains("Hexagonal Architecture Rules") {
+            // A legacy hexa section. `hexa refresh` upgrades it; init must not
+            // append a second copy.
             return Ok(());
         }
         // Append hexa section
@@ -496,25 +564,9 @@ fn create_claude_md(target: &Path, project_name: &str) -> Result<()> {
         return Ok(());
     }
 
-    let content = format!(
-        r#"# {project_name}
-
-## Behavioral Rules
-
-- ALWAYS read a file before editing it
-- NEVER commit secrets, credentials, or .env files
-- ALWAYS run tests after making code changes
-
-{hexa_section}
-
-## Security
-
-- Never commit `.env` files — use `.env.example`
-- Primary adapters MUST NOT use `innerHTML`/`outerHTML`/`insertAdjacentHTML` with any data that originates outside the domain layer. Use `textContent` or DOM APIs (`createElement`) instead.
-"#,
-        project_name = project_name,
-        hexa_section = hexa_claude_md_section()
-    );
+    // Only what Claude Code reads: the import and the Claude-only parts. The
+    // project's own rules live in AGENTS.md, for every agent (ADR-2611221600 §2).
+    let content = format!("# {project_name}\n\n{}\n", hexa_claude_md_section());
 
     fs::write(&claude_md_path, content)
         .context("Failed to write CLAUDE.md")?;
@@ -583,6 +635,7 @@ fn scaffold_files(target: &Path, lang: &str, project_name: &str) -> Result<Vec<P
     // leave `written` at zero. Reporting the first as the second sent a reader
     // looking for a missing asset bundle that was present and complete.
     let mut found = 0usize;
+    let mut rels: Vec<String> = Vec::new();
 
     for path in crate::assets::Assets::iter() {
         let Some(rel) = path.strip_prefix(&prefix) else {
@@ -592,6 +645,7 @@ fn scaffold_files(target: &Path, lang: &str, project_name: &str) -> Result<Vec<P
         // build tool sitting in the assets tree. The suffix is dropped here.
         let rel = rel.strip_suffix(".tmpl").unwrap_or(rel);
         found += 1;
+        rels.push(rel.to_string());
         let dest = target.join(rel);
         if dest.exists() {
             continue;
@@ -609,10 +663,40 @@ fn scaffold_files(target: &Path, lang: &str, project_name: &str) -> Result<Vec<P
     if found == 0 {
         anyhow::bail!("no scaffold assets embedded for --lang {lang}");
     }
+    written.extend(write_module_readmes(target, &rels, gate)?);
     if written.is_empty() {
         return Ok(written);
     }
     println!("  {} {} files ({}) — gate: {}", "\u{2713}".green(), written.len(), lang, gate);
+    Ok(written)
+}
+
+/// Write a README into each layer directory among `rels`' parents, unless one
+/// is there (ADR-2611221600 §5). Returns the files written, relative to `target`.
+fn write_module_readmes(target: &Path, rels: &[String], gate: &str) -> Result<Vec<PathBuf>> {
+    use hexa_core::ports::orientation::{module_readme, Layer};
+    let mut dirs = std::collections::BTreeSet::new();
+    for rel in rels {
+        let mut at = Path::new(rel).parent();
+        while let Some(d) = at.filter(|d| !d.as_os_str().is_empty()) {
+            if Layer::of_dir(&d.to_string_lossy()).is_some() {
+                dirs.insert(d.to_path_buf());
+            }
+            at = d.parent();
+        }
+    }
+    let mut written = Vec::new();
+    for d in dirs {
+        let rel = d.join("README.md");
+        let dest = target.join(&rel);
+        if dest.exists() {
+            continue;
+        }
+        let name = d.to_string_lossy().replace('\\', "/");
+        fs::write(&dest, module_readme(&name, Layer::of_dir(&name), gate))
+            .with_context(|| format!("writing {}", dest.display()))?;
+        written.push(rel);
+    }
     Ok(written)
 }
 
@@ -746,9 +830,14 @@ fn init_repo_and_commit(target: &Path, project_name: &str, paths: &[PathBuf]) ->
 }
 
 /// The embedded template prefixes and the `.claude/` directory each goes to.
-const TEMPLATE_DIRS: &[(&str, &str)] = &[("skills/", "skills"), ("hooks/", "hooks")];
+/// `agents/` holds the lead and builder roles (ADR-2611221600 §4).
+pub(crate) const TEMPLATE_DIRS: &[(&str, &str)] = &[
+    ("skills/", "skills"),
+    ("agents/", "agents"),
+    ("hooks/", "hooks"),
+];
 
-/// Write the embedded `skills/` and `hooks/` templates into `.claude/`,
+/// Write the embedded `skills/`, `agents/` and `hooks/` templates into `.claude/`,
 /// returning the paths created, relative to `target`.
 ///
 /// Never overwrites: an existing file is a customisation, not a stale copy.
