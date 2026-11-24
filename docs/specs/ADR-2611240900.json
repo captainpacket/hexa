@@ -2,6 +2,10 @@
   "adr": "ADR-2611240900",
   "feature": "remote-lifecycle",
   "description": "The lifecycle runs its gates where the project says tests run",
+  "accepted": {
+    "by": "Gary Berger",
+    "sha256": "681bb852740ee7ca8904a43b90d701a0e4fbc6ff2ba4f842eace6955ac5e08d9"
+  },
   "specs": [
     {
       "id": "S01",
