@@ -6,7 +6,7 @@
 > [`ARCHITECTURE.md`](../../ARCHITECTURE.md); for *why* a decision was made,
 > read the ADR itself.
 
-**80 ADRs** across 1 epochs.
+**87 ADRs** across 1 epochs.
 
 ## Epoch: `single-agent` — **current**
 
@@ -14,41 +14,48 @@ _One gateway-mediated agent loop; code-graph context as the differentiator_
 
 | ADR | Status | Title | Superseded-By |
 |-----|--------|-------|---------------|
-| ADR-2611191120 | proposed | ADR-2611191120: A test names its runner, and a project names where its tests run |  |
-| ADR-2611160730 | proposed | ADR-2611160730: Compliance by refusal, not by interface |  |
-| ADR-2611160750 | proposed | ADR-2611160750: Leases follow the architecture |  |
-| ADR-2611160910 | proposed | ADR-2611160910: An eval of how models use hexa |  |
+| ADR-2611240900 | accepted | ADR-2611240900: The lifecycle runs its gates where the project says tests run |  |
+| ADR-2611231400 | accepted | ADR-2611231400: A remote gate commits red or green, tries itself first, and says what it did in one object |  |
+| ADR-2611221600 | accepted | ADR-2611221600: Every hexa project gets agent orientation |  |
+| ADR-2611221610 | accepted | ADR-2611221610: The code graph is always built and fresh, and `hexa do gate` runs where the tests run |  |
+| ADR-2611191120 | accepted | ADR-2611191120: A test names its runner, and a project names where its tests run |  |
+| ADR-2611191500 | proposed | ADR-2611191500: What a `hexa harden` run costs, and how to cut it |  |
+| ADR-2611160730 | accepted | ADR-2611160730: Compliance by refusal, not by interface |  |
+| ADR-2611160750 | accepted | ADR-2611160750: Leases follow the architecture |  |
+| ADR-2611160910 | accepted | ADR-2611160910: An eval of how models use hexa |  |
 | ADR-2611161600 | accepted | ADR-2611161600: Spec acceptance is of committed Rust specs, and guard tests are kept apart |  |
-| ADR-2611161800 | proposed | ADR-2611161800: A plan ends on main |  |
-| ADR-2611161830 | proposed | ADR-2611161830: hexa speaks AG-UI |  |
-| ADR-2611151030 | proposed | ADR-2611151030: `hexa adr board` shows which decisions are done, how far each is, and who is on it |  |
-| ADR-2611151330 | proposed | ADR-2611151330: `hexa dev build-keys` catches a native build that recompiles depending on the command |  |
-| ADR-2611151645 | proposed | ADR-2611151645: `hexa harden` checks its gate before it hunts, and keeps what the gate said |  |
-| ADR-2611152035 | proposed | ADR-2611152035: hexa learns from its own record, and gives better models bigger work |  |
+| ADR-2611161800 | accepted | ADR-2611161800: A plan ends on main |  |
+| ADR-2611161830 | accepted | ADR-2611161830: hexa speaks AG-UI |  |
+| ADR-2611151030 | accepted | ADR-2611151030: `hexa adr board` shows which decisions are done, how far each is, and who is on it |  |
+| ADR-2611151330 | accepted | ADR-2611151330: `hexa dev build-keys` catches a native build that recompiles depending on the command |  |
+| ADR-2611151645 | accepted | ADR-2611151645: `hexa harden` checks its gate before it hunts, and keeps what the gate said |  |
+| ADR-2611152035 | accepted | ADR-2611152035: hexa learns from its own record, and gives better models bigger work |  |
 | ADR-2611081151 | accepted | ADR-2611081151: A check that cannot read its evidence fails, and a seal is anchored in history |  |
 | ADR-2611062141 | accepted | ADR-2611062141: `hexa spec amend` records a reviewed edit to a sealed test |  |
 | ADR-2611050000 | proposed | ADR-2611050000: Template-Driven Telemetry Rendering |  |
-| ADR-2611051850 | proposed | ADR-2611051850: hexa keeps the record and the rules for concurrent agents |  |
+| ADR-2611051850 | accepted | ADR-2611051850: hexa keeps the record and the rules for concurrent agents |  |
 | ADR-2611031914 | accepted | ADR-2611031914: hexa files issues and opens pull requests on the repository's forge |  |
 | ADR-2611020815 | accepted | ADR-2611020815: A run does not replace the loop's gate |  |
 | ADR-2610301129 | accepted | ADR-2610301129: hexa installs the question-alert Claude Code mod on setup |  |
-| ADR-2610301330 | proposed | ADR-2610301330: The status bar gets a glance, not a paragraph |  |
-| ADR-2610301500 | proposed | ADR-2610301500: A dead end gives a guide, and the guide records the gap |  |
-| ADR-2610281011 | proposed | ADR-2610281011: design is the first stage of the hexa loop |  |
-| ADR-2610281442 | proposed | ADR-2610281442: a sealed test can pass, and its writer sees the API it tests |  |
-| ADR-2610281516 | proposed | ADR-2610281516: inference is measured, cached, and repaired rather than repeated |  |
-| ADR-2610281552 | proposed | ADR-2610281552: a new project is consistent on day one |  |
-| ADR-2610281628 | proposed | ADR-2610281628: an amended decision is re-proved where it changed |  |
+| ADR-2610301330 | accepted | ADR-2610301330: The status bar gets a glance, not a paragraph |  |
+| ADR-2610301500 | accepted | ADR-2610301500: A dead end gives a guide, and the guide records the gap |  |
+| ADR-2610281011 | accepted | ADR-2610281011: design is the first stage of the hexa loop |  |
+| ADR-2610281442 | accepted | ADR-2610281442: a sealed test can pass, and its writer sees the API it tests |  |
+| ADR-2610281500 | proposed | ADR-2610281500: managed mode, hexa driven by a harness that owns every model call |  |
+| ADR-2610281516 | accepted | ADR-2610281516: inference is measured, cached, and repaired rather than repeated |  |
+| ADR-2610281552 | accepted | ADR-2610281552: a new project is consistent on day one |  |
+| ADR-2610281628 | accepted | ADR-2610281628: an amended decision is re-proved where it changed |  |
+| ADR-2610281700 | proposed | ADR-2610281700: `hexa do apply`, a gated change without a model |  |
 | ADR-2610270853 | accepted | ADR-2610270853: hexa knows which build it is and says when it is behind |  |
 | ADR-2610270901 | accepted | ADR-2610270901: `claude-text` serves Claude as a tool-less completion |  |
-| ADR-2610271110 | proposed | ADR-2610271110: A decision not yet built is declared, and the declaration may only shrink |  |
+| ADR-2610271110 | accepted | ADR-2610271110: A decision not yet built is declared, and the declaration may only shrink |  |
 | ADR-2610271308 | accepted | ADR-2610271308: `hexa hey` routes only to verbs hexa has |  |
 | ADR-2610271649 | accepted | ADR-2610271649: An adapter importing another adapter in its own layer is a violation |  |
-| ADR-2610271736 | proposed | ADR-2610271736: hexa designs with an elephant and reviews with goldfish |  |
+| ADR-2610271736 | accepted | ADR-2610271736: hexa designs with an elephant and reviews with goldfish |  |
 | ADR-2610261356 | accepted | ADR-2610261356: A primary adapter may drive a use case; the docs say so |  |
 | ADR-2610261420 | accepted | ADR-2610261420: A grade floor names what it let through; the scaffold fails on any violation |  |
 | ADR-2610221540 | accepted | ADR-2610221540: An ADR is compiled to a spec, the spec to sealed tests that fail, and only then is code generated |  |
-| ADR-2610221834 | proposed | ADR-2610221834: Harden fixes in parallel worktrees, lands each fix serially, and proves each regression test red |  |
+| ADR-2610221834 | accepted | ADR-2610221834: Harden fixes in parallel worktrees, lands each fix serially, and proves each regression test red |  |
 | ADR-2610160756 | accepted | ADR-2610160756: Harden gates each fix fast and each batch in full, and finds a breaking fix by bisection |  |
 | ADR-2610161730 | accepted | ADR-2610161730: The delegate runs on an allowlist scoped to its run, not with permissions skipped |  |
 | ADR-2610141733 | accepted | ADR-2610141733: A claude model id is delegated, a missing model says how to set one, and every gated harden fix commits |  |

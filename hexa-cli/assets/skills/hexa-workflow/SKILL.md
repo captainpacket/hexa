@@ -163,8 +163,10 @@ hexa loop gate "hexa analyze . --exit-code" --uncounted
 The commit and every report then say `uncounted`, so a reader knows no test
 was counted.
 
-vitest's summary and JSON report are counted too, and a gate that is exactly
-one bash script (`bash ci/check-x.sh`) counts as one test.
+vitest's summary and JSON report are counted too, and so is cargo-nextest's
+`Summary [ … ] N tests run: P passed, F failed, S skipped`. Colour codes are
+stripped first. A gate that is exactly one bash script (`bash ci/check-x.sh`)
+counts as one test.
 
 **Python: make the type checker part of the test run.** Python has no
 compiler, so without one the first gate an agent meets is the tests it wrote
@@ -186,8 +188,21 @@ project does (for example through `uv run`), with the package importable
 `spec red` and `loop stage done` then send every test for the commit concerned
 through it, in one run, and refuse an unpushed commit or a tree that differs
 from HEAD. They never fall back to running here; `--local` runs here, on purpose.
-`hexa do gate` gates an uncommitted change, so it refuses under a remote unless
-given `--local`.
+`loop stage done` reads the remote itself (`git ls-remote`) to check that HEAD
+is pushed, refusing with `head-not-pushed`, and sends the recorded evidence
+command with the gate. `hexa harden` gates each fix on the runner as a scratch
+candidate commit of the tree (`refs/heads/hexa-gate/<id>`, deleted after) and
+keeps a fix only when it passed there. A hexa verb that runs on the runner
+itself (its batch exports `HEXA_ON_RUNNER=<commit>`) runs its tests in place.
+`hexa do gate` sends its gate there too: it pushes a candidate commit of the
+named files to `refs/heads/hexa-gate/<id>`, runs the gate on the remote runner
+for that commit, and moves the branch only on a verdict it accepts, then pushes
+the branch and reads its head back (the branch must track a remote branch).
+Tests first: commit them while they fail with `--expect-red`, which refuses a
+pass, zero tests and a compile error, never lands, and prints the
+`hexa spec red <ADR> <sha>` to run next. `--dry-run` shows what it would push
+and run. The last stdout line is one JSON object: `ok`, `commit`,
+`remote_head`, `tests`, and on failure `code`, `hint`, `field`, `retryable`.
 
 ## 5. Harden, then ship
 

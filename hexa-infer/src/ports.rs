@@ -296,5 +296,5 @@ pub fn completion_key(model: &str, system: &str, user: &str) -> String {
         h.update((part.len() as u64).to_be_bytes());
         h.update(part.as_bytes());
     }
-    format!("{:x}", h.finalize())
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }

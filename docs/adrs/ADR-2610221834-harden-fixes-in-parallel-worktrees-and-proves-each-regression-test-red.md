@@ -1,12 +1,12 @@
 ---
 id: ADR-2610221834
-status: abandoned
+status: accepted
 date: 2026-10-22
 ---
 # ADR-2610221834: Harden fixes in parallel worktrees, lands each fix serially, and proves each regression test red
 
-**Status:** Abandoned
-> 2026-11-23 Abandoned by Craig: proposed 32 days, accepted by neither review nor use.
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-10-22
 **Drivers:** Hardening ADR-2610221540's three new files on 2026-10-22 took about 45 minutes, and the operator asked why hexa is so slow. The session transcripts give the time per phase. Checking the result by hand then showed the regression tests had never been proven red, and the gate had let a flaky test and two lint errors through.
 

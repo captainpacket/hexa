@@ -4,4 +4,7 @@
 //! gate (`do`, `adr gates`, `loop stage done`, `gate coverage`, `scaffold`) is
 //! bound by it, so it is part of their contract, reached here.
 
-pub use crate::domain::evidence::{is_single_script, read_evidence, read_gate_evidence, Evidence, KNOWN_RUNNERS};
+pub use crate::domain::evidence::{
+    count_tests, first_failure, is_single_script, read_evidence, read_gate_evidence, read_red_evidence, Evidence, RedEvidence,
+    TestCounts, KNOWN_RUNNERS,
+};

@@ -1,0 +1,259 @@
+{
+  "adr": "ADR-2611221610",
+  "feature": "graph-fresh-and-remote-do-gate",
+  "description": "The code graph is always built and fresh, and hexa do gate runs where the tests run",
+  "accepted": {
+    "by": "gary (standing instruction: always accept the ADRs and specs; recorded by the implementing agent, builder B, 2026-11-22)",
+    "sha256": "89b516310876d82da426f115dbb61cb2f6de1d22c42afa871a43eca100a3997a"
+  },
+  "sealed": {
+    "hexa-cli/tests/adr_2611221610_spec.rs": "87494758226d5eb4ef0face444b5c9e1fcd08349b9eaac37c7e75284b8422a99"
+  },
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "The graph reads the project's files and no nested worktree's",
+      "given": "a git checkout with `src/a.rs` and a nested worktree `origin/t3/x/` (a directory holding a `.git` file) that holds `src/b.rs`",
+      "when": "`hexa graph build` runs",
+      "then": "the graph holds a node for `src/a.rs` and none whose source file is under `origin/`",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s01_a_nested_worktree_is_not_read",
+      "red": "2172049"
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "A gitignored file is not read",
+      "given": "a git checkout whose `.gitignore` names `gen/`, with `gen/big.rs` and a tracked `src/a.rs`",
+      "when": "`hexa graph build` runs",
+      "then": "the graph holds `src/a.rs` and no node from `gen/big.rs`",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s02_a_gitignored_file_is_not_read",
+      "red": "2172049"
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "A build records a stamp with its fingerprint",
+      "given": "a git checkout with one source file",
+      "when": "`hexa graph build` runs",
+      "then": "`.hexa/graph/stamp.json` holds `built_at`, `nodes` (the graph's node count) and a 64-hex `fingerprint`",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s03_a_build_records_its_stamp",
+      "red": "2172049"
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "A deleted file changes the fingerprint though no file is newer",
+      "given": "a built graph over `src/a.rs` and `src/b.rs`",
+      "when": "`src/b.rs` is deleted and `hexa graph status --json` runs",
+      "then": "the state is `stale`, though no remaining file is newer than the graph",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s04_a_deletion_makes_the_graph_stale",
+      "red": "2172049"
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "Status reports missing, then fresh, then stale after an edit",
+      "given": "a git checkout with one source file and no graph",
+      "when": "`hexa graph status --json` runs before a build, after a build, and after an edit to the file",
+      "then": "the states are `missing`, `fresh` (with `built` true and `nodes` above 0) and `stale` (with `changed` at least 1), and each run exits 0",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s05_status_reports_missing_fresh_and_stale",
+      "red": "2172049"
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "A graph with no stamp is stale, not fresh",
+      "given": "a graph file written without a stamp (a build by an older hexa)",
+      "when": "`hexa graph status --json` runs",
+      "then": "the state is `stale` and `built` is true",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s06_a_graph_without_a_stamp_is_stale",
+      "red": "2172049"
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§4"
+      ],
+      "kind": "example",
+      "description": "`hexa init` builds the graph",
+      "given": "a directory with `src/lib.rs` and no `.hexa/`",
+      "when": "`hexa init` runs",
+      "then": "it exits 0, `.hexa/graph/graph.json` exists, and `hexa graph status --json` says `fresh`",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s07_init_builds_the_graph",
+      "red": "2172049"
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "The graph init builds holds nothing init wrote under `.claude/`",
+      "given": "a directory with `src/lib.rs`",
+      "when": "`hexa init` runs, writing skills under `.claude/`",
+      "then": "the graph holds no node whose source file is under `.claude/` or `.hexa/`",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s08_init_graph_holds_no_claude_files",
+      "red": "2172049"
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "SessionStart rebuilds a stale graph in the background",
+      "given": "a hexa project with a built graph and a source file edited since",
+      "when": "`hexa hook session-start` runs",
+      "then": "it prints a `graph:` line naming the stale state, returns without waiting, and within 60 seconds the status is `fresh` again",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s09_session_start_rebuilds_a_stale_graph",
+      "red": "2172049"
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§5"
+      ],
+      "kind": "negative",
+      "description": "SessionStart leaves a fresh graph alone",
+      "given": "a hexa project with a fresh graph",
+      "when": "`hexa hook session-start` runs",
+      "then": "it prints `graph: fresh` and the stamp's `built_at` is unchanged after 3 seconds",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s10_session_start_leaves_a_fresh_graph",
+      "red": "2172049"
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§6"
+      ],
+      "kind": "example",
+      "description": "The edit hook prints the file's graph context, bounded",
+      "given": "a hexa project with a built graph where `src/b.rs` imports `src/a.rs`",
+      "when": "`hexa hook pre-edit` runs for an edit to `src/a.rs`",
+      "then": "it exits 0 and prints at most 12 graph lines that name `src/a.rs` and its consumer `src/b.rs`; a second edit to the same file in the same session prints no graph lines",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s11_the_edit_hook_prints_graph_context",
+      "red": "2172049"
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§6"
+      ],
+      "kind": "negative",
+      "description": "With no graph, or for a file the graph does not hold, the edit hook prints no context and does not block",
+      "given": "a hexa project with no graph; then the same project with a built graph and a new file `src/new.rs` the graph does not hold",
+      "when": "`hexa hook pre-edit` runs for an edit to `src/a.rs` with no graph, then for `src/new.rs` and `src/b.rs` with the graph",
+      "then": "it exits 0 and prints no graph line with no graph and for `src/new.rs`; the control, `src/b.rs`, does get its context",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s12_no_graph_means_no_context",
+      "red": "2172049"
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§7"
+      ],
+      "kind": "example",
+      "description": "A remote `do gate` commits the commit the runner tested, on exit 0",
+      "given": "a project whose `test.remote` runs the gate in a clone of the pushed commit, on a branch, with a change to `src/a.rs`",
+      "when": "`hexa do gate --files src/a.rs -e 'bash ci/ok.sh' -m fix --no-land` runs without `--local`",
+      "then": "it exits 0; the branch's new HEAD is the commit the runner printed; that commit holds the change; the branch is pushed to origin at that commit; no `hexa-gate/` ref is left on origin; the commit's `refs/notes/hexa-gate` note holds the runner's output",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s13_a_remote_gate_commits_on_exit_zero",
+      "red": "2172049"
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§7"
+      ],
+      "kind": "negative",
+      "description": "A remote `do gate` whose gate fails commits nothing",
+      "given": "the same project with a gate that exits 1 on the remote",
+      "when": "`hexa do gate` runs without `--local`",
+      "then": "it exits non-zero; HEAD has not moved; the change is still in the tree; no `hexa-gate/` ref is left on origin; nothing ran the gate locally",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s14_a_failing_remote_gate_commits_nothing",
+      "red": "2172049"
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§8"
+      ],
+      "kind": "example",
+      "description": "A sealed test whose amendment was recorded is committed through the gate",
+      "given": "an accepted spec with a sealed test `tests/t.sh`, edited and recorded with `hexa spec amend … --confirm <sha256>`",
+      "when": "`hexa do gate --local --files tests/t.sh <the spec record> -e 'bash tests/t.sh'` runs",
+      "then": "it exits 0 and commits both the test and the spec record",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s15_an_amended_sealed_test_is_accepted",
+      "red": "2172049"
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "§8"
+      ],
+      "kind": "negative",
+      "description": "An unrecorded edit to a sealed test is still refused",
+      "given": "the sealed test edited with no amendment recorded; then an amendment recorded for that content and the file edited again",
+      "when": "`hexa do gate --local --files tests/t.sh <the spec record> -e 'bash tests/t.sh'` runs after each",
+      "then": "both runs exit non-zero naming the sealed file and commit nothing; the control, the file put back to the recorded content, passes",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s16_an_unamended_sealed_test_is_refused",
+      "red": "2172049"
+    },
+    {
+      "id": "S17",
+      "decision": [
+        "§9"
+      ],
+      "kind": "example",
+      "description": "Under test.remote the commit hook's refusal names the remote gate",
+      "given": "a project with `test.remote` and lifecycle enforcement mandatory, with a staged change to `src/a.rs`",
+      "when": "`hexa hook pre-bash` sees `git commit -m x`",
+      "then": "it refuses, naming `hexa do gate` and saying the gate runs on the remote runner",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s17_the_commit_hook_names_the_remote_gate",
+      "red": "2172049"
+    },
+    {
+      "id": "S18",
+      "decision": [
+        "§9"
+      ],
+      "kind": "negative",
+      "description": "Without test.remote the refusal does not mention a remote runner",
+      "given": "the same project without `test.remote`",
+      "when": "`hexa hook pre-bash` sees `git commit -m x`",
+      "then": "it refuses naming `hexa do gate`, and says nothing of a remote runner; the control, the same project with `test.remote` set, does",
+      "test": "hexa-cli/tests/adr_2611221610_spec.rs::s18_no_remote_no_remote_wording",
+      "red": "2172049"
+    }
+  ],
+  "amendments": [
+    {
+      "file": "hexa-cli/tests/adr_2611221610_spec.rs",
+      "from": "824e64a39807f9a4144e544dc1fad1b9d6fb7094fc8d79b1575fd1707dc843b0",
+      "to": "87494758226d5eb4ef0face444b5c9e1fcd08349b9eaac37c7e75284b8422a99",
+      "by": "builder B (the implementing agent), under gary's standing instruction to accept the ADRs and specs",
+      "reason": "Before the first seal: S12, S16 and S18 already held at b764fe5, so `hexa spec red` refused them as not written first. Each gained a live control (scenarios re-accepted at 89b5163), and all 18 were proved red at 2172049 and sealed there. `hexa spec amend` cannot record this edit because the file already matches its seal; this entry records it by hand so the chain runs from the file's first commit to the sealed hash.",
+      "at": "2026-11-22T22:30:00+00:00",
+      "base_commit": "b764fe5dd9a74d32cba01b33f920242ac17f6d99"
+    }
+  ]
+}

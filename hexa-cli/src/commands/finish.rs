@@ -1,5 +1,6 @@
 //! `hexa finish`: the open work, each item with the command that closes it
-//! (ADR-2611161800 §1). Read-only.
+//! (ADR-2611161800 §1), and the agent-orientation checks that fail
+//! (ADR-2611221600 §6). Read-only.
 //!
 //! A plan ends on main: its tasks done, its ADR closed, everything landed.
 //! This is the list of what stands between the repository and that end. The
@@ -250,7 +251,23 @@ pub fn open_work(dir: &Path) -> Vec<Item> {
     out.extend(branch_items(dir, &base, None));
     out.extend(draft_items(dir));
     out.extend(adr_item(dir, &entry));
+    out.extend(orientation_items(dir));
     out
+}
+
+/// The orientation checks that fail, each with its fix (ADR-2611221600 §6).
+/// None outside an initialised project; a check that cannot be decided is
+/// not open work.
+fn orientation_items(dir: &Path) -> Vec<Item> {
+    crate::commands::orientation::checks(dir)
+        .into_iter()
+        .filter(|c| c.state == hexa_core::ports::orientation::CheckState::Failing)
+        .map(|c| Item {
+            kind: "orientation",
+            what: c.what,
+            fix: c.fix,
+        })
+        .collect()
 }
 
 /// What stands between this work and main, apart from its checklist: files
@@ -326,7 +343,7 @@ pub async fn run(args: FinishArgs) -> anyhow::Result<()> {
     }
     crate::commands::events::finish(Some(Value::Object(content)));
     if args.exit_code && !items.is_empty() {
-        std::process::exit(1);
+        crate::commands::events::exit(1);
     }
     Ok(())
 }

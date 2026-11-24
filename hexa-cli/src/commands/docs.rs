@@ -1,10 +1,12 @@
 //! `hexa docs` — internal-documentation health (ADR-047 Phase 4).
 //!
-//! `hexa docs check` scans the docs/ tree and `spacetime-modules/*/README.md`
-//! for:
+//! `hexa docs check` scans the docs/ tree and the project's modules for:
 //!   - stale terminology (canonical glossary from ADR-047 §"Glossary"),
-//!   - missing per-module READMEs in `spacetime-modules/`,
+//!   - a module with no README.md (ADR-2611221600 §5): what it owns, what it
+//!     may import, where its tests are, which ADRs decided it,
 //!   - docs older than `--max-age-days` (default 90) since last git commit.
+//!
+//! `hexa docs readmes` writes that README into each module that lacks one.
 //!
 //! Exit codes (mirrors `hexa adr doctor`): 0 = clean, 1 = warnings only,
 //! 2 = errors (or any finding under `--strict`).
@@ -33,6 +35,13 @@ pub enum DocsAction {
     },
     /// List the canonical glossary terms enforced by `check`.
     Glossary,
+    /// Write a README (owns / may import / tests / ADRs) into each module that has none; never overwrites
+    /// (ADR-2611221600 §5).
+    Readmes {
+        /// Path of the project (default: discovered project root).
+        #[arg(long, value_name = "PATH")]
+        root: Option<String>,
+    },
     /// Add YAML frontmatter to one ADR (ADR-047 Phase 5). Idempotent; skips ADRs
     /// that already have a `---` block. Preview by default — pass `--apply` to write.
     MigrateAdr {
@@ -56,6 +65,7 @@ pub async fn run(action: DocsAction) -> anyhow::Result<()> {
             print_glossary();
             Ok(())
         }
+        DocsAction::Readmes { root } => write_readmes(&discover_root(root)?),
         DocsAction::MigrateAdr { adr, apply } => migrate_adr(&adr, apply).await,
     }
 }
@@ -138,6 +148,7 @@ async fn check(
     let mut findings: Vec<Finding> = Vec::new();
 
     findings.extend(check_terminology(&root)?);
+    findings.extend(check_module_readmes(&root));
     findings.extend(check_adr_frontmatter(&root)?);
     if max_age_days > 0 {
         findings.extend(check_staleness(&root, max_age_days)?);
@@ -163,7 +174,7 @@ async fn check(
 
     let code = exit_code(errors, warnings, strict);
     if code != 0 {
-        std::process::exit(code);
+        crate::commands::events::exit(code);
     }
     Ok(())
 }
@@ -234,6 +245,134 @@ fn check_terminology(root: &Path) -> anyhow::Result<Vec<Finding>> {
         }
     }
     Ok(out)
+}
+
+// ─── Module READMEs (ADR-2611221600 §5) ───────────────────────────────────
+
+/// The layer directories a project may have, under each base.
+const LAYER_DIRS: &[&str] = &[
+    "domain",
+    "ports",
+    "usecases",
+    "adapters",
+    "adapters/primary",
+    "adapters/secondary",
+];
+const LAYER_BASES: &[&str] = &["src", "src/core", "internal", ""];
+
+/// A project's modules, relative to `root`: `docs.modules` in
+/// `.hexa/project.json`, else the members of a Cargo workspace, else the
+/// layer directories present.
+pub(crate) fn modules(root: &Path) -> Vec<String> {
+    let project: serde_json::Value = std::fs::read_to_string(root.join(".hexa/project.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or(serde_json::Value::Null);
+    if let Some(list) = project["docs"]["modules"].as_array() {
+        return list
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(|s| s.trim_end_matches('/').to_string())
+            .collect();
+    }
+    let members = workspace_members(root);
+    if !members.is_empty() {
+        return members;
+    }
+    let mut out = Vec::new();
+    for base in LAYER_BASES {
+        for layer in LAYER_DIRS {
+            let rel = if base.is_empty() {
+                layer.to_string()
+            } else {
+                format!("{base}/{layer}")
+            };
+            if root.join(&rel).is_dir() && !out.contains(&rel) {
+                out.push(rel);
+            }
+        }
+    }
+    out
+}
+
+/// The member directories of a Cargo workspace at `root`; a trailing `/*`
+/// is expanded to the directories under it that hold a `Cargo.toml`.
+fn workspace_members(root: &Path) -> Vec<String> {
+    let Some(manifest) = std::fs::read_to_string(root.join("Cargo.toml"))
+        .ok()
+        .and_then(|t| t.parse::<toml::Table>().ok())
+    else {
+        return Vec::new();
+    };
+    let Some(members) = manifest
+        .get("workspace")
+        .and_then(|w| w.get("members"))
+        .and_then(|m| m.as_array())
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for m in members.iter().filter_map(|m| m.as_str()) {
+        if let Some(parent) = m.strip_suffix("/*") {
+            let mut found: Vec<String> = std::fs::read_dir(root.join(parent))
+                .map(|d| {
+                    d.flatten()
+                        .filter(|e| e.path().join("Cargo.toml").is_file())
+                        .map(|e| format!("{parent}/{}", e.file_name().to_string_lossy()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            found.sort();
+            out.extend(found);
+        } else if m != "." && root.join(m).is_dir() {
+            out.push(m.trim_end_matches('/').to_string());
+        }
+    }
+    out
+}
+
+/// The modules with no README.md, relative to `root`.
+pub(crate) fn missing_module_readmes(root: &Path) -> Vec<String> {
+    modules(root)
+        .into_iter()
+        .filter(|m| !root.join(m).join("README.md").is_file())
+        .collect()
+}
+
+fn check_module_readmes(root: &Path) -> Vec<Finding> {
+    missing_module_readmes(root)
+        .into_iter()
+        .map(|m| Finding {
+            kind: "missing_module_readme".into(),
+            severity: "warning".into(),
+            path: m.clone(),
+            line: None,
+            detail: format!(
+                "{m} has no README.md saying what it owns, what it may import, where its tests are and which ADRs decided it; `hexa docs readmes` writes one"
+            ),
+        })
+        .collect()
+}
+
+/// `hexa docs readmes`: the skeleton README in each module lacking one.
+fn write_readmes(root: &Path) -> anyhow::Result<()> {
+    use hexa_core::ports::orientation::{module_readme, Layer};
+    let gate = crate::commands::loop_cmd::full_gate(root).unwrap_or_default();
+    let missing = missing_module_readmes(root);
+    if missing.is_empty() {
+        println!("{} every module has a README.md", "\u{2713}".green());
+        return Ok(());
+    }
+    for m in &missing {
+        let path = root.join(m).join("README.md");
+        std::fs::write(&path, module_readme(m, Layer::of_dir(m), &gate))?;
+        println!(
+            "{} {}/README.md — fill in what it owns and the ADRs that decided it",
+            "\u{2713}".green(),
+            m
+        );
+    }
+    Ok(())
 }
 
 // ─── ADR frontmatter audit (Phase 5) ──────────────────────────────────────

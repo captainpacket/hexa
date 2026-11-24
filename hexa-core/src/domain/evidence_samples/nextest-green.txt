@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+────────────
+ Nextest run ID 1aca0575-0c1e-4398-b9e8-b5cdbc235e0e with nextest profile: default
+    Starting 2 tests across 1 binary (2 tests skipped)
+        PASS [   0.001s] (1/2) sample tests::also_adds
+        PASS [   0.002s] (2/2) sample tests::adds
+────────────
+     Summary [   0.002s] 2 tests run: 2 passed, 2 skipped

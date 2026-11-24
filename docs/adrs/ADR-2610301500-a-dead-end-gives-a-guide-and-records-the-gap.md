@@ -1,11 +1,12 @@
 ---
 id: ADR-2610301500
-status: proposed
+status: accepted
 date: 2026-10-30
 ---
 # ADR-2610301500: A dead end gives a guide, and the guide records the gap
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-10-30
 **Drivers:** On 2026-10-30, building ADR-2610301330 from a user project (ccs) through hexa's own gate-first pipeline, the agent hit four places where hexa's path did not work and had to go around the code. hexa said how in none of them. The user: "we need a better workflow for these things to make using hexa better. Hexa should offer guides when there are inconsistencies, that have to route around the code but document adding a PR into hexa for fixing".
 

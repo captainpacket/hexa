@@ -92,6 +92,11 @@ pub struct HardenArgs {
     /// inference.tier_models.
     #[arg(long)]
     pub model: Option<String>,
+    /// Run every gate on this machine even when .hexa/project.json sets
+    /// test.remote, which otherwise gates each fix on the remote runner, as a
+    /// scratch candidate commit of the tree (ADR-2611240900 §1)
+    #[arg(long)]
+    pub local: bool,
 }
 
 /// Can this run reach a model at all?
@@ -361,12 +366,23 @@ pub async fn run_harden(args: HardenArgs) -> anyhow::Result<()> {
         // What this project has learned reaches the hunt and the fix (ADR-2611152035 §4).
         lessons: hexa_exec::direct_exec::fetch_lessons(&hexa_exec::memory()).await,
     };
+    // Under test.remote each gate runs on the remote runner, unless --local
+    // (ADR-2611240900 §1); a test setting that cannot be read stops here.
+    let cfg = hexa_exec::test_exec::test_config(&repo_root).map_err(|e| anyhow::anyhow!(e))?;
+    let at = match cfg.remote.filter(|_| !args.local) {
+        Some(template) => {
+            println!("  every gate runs on the remote runner (test.remote), on a scratch candidate of the tree; --local runs them here");
+            hexa_exec::adversarial::GateAt::Remote(template)
+        }
+        None => hexa_exec::adversarial::GateAt::Here,
+    };
     let mut record = record;
-    let report = hexa_exec::adversarial::run_review_gated_with(
+    let report = hexa_exec::adversarial::run_review_gated_at(
         frontier,
         hexa_exec::default_git_history(),
         &args.target,
         &gates,
+        at,
         &repo_root,
         reporter("harden", &repo_root),
     )

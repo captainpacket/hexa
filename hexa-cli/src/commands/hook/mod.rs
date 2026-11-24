@@ -517,6 +517,8 @@ async fn session_start(project_dir: &Path) -> Result<()> {
     for l in awareness_lines(project_dir) {
         println!("  {l}");
     }
+    // The code graph, rebuilt in the background when the tree moved (ADR-2611221610 §5).
+    println!("  {}", crate::commands::graph::refresh_for_session(project_dir));
     let mut st = SessionState::load_or_new();
     st.project = crate::commands::loop_cmd::project_name(project_dir);
     st.name = session_key();
@@ -829,7 +831,7 @@ fn lease_gate(project_dir: &Path, file_path: &str) {
     }
     let refuse = |why: String| -> ! {
         eprintln!("\u{26d4} lease: {why}");
-        std::process::exit(2);
+        crate::commands::events::exit(2);
     };
     let ledger = match task_ledger::read(project_dir) {
         Ok(l) => l,
@@ -1005,6 +1007,10 @@ async fn pre_edit(project_dir: &Path) -> Result<()> {
                 return Ok(());
             }
 
+            // The file's graph neighbourhood, once per file per session,
+            // before any rule below can stop the edit (ADR-2611221610 §6).
+            print_edit_context(project_dir, path);
+
             // The layer rules, on what the edit would leave.
             validate_boundary_edit(project_dir, file_path, &input).await?;
 
@@ -1049,7 +1055,7 @@ async fn pre_edit(project_dir: &Path) -> Result<()> {
                     );
                     if boundary_mode == "mandatory" {
                         eprintln!("{}", msg);
-                        std::process::exit(2);
+                        crate::commands::events::exit(2);
                     } else {
                         println!("WARNING: {}", msg);
                     }
@@ -1115,7 +1121,7 @@ async fn pre_agent() -> Result<()> {
         eprintln!(
             "\u{26d4} {who} blocked: it would edit on this branch. Give it its own worktree: isolation: \"worktree\" on the Agent call."
         );
-        std::process::exit(2);
+        crate::commands::events::exit(2);
     }
     println!(
         "\u{26a0}\u{fe0f} {who} has no worktree of its own; its edits and commits land on this branch. Add isolation: \"worktree\" to the Agent call."
@@ -1146,7 +1152,7 @@ async fn pre_bash() -> Result<()> {
                             "\u{26d4} {} refused: it rewrites the shared history of {}. `{shown}`. Push a branch and open a pull request instead.",
                             op.what, op.branch
                         );
-                        std::process::exit(2);
+                        crate::commands::events::exit(2);
                     }
                 }
                 let what: Vec<&str> = found.iter().map(|o| o.what).collect();
@@ -1209,7 +1215,7 @@ fn source_gate_check(project_dir: &Path, targets: &[PathBuf], mode: &str, what: 
             // stderr: on exit 2 it is the only stream Claude Code shows,
             // and a block with no reason reads as a crash.
             eprintln!("\u{26d4} {msg}");
-            std::process::exit(2);
+            crate::commands::events::exit(2);
         }
         println!("\u{26a0}\u{fe0f} {msg}");
     }
@@ -1218,6 +1224,38 @@ fn source_gate_check(project_dir: &Path, targets: &[PathBuf], mode: &str, what: 
             let _ = crate::commands::loop_cmd::touch(project_dir, f);
         }
     }
+}
+
+/// Print the compact graph context for an edit to `path`, the first time
+/// this session edits it (ADR-2611221610 §6). Silent with no graph, for a file
+/// the graph does not hold, and for a file already shown.
+fn print_edit_context(project_dir: &Path, path: &Path) {
+    let abs = if path.is_absolute() { path.to_path_buf() } else { project_dir.join(path) };
+    let root = source_gate::canonical_lenient(project_dir);
+    let abs = source_gate::canonical_lenient(&abs);
+    let Ok(rel) = abs.strip_prefix(&root) else { return };
+    let rel = rel.to_string_lossy().replace('\\', "/");
+    if !project_dir.join(hexa_graph::GRAPH_FILE).is_file() && !project_dir.join(hexa_graph::LEGACY_GRAPH_FILE).is_file() {
+        return;
+    }
+    let key: String = session_key().chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
+    let seen_file = project_dir.join(".hexa/graph/seen").join(key);
+    let seen = std::fs::read_to_string(&seen_file).unwrap_or_default();
+    if seen.lines().any(|l| l == rel) {
+        return;
+    }
+    let lines = crate::commands::graph::edit_context(project_dir, &rel);
+    if lines.is_empty() {
+        return;
+    }
+    for l in &lines {
+        println!("{l}");
+    }
+    println!();
+    if let Some(d) = seen_file.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let _ = std::fs::write(&seen_file, format!("{seen}{rel}\n"));
 }
 
 /// Hold a hand `git commit` of project source to `hexa do gate`
@@ -1268,13 +1306,22 @@ fn commit_gate_check(project_dir: &Path, command: &str, cwd: &Path, mode: &str) 
         } else {
             ""
         };
+        // Under test.remote the gate runs on the remote runner (ADR-2611221610 §9).
+        let remote = hexa_exec::test_exec::test_config(&root).ok().and_then(|c| c.remote).is_some();
+        let where_ = if remote {
+            "It pushes a candidate commit, runs the gate on the remote runner (test.remote), and commits those files only if it exits 0 there."
+        } else {
+            "It runs the gate on the change in your tree and commits only those files, and only if it passes."
+        };
+        // The tests-first path, in every project (ADR-2611231400 §7).
+        let red = " A tests-first commit (tests that must fail before the code) is the same command with `--expect-red`; `--dry-run` shows what either would do.";
         let msg = format!(
-            "`git commit` would commit project source by hand ({}). Commit it through the gate instead: `{suggestion}`. It runs the gate on the change in your tree and commits only those files, and only if it passes.{record} `git commit` is for docs, ADRs and other prose.",
+            "`git commit` would commit project source by hand ({}). Commit it through the gate instead: `{suggestion}`. {where_}{red}{record} `git commit` is for docs, ADRs and other prose.",
             files.join(", ")
         );
         if mode == "mandatory" {
             eprintln!("\u{26d4} {msg}");
-            std::process::exit(2);
+            crate::commands::events::exit(2);
         }
         println!("\u{26a0}\u{fe0f} {msg}");
         return;
@@ -1650,7 +1697,7 @@ async fn validate_boundary_edit(project_dir: &Path, file_path: &str, input: &ser
     );
     if enforcement_mode(project_dir) == "mandatory" {
         eprintln!("\u{26d4} {msg}");
-        std::process::exit(2);
+        crate::commands::events::exit(2);
     }
     eprintln!("\u{26a0}\u{fe0f} {msg}");
     Ok(())
@@ -1723,7 +1770,7 @@ fn validate_workplan_boundary(project_dir: &Path, file_path: &str, workplan_id: 
                 rel,
                 &declared_files[..declared_files.len().min(5)]
             );
-            std::process::exit(2);
+            crate::commands::events::exit(2);
         } else {
             println!(
                 "WARNING: File '{}' is outside the active workplan's declared boundary.",

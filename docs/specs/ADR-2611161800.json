@@ -1,0 +1,217 @@
+{
+  "adr": "ADR-2611161800",
+  "feature": "plan-ends-on-main",
+  "description": "A plan ends when all tasks are done, the ADR is closed, and everything is on main.",
+  "universal": [
+    "§1",
+    "§2",
+    "§3",
+    "§4",
+    "§5",
+    "§6"
+  ],
+  "accepted": {
+    "by": "gary (in conversation, 2026-11-23: \"accept the specs\"; recorded by the implementing agent)",
+    "sha256": "3f9469aa212166697f61e692d766292acadd192a3f8a436f0a14aa02c65a6be6"
+  },
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "`hexa finish` lists open work with commands to close each item.",
+      "given": "A repository with uncommitted changes, unpushed commits, open tasks, unmerged worktree branches, merged clean worktrees, and unplanned drafts.",
+      "when": "`hexa finish` is run.",
+      "then": "It lists each item with the command to close it."
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "Nothing open is reported as nothing open",
+      "given": "A repository with no open work.",
+      "when": "`hexa finish` is run.",
+      "then": "It prints `nothing open: the work is on main` and exits 0."
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§1"
+      ],
+      "kind": "property",
+      "description": "`hexa finish --exit-code` exits 1 when anything is open.",
+      "given": "Any repository state.",
+      "when": "`hexa finish --exit-code` is run.",
+      "then": "It exits 1 if any work is open, 0 otherwise."
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "`hexa loop adr` appends `Land on main` and `Close <ADR>` to the checklist.",
+      "given": "A loop with a checklist of two tasks and no ADR recorded",
+      "when": "`hexa loop adr` is run.",
+      "then": "The checklist has `Land on main` and `Close <ADR>` as the last two items."
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "`hexa loop adr` does not append the close-out steps twice.",
+      "given": "A loop where `Land on main` and `Close <ADR>` are already on the checklist.",
+      "when": "`hexa loop adr` is run again.",
+      "then": "The checklist remains unchanged."
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§2"
+      ],
+      "kind": "property",
+      "description": "Tasks added after the close-out steps go before them.",
+      "given": "A loop with `Land on main` and `Close <ADR>` on the checklist.",
+      "when": "A new task is added.",
+      "then": "The new task is inserted before `Land on main`."
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "`hexa loop stage done` is refused when work is open.",
+      "given": "A loop with open tasks or unmerged branches.",
+      "when": "`hexa loop stage done` is run.",
+      "then": "It is refused with the open items named."
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "`hexa loop stage done` closes out landed work",
+      "given": "A loop with all tasks done and all branches merged to main.",
+      "when": "`hexa loop stage done` is run.",
+      "then": "It runs the gate on main, appends the evidence, sets the ADR to Completed with the reason `landed on main at <sha>; gate <command> passed`, and checks off `Close <ADR>`"
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§3"
+      ],
+      "kind": "property",
+      "description": "`hexa loop stage done` always checks the tree, not just the boxes.",
+      "given": "Any loop state.",
+      "when": "`hexa loop stage done` is run.",
+      "then": "It sets the ADR to Completed only when `hexa finish` has nothing open for this work but the ADR; otherwise the ADR's status is unchanged"
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§4"
+      ],
+      "kind": "example",
+      "description": "`hexa do gate` lands a commit on main by fast-forwarding.",
+      "given": "A branch with a commit not on main, and a clean main.",
+      "when": "`hexa do gate` is run on the branch.",
+      "then": "The commit is fast-forwarded to main."
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "`hexa do gate` refuses to land when main is dirty.",
+      "given": "A branch with a commit not on main, and a dirty main checkout.",
+      "when": "`hexa do gate` is run on the branch.",
+      "then": "The commit stays on the branch, and the reason is reported."
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§4"
+      ],
+      "kind": "property",
+      "description": "Landing never pushes and never forces",
+      "given": "Any branch and main state.",
+      "when": "`hexa do gate` is run.",
+      "then": "`origin` is unchanged by it, and main only ever moves by fast-forward"
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "The Stop hook blocks when a session has open work.",
+      "given": "A session with uncommitted changes or open tasks.",
+      "when": "The Stop hook runs.",
+      "then": "It returns `block` with the open work listed."
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§5"
+      ],
+      "kind": "negative",
+      "description": "The Stop hook lets a session stop after three blocks.",
+      "given": "A session that has been blocked three times in a row.",
+      "when": "The Stop hook runs again.",
+      "then": "It lets the stop through and prints the open work."
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§5"
+      ],
+      "kind": "property",
+      "description": "The Stop hook never blocks on unpushed commits.",
+      "given": "A session with unpushed commits.",
+      "when": "The Stop hook runs.",
+      "then": "It does not block, but lists the unpushed commits in the reason."
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "§6"
+      ],
+      "kind": "example",
+      "description": "A plan is made when someone asks for one",
+      "given": "A person runs `hexa plan draft \"<what is left>\"`",
+      "when": "The command runs",
+      "then": "One draft workplan is written from that prompt"
+    },
+    {
+      "id": "S17",
+      "decision": [
+        "§6"
+      ],
+      "kind": "negative",
+      "description": "A prompt is never drafted into a plan on its own",
+      "given": "A project that has not opted into auto-invoke, a long prompt, and a subagent brief",
+      "when": "Each goes through the hook router",
+      "then": "No draft workplan is written for either"
+    },
+    {
+      "id": "S18",
+      "decision": [
+        "§6"
+      ],
+      "kind": "property",
+      "description": "A plan is made only when someone asks for one.",
+      "given": "Any prompt or state.",
+      "when": "The router processes a prompt.",
+      "then": "It drafts a workplan only for a project that opted into auto-invoke, and never from a subagent brief"
+    }
+  ]
+}

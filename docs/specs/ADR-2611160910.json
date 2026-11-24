@@ -1,0 +1,181 @@
+{
+  "adr": "ADR-2611160910",
+  "feature": "hexa-usage-eval",
+  "description": "Measure model's use of hexa via transcript scoring",
+  "universal": [
+    "§3",
+    "§4",
+    "§5"
+  ],
+  "accepted": {
+    "by": "gary (in conversation, 2026-11-23: \"accept the specs\"; recorded by the implementing agent)",
+    "sha256": "bdd64d4f948661c73e900abb7470e5db419e0ad29240f649539409e76c9f071f"
+  },
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "Score a transcript with all five numbers",
+      "given": "A transcript with one Bash command matching the scenario's one `expect_verbs` entry (weight 1), one hook-refused call, one call matching a `forbid` pattern, and a `result` record with `num_turns` 1 and `total_cost_usd` 0.01; the outcome command exits 0",
+      "when": "The scorer runs against a scenario with one expect_verbs entry (weight 1), one forbid pattern, and an outcome command",
+      "then": "The score is outcome pass, process 1.0, bypasses 1, refusals 1, turns 1, cost 0.01"
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "Refuse to score a transcript with a non-JSON line",
+      "given": "A transcript containing a line that is not valid JSON",
+      "when": "The scorer attempts to parse the transcript",
+      "then": "The scorer returns an error naming the line number"
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "A valid scenario with all fields",
+      "given": "A scenario.toml with prompt, setup, expect_verbs, forbid, outcome, outcome_fails_at_start, source, gate_pattern, max_turns, budget_usd",
+      "when": "`hexa eval run --dry-run` loads it",
+      "then": "The validation passes with no errors"
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "A scenario that is already solved is refused",
+      "given": "A scenario with `outcome_fails_at_start = true` whose `outcome` command already exits 0 on the fixture",
+      "when": "`hexa eval run --dry-run` checks it",
+      "then": "The scenario fails as vacuous, before any model runs"
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§3"
+      ],
+      "kind": "property",
+      "description": "A refused call never counts as a match, edit, gate, or bypass",
+      "given": "A transcript where a Bash command is refused by a hook",
+      "when": "The scorer processes the transcript",
+      "then": "The refused call is counted only as a refusal and is excluded from all other tallies"
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "A direct source edit before any gate is a bypass",
+      "given": "A transcript where a model runs 'sed -i s/a/b/ src/x.rs' before running 'hexa loop gate'",
+      "when": "The scorer processes the transcript",
+      "then": "The sed command is counted as a bypass"
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "A command that only names a source path is not a write",
+      "given": "A transcript with 'cat src/x.rs'",
+      "when": "The scorer checks if the command writes to source",
+      "then": "The command is not counted as a source edit"
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§4"
+      ],
+      "kind": "example",
+      "description": "Store a run's results in .hexa/evals",
+      "given": "A run of 'hexa eval run' with a model and timestamp",
+      "when": "The run completes",
+      "then": "One file `.hexa/evals/<timestamp>-<model>.json` holds one row per scenario with the five numbers, the stop reason and the path of the saved transcript `.hexa/evals/<timestamp>-<model>/<scenario>.jsonl`"
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "Do not modify the repository outside .hexa/evals",
+      "given": "A run of 'hexa eval run' in a repository",
+      "when": "The run executes",
+      "then": "No files outside .hexa/evals are modified"
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "Run a model with opt-in permission",
+      "given": "A user runs 'hexa eval run' without --dry-run or --score",
+      "when": "The command executes",
+      "then": "The model is invoked with the scenario's prompt and settings"
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§5"
+      ],
+      "kind": "negative",
+      "description": "A dry run or a scoring run starts no model",
+      "given": "`hexa eval run --dry-run`, and `hexa eval run --score` on a saved transcript",
+      "when": "Each command runs",
+      "then": "No `claude` process is started by either"
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§6"
+      ],
+      "kind": "example",
+      "description": "A scenario repo is a fresh temporary directory",
+      "given": "A run of 'hexa eval run' for a scenario",
+      "when": "The scenario repo is created",
+      "then": "The repo is a new temporary directory with the fixture copied in"
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§6"
+      ],
+      "kind": "negative",
+      "description": "Do not modify the run-from repository",
+      "given": "A run of 'hexa eval run' in a repository",
+      "when": "The run executes",
+      "then": "The repository the command was run from is unchanged"
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§4"
+      ],
+      "kind": "property",
+      "description": "Every run's file accounts for every scenario",
+      "given": "Any real run over any set of scenarios",
+      "when": "The run ends",
+      "then": "Exactly one new file is written under `.hexa/evals/`, with one row per scenario run, and every transcript path in it names a file that exists"
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§5"
+      ],
+      "kind": "property",
+      "description": "A model runs only when a person asks for a real run, and only within budget",
+      "given": "Any invocation of `hexa eval run`, and any value of `inference.budget_usd_per_day`",
+      "when": "Scenarios are run",
+      "then": "A model is started only when neither `--dry-run` nor `--score` is given, and no scenario starts once the day's spend, counting this run's, has reached the budget"
+    }
+  ]
+}

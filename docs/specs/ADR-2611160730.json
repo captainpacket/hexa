@@ -1,0 +1,251 @@
+{
+  "adr": "ADR-2611160730",
+  "feature": "compliance-by-refusal",
+  "description": "hexa enforces safety by refusing unsafe or ungated work, not by changing its interface",
+  "universal": [
+    "§1",
+    "§2",
+    "§3",
+    "§4",
+    "§5",
+    "§6",
+    "§7"
+  ],
+  "accepted": {
+    "by": "gary (in conversation, 2026-11-23: \"accept the specs\"; recorded by the implementing agent)",
+    "sha256": "6e89f030e7d1c46abf34021087339a6fa228fa46daada3e878bd7bdd290997cc"
+  },
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "harden refuses to start when tree is dirty",
+      "given": "a git repo with uncommitted changes",
+      "when": "hexa harden is called",
+      "then": "it exits with an error message about a clean tree requirement"
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "harden refuses to start when HEAD is not the branch tip",
+      "given": "a git repo where HEAD is behind the branch tip",
+      "when": "hexa harden is called",
+      "then": "it exits with an error message about HEAD not being the branch tip"
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§1"
+      ],
+      "kind": "property",
+      "description": "harden always checks tree cleanliness and HEAD position before starting",
+      "given": "any git repo state",
+      "when": "hexa harden is called",
+      "then": "it verifies the tree is clean and HEAD is the branch tip before proceeding"
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "do run commits only specified files",
+      "given": "a git repo with a root Cargo.toml and two files: src/main.rs (dirty) and src/lib.rs (clean)",
+      "when": "hexa do run --file src/lib.rs is called",
+      "then": "it commits only src/lib.rs, not src/main.rs"
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "do run refuses to commit dirty files without --include-dirty",
+      "given": "a git repo with a dirty file src/main.rs",
+      "when": "hexa do run --file src/main.rs is called without --include-dirty",
+      "then": "it exits with an error about the file being dirty"
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§2"
+      ],
+      "kind": "property",
+      "description": "do run never commits files outside the specified --file and --also",
+      "given": "any git repo state",
+      "when": "hexa do run is called with --file and/or --also",
+      "then": "it commits only the specified files, never the entire package"
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "hexa do gate runs evidence on an edit",
+      "given": "a git repo with a staged edit to src/main.rs",
+      "when": "hexa do gate --files src/main.rs --evidence 'cargo test' is called",
+      "then": "it runs 'cargo test' on the staged edit and commits src/main.rs if the test passes"
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "hexa do gate refuses to run without --files",
+      "given": "a git repo with staged edits",
+      "when": "hexa do gate --evidence 'cargo test' is called without --files",
+      "then": "it exits with an error about missing --files"
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§4"
+      ],
+      "kind": "example",
+      "description": "pre_bash blocks write-shaped commands without a gate",
+      "given": "a git repo with no gate recorded for the current task",
+      "when": "hexa pre_bash is called with 'sed -i s/a/b/ src/main.rs'",
+      "then": "it exits with code 2 to block the command"
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "pre_bash allows read-only commands without a gate",
+      "given": "a git repo with no gate recorded for the current task",
+      "when": "hexa pre_bash is called with 'cargo test'",
+      "then": "it exits with code 0 to allow the command"
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§4"
+      ],
+      "kind": "property",
+      "description": "pre_bash blocks write-shaped commands to tracked project paths without a gate",
+      "given": "any git repo state",
+      "when": "hexa pre_bash is called with a write-shaped command to a tracked project path",
+      "then": "it exits with code 2 if no gate is recorded for the current task"
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "gate fails on vacuous test results",
+      "given": "a test that runs with 0 tests",
+      "when": "hexa run_gate is called on the test output",
+      "then": "it returns Vacuous and fails the gate"
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§5"
+      ],
+      "kind": "negative",
+      "description": "gate passes on non-vacuous test results",
+      "given": "a test that runs with 1 or more tests",
+      "when": "hexa run_gate is called on the test output",
+      "then": "it returns Pass and passes the gate"
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§5"
+      ],
+      "kind": "property",
+      "description": "every gate result goes through evidence_verdict and fails on Vacuous",
+      "given": "any gate result",
+      "when": "hexa run_gate is called",
+      "then": "it checks the result against evidence_verdict and fails if Vacuous"
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§6"
+      ],
+      "kind": "example",
+      "description": "harden includes stored lessons in its prompt",
+      "given": "a stored lesson 'lesson:async-staleness' matching the target",
+      "when": "hexa harden is called",
+      "then": "the prompt includes the lesson"
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "§6"
+      ],
+      "kind": "negative",
+      "description": "harden fails if a fix test passes without the fix",
+      "given": "a fix whose test passes without the fix applied",
+      "when": "hexa harden is called",
+      "then": "The fix is reported as \"untested\", never as \"fixed\""
+    },
+    {
+      "id": "S17",
+      "decision": [
+        "§6"
+      ],
+      "kind": "property",
+      "description": "harden and build call the same lesson gathering as do run",
+      "given": "any git repo state",
+      "when": "hexa harden or hexa build is called",
+      "then": "they gather lessons the same way as do run"
+    },
+    {
+      "id": "S18",
+      "decision": [
+        "§7"
+      ],
+      "kind": "example",
+      "description": "skills CI check fails on broken skill lines",
+      "given": "a skill file with 'npx hexa summarize'",
+      "when": "hexa skills_name_real_commands is run",
+      "then": "it fails because 'npx hexa summarize' does not exist"
+    },
+    {
+      "id": "S19",
+      "decision": [
+        "§7"
+      ],
+      "kind": "negative",
+      "description": "skills CI check passes on valid skill lines",
+      "given": "a skill file with 'hexa do gate --files src/main.rs'",
+      "when": "hexa skills_name_real_commands is run",
+      "then": "it passes because the command exists"
+    },
+    {
+      "id": "S20",
+      "decision": [
+        "§7"
+      ],
+      "kind": "property",
+      "description": "a CI check runs --help on every hexa command in skills",
+      "given": "any git repo state",
+      "when": "the CI check is run",
+      "then": "it verifies that every hexa command in skills has a valid --help output"
+    },
+    {
+      "id": "S21",
+      "decision": [
+        "§3"
+      ],
+      "kind": "property",
+      "description": "do gate commits exactly the files it names",
+      "given": "Any tree with an edit in each of the named files and any other modified tracked files, and evidence that reports passing tests",
+      "when": "`hexa do gate --files <named>… --evidence <cmd>` runs",
+      "then": "The commit it makes contains exactly the named files; every other modified file is still modified and uncommitted"
+    }
+  ]
+}

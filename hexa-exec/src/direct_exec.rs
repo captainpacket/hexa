@@ -100,7 +100,7 @@ pub fn validate_also_paths(paths: &[String]) -> Result<(), String> {
 }
 
 /// `./a/b` → `a/b`, so a listed path matches git's own spelling.
-fn normalize_also(p: &str) -> String {
+pub(crate) fn normalize_also(p: &str) -> String {
     let mut s = p;
     while let Some(rest) = s.strip_prefix("./") {
         s = rest;
@@ -396,7 +396,7 @@ pub(crate) struct TreeLock {
 
 /// Where the tree lock lives for the repository at `main_root`.
 pub(crate) fn tree_lock_path(main_root: &std::path::Path) -> std::path::PathBuf {
-    let common = std::process::Command::new("git")
+    let common = child_std("git")
         .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .current_dir(main_root)
         .output()
@@ -609,7 +609,7 @@ fn persist_run_async(runs: &dyn crate::ports::RunLog, run: DirectRun) {
 /// reported 8% pass over 5 real runs. `runs_from_rows` drops those rows
 /// before assigning display ids, so ids number only real runs
 /// (ADR-2609151100).
-fn runs_snapshot(runs: &dyn crate::ports::RunLog) -> Vec<DirectRun> {
+pub(crate) fn runs_snapshot(runs: &dyn crate::ports::RunLog) -> Vec<DirectRun> {
     runs_from_rows(runs.recent(RUN_HISTORY))
 }
 
@@ -714,6 +714,10 @@ pub struct ExecDeps {
 /// guessing, on purpose, so an unconfigured project fails with a message that
 /// names the missing key instead of silently running on a model nobody chose.
 pub(crate) fn resolve_model(task: &DirectTask) -> Option<String> {
+    // Managed mode answers from the harness's tier map alone (ADR-2610281500 §4).
+    if let Some(m) = hexa_infer::managed::active() {
+        return m.tier("t2").map(|t| t.model.clone());
+    }
     task.model
         .clone()
         .or_else(|| std::env::var("HEXA_DIRECT_MODEL").ok())
@@ -751,9 +755,118 @@ impl DirectResult {
             left_modified: Vec::new(),
         }
     }
+
+    /// The run's result code (ADR-2610281500 §9): `None` when it passed, else one of
+    /// `gate_failed`, `timeout`, `auth`, `budget`, `model_error` and `internal`.
+    ///
+    /// Read from the result rather than carried in a field, so the struct's shape (which
+    /// callers build literally) does not change.
+    pub fn code(&self) -> Option<&'static str> {
+        if self.ok {
+            return None;
+        }
+        let err = self.error.as_deref().unwrap_or("");
+        if err.starts_with(TIMEOUT_PREFIX) {
+            return Some("timeout");
+        }
+        let last = err.split_once(". last: ").map_or(err, |(_, l)| l);
+        if let Some(rest) = last.strip_prefix("inference: ") {
+            return Some(inference_code(rest));
+        }
+        if self.edit_applied && !self.evidence_passed {
+            return Some("gate_failed");
+        }
+        Some("internal")
+    }
+}
+
+/// The result code of an inference failure, from its message: `auth` (401), `budget` (402),
+/// else `model_error` (ADR-2610281500 §5).
+pub(crate) fn inference_code(msg: &str) -> &'static str {
+    let status = msg
+        .strip_prefix("API error: ")
+        .and_then(|r| r.split(|c: char| !c.is_ascii_digit()).next())
+        .and_then(|d| d.parse::<u16>().ok());
+    match status {
+        Some(status) => hexa_infer::managed::code_for(
+            &hexa_core::ports::inference::InferenceError::ApiError { status, body: String::new() },
+        ),
+        None => "model_error",
+    }
+}
+
+/// In managed mode, the pre-run state of the files a run may edit: a failed managed run
+/// leaves the tree as it found it (ADR-2610281500 §6).
+pub(crate) fn managed_snapshot(repo_root: &std::path::Path, task: &DirectTask) -> Option<AlsoSnapshot> {
+    hexa_infer::managed::active()?;
+    let mut paths = vec![task.file.clone()];
+    paths.extend(task.also.iter().cloned());
+    AlsoSnapshot::capture(repo_root, &paths).ok()
+}
+
+/// Put back what [`managed_snapshot`] saw, unless the run passed its gate: a passing edit
+/// is either committed or the only copy of a verified change.
+pub(crate) fn managed_restore(before: Option<AlsoSnapshot>, result: &DirectResult) {
+    if let Some(s) = before.filter(|_| !result.evidence_passed) {
+        s.restore();
+    }
+}
+
+/// A managed run stops at once on a 401 or a 402: no further attempt can succeed, and each
+/// one would spend (ADR-2610281500 §5).
+pub(crate) fn managed_stop(msg: &str) -> bool {
+    hexa_infer::managed::active().is_some() && matches!(inference_code(msg), "auth" | "budget")
+}
+
+/// The variables no child process of a managed run may see (ADR-2610281500 §7): the managed
+/// settings and every `ANTHROPIC_*` variable. Empty outside managed mode.
+pub(crate) fn managed_child_env_removals() -> Vec<String> {
+    if hexa_infer::managed::active().is_none() {
+        return Vec::new();
+    }
+    let mut v: Vec<String> =
+        ["HEXA_MANAGED_URL", "HEXA_MANAGED_TOKEN_FD", "HEXA_MANAGED_TIERS"].map(String::from).into();
+    v.extend(std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).filter(|k| k.starts_with("ANTHROPIC_")));
+    v
+}
+
+/// An async child process, with the managed settings removed from its environment (§7).
+pub(crate) fn child(program: &str) -> tokio::process::Command {
+    let mut c = tokio::process::Command::new(program);
+    for k in managed_child_env_removals() {
+        c.env_remove(k);
+    }
+    c
+}
+
+/// A blocking child process, with the managed settings removed from its environment (§7).
+pub(crate) fn child_std(program: &str) -> std::process::Command {
+    let mut c = std::process::Command::new(program);
+    for k in managed_child_env_removals() {
+        c.env_remove(k);
+    }
+    c
+}
+
+/// How long before the managed deadline a run stops, so it can still print its result (§8).
+const DEADLINE_MARGIN_SECS: u64 = 5;
+
+/// The prefix of a run's error when it stopped at the managed deadline (§8).
+const TIMEOUT_PREFIX: &str = "timeout: ";
+
+/// With `HEXA_MANAGED_DEADLINE` set and `now >= deadline - 5 s`, the error a managed run stops
+/// with before a model call, evidence or a worktree (ADR-2610281500 §8); `None` otherwise.
+pub fn managed_timeout() -> Option<String> {
+    let deadline = hexa_infer::managed::active()?.deadline?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    (now >= deadline.saturating_sub(DEADLINE_MARGIN_SECS))
+        .then(|| format!("{TIMEOUT_PREFIX}the managed deadline ({deadline}) is reached; no model call or evidence was run"))
 }
 
 pub(crate) async fn execute_direct_inner(deps: &ExecDeps, task: DirectTask) -> DirectResult {
+    if let Some(e) = managed_timeout() {
+        return DirectResult::err(e);
+    }
     // Serialize the whole acquire→read→edit→evidence→commit→finish section.
     let _tree_lock = match lock_tree(&repo_root()).await {
         Ok(l) => l,
@@ -774,7 +887,9 @@ pub(crate) async fn execute_direct_inner(deps: &ExecDeps, task: DirectTask) -> D
     }
     let repo_root = workspace.workdir().to_path_buf();
     let factory = workspace.is_isolated();
+    let before = managed_snapshot(&repo_root, &task);
     let mut result = exec_attempts(deps, &task, &repo_root, factory).await;
+    managed_restore(before, &result);
     settle_workspace(workspace, &mut result);
     result
 }
@@ -833,11 +948,19 @@ async fn exec_attempts(deps: &ExecDeps, task: &DirectTask, repo_root: &std::path
     };
 
     let mut last_error: Option<String> = None;
+    // The file as the run found it. Each attempt starts from it, and a run that
+    // never passes puts it back: applying attempt after attempt on top of the
+    // last appended one block three times and left it in the tree (git.local
+    // gary/hexa#18). The ReAct and frontier paths already restore.
+    let snapshot = FileSnapshot::capture(&abs_path);
 
     for attempt in 1..=max_attempts {
         result.attempts = attempt;
+        if attempt > 1 {
+            snapshot.restore();
+        }
 
-        // 1. Read the current file (re-read each attempt: prior attempt may have edited it).
+        // 1. Read the file as the run found it; the prior attempt's error is fed back instead.
         let content = match std::fs::read_to_string(&abs_path) {
             Ok(c) => c,
             Err(e) => {
@@ -847,12 +970,20 @@ async fn exec_attempts(deps: &ExecDeps, task: &DirectTask, repo_root: &std::path
         };
         let grounded = ground_window(&content, &task.instruction);
 
-        // 2. ONE inference call for a precise edit.
+        // 2. ONE inference call for a precise edit — none past the managed deadline (§8).
+        if let Some(e) = managed_timeout() {
+            result.error = Some(e);
+            return result;
+        }
         let edit = match request_edit(&model, task, &grounded, &context_block, last_error.as_deref()).await {
             Ok(e) => e,
             Err(e) => {
                 last_error = Some(format!("inference: {}", e));
                 tracing::warn!(attempt, error = %e, "direct_exec: inference failed");
+                if managed_stop(&e) {
+                    result.error = last_error;
+                    return result;
+                }
                 continue;
             }
         };
@@ -866,7 +997,11 @@ async fn exec_attempts(deps: &ExecDeps, task: &DirectTask, repo_root: &std::path
         result.edit_applied = true;
         tracing::info!(attempt, file = %task.file, mode = %edit.mode, "direct_exec: edit applied");
 
-        // 4. Run the evidence command.
+        // 4. Run the evidence command — not past the managed deadline (§8).
+        if let Some(e) = managed_timeout() {
+            result.error = Some(e);
+            return result;
+        }
         let (passed, output) = run_evidence(&task.evidence, repo_root).await;
         result.evidence_output = output.chars().take(4000).collect();
         // Only a run the one reader calls a pass commits: zero tests, a reported
@@ -900,9 +1035,11 @@ async fn exec_attempts(deps: &ExecDeps, task: &DirectTask, repo_root: &std::path
         }
     }
 
+    snapshot.restore();
     result.error = Some(format!(
-        "exhausted {} attempts without passing evidence. last: {}",
+        "exhausted {} attempts without passing evidence; {} is restored as the run found it. last: {}",
         max_attempts,
+        task.file,
         last_error.unwrap_or_default()
     ));
     result
@@ -1365,8 +1502,13 @@ pub async fn run_evidence(cmd: &str, repo_root: &std::path::Path) -> (bool, Stri
     // like `cargo test … | tail` returns tail's 0 and a FAILING test reads as
     // passed — defeating the entire evidence gate (measured 2026-06-04: a failing
     // test got committed because of exactly this).
-    let wrapped = format!("set -o pipefail; {}", cmd);
-    let out = tokio::process::Command::new("bash")
+    let mut wrapped = format!("set -o pipefail; {}", cmd);
+    // A managed run's evidence starts with no descriptor beyond stdout and stderr: stdin is
+    // closed, so the lowest descriptor the evidence opens is never one hexa held (§7).
+    if hexa_infer::managed::active().is_some() {
+        wrapped = format!("exec 0<&-; {wrapped}");
+    }
+    let out = child("bash")
         .arg("-c")
         .arg(&wrapped)
         .current_dir(repo_root)
@@ -1387,7 +1529,7 @@ pub async fn run_evidence(cmd: &str, repo_root: &std::path::Path) -> (bool, Stri
 /// (a spec, a module registration) that the evidence depended on — without sweeping in
 /// anything that appears *concurrently* after the run begins.
 pub async fn dirty_paths(repo_root: &std::path::Path) -> Vec<String> {
-    let out = match tokio::process::Command::new("git")
+    let out = match child("git")
         .args(["status", "--porcelain", "--untracked-files=all"])
         .current_dir(repo_root)
         .output()
@@ -1520,7 +1662,7 @@ async fn restore_seal(repo_root: &std::path::Path, path: &str, start_dirty: &[St
     if start_dirty.iter().any(|p| p == path) {
         return false;
     }
-    let Ok(head) = tokio::process::Command::new("git")
+    let Ok(head) = child("git")
         .args(["cat-file", "blob", &format!("HEAD:{path}")])
         .current_dir(repo_root)
         .output()
@@ -1550,7 +1692,7 @@ async fn commit(
 
 /// Whether `path` is tracked in `HEAD` (so its absence now is a deletion).
 fn tracked_in_head(repo_root: &std::path::Path, path: &str) -> bool {
-    std::process::Command::new("git")
+    child_std("git")
         .args(["cat-file", "-e"])
         .arg(format!("HEAD:{path}"))
         .current_dir(repo_root)
@@ -1586,7 +1728,7 @@ pub async fn restore_unlisted(repo_root: &std::path::Path, paths: &[String]) -> 
     let mut kept = Vec::new();
     for p in paths {
         let ok = if tracked_in_head(repo_root, p) {
-            tokio::process::Command::new("git")
+            child("git")
                 .args(["checkout", "-q", "HEAD", "--"])
                 .arg(p)
                 .current_dir(repo_root)
@@ -1624,6 +1766,227 @@ pub async fn gate_patch(
     message: &str,
     uncounted: bool,
 ) -> Result<String, String> {
+    gate_patch_local(repo_root, files, evidence, message, uncounted, Expect::Green)
+        .await
+        .map(|g| g.commit.chars().take(7).collect())
+        .map_err(|f| f.why)
+}
+
+/// What `hexa do gate` expects of its gate (ADR-2611231400 §4): to pass, or,
+/// for a tests-first commit, to fail on test assertions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Expect {
+    Green,
+    Red,
+}
+
+impl Expect {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Expect::Green => "green",
+            Expect::Red => "red",
+        }
+    }
+}
+
+/// A `hexa do gate` that did not commit, or whose commit did not reach the
+/// remote (ADR-2611231400 §1): a machine code, the reason, the next step, the
+/// flag concerned, and whether the same command could succeed if run again.
+#[derive(Debug, Clone)]
+pub struct GateFailure {
+    pub code: &'static str,
+    pub why: String,
+    pub hint: String,
+    pub field: Option<&'static str>,
+    pub retryable: bool,
+    /// The candidate's full id, when one was built.
+    pub commit: Option<String>,
+    /// What the gate counted, when it ran.
+    pub tests: Option<hexa_core::ports::evidence::TestCounts>,
+    pub first_failure: Option<String>,
+    /// The runner's output tail, when the gate ran remotely.
+    pub output: Option<String>,
+}
+
+impl GateFailure {
+    /// Boxed: it is the error of every gate step, and it is large.
+    pub fn new(code: &'static str, why: impl Into<String>, hint: impl Into<String>, field: Option<&'static str>, retryable: bool) -> Box<Self> {
+        Box::new(GateFailure { code, why: why.into(), hint: hint.into(), field, retryable, commit: None, tests: None, first_failure: None, output: None })
+    }
+
+    /// A refusal [`gate_checks`] made, before anything ran.
+    pub fn from_checks(why: String) -> Box<Self> {
+        if why.starts_with("nothing to commit") {
+            GateFailure::new(
+                "nothing-to-commit",
+                why,
+                "name only files that differ from HEAD (`git status --short`), or make the change first",
+                Some("--files"),
+                false,
+            )
+        } else {
+            GateFailure::new("refused", why, "fix what the refusal names, then run the same command again", Some("--files"), false)
+        }
+    }
+}
+
+/// A gate's run, judged for what was expected of it and passed.
+#[derive(Debug, Clone)]
+pub struct Judged {
+    /// The counts; `None` for an uncounted gate.
+    pub tests: Option<hexa_core::ports::evidence::TestCounts>,
+    pub first_failure: Option<String>,
+}
+
+/// Judge a gate's run (ADR-2611231400 §1, §4): `Ok` exactly when it may be
+/// committed. `remote` picks the failing gate's code (`remote-gate-failed` or
+/// `gate-failed`). The failure carries the counts, the first failing line and
+/// the output's last 40 lines.
+pub fn judge_gate(evidence: &str, exit_ok: bool, output: &str, uncounted: bool, expect: Expect, remote: bool) -> Result<Judged, Box<GateFailure>> {
+    use hexa_core::ports::evidence::{
+        count_tests, first_failure, read_gate_evidence, read_red_evidence, Evidence, RedEvidence, TestCounts, KNOWN_RUNNERS,
+    };
+    let counts = count_tests(output);
+    let first = first_failure(output);
+    let tail: String = {
+        let lines: Vec<&str> = output.lines().collect();
+        lines[lines.len().saturating_sub(40)..].join("\n")
+    };
+    let left = "nothing committed; the change is left in the tree";
+    let fail = |code: &'static str, why: String, hint: &str, field: Option<&'static str>| {
+        let mut f = GateFailure::new(code, format!("{why}\n{left}"), hint, field, false);
+        f.tests = Some(counts);
+        f.first_failure = first.clone();
+        f
+    };
+    match expect {
+        Expect::Green => match read_gate_evidence(evidence, exit_ok, output, uncounted) {
+            Evidence::Passed { tests } => Ok(Judged {
+                tests: Some(TestCounts { passed: tests.max(counts.passed), failed: 0, recognised: true }),
+                first_failure: None,
+            }),
+            Evidence::Uncounted => Ok(Judged { tests: None, first_failure: None }),
+            v @ Evidence::Failed { .. } => Err(fail(
+                if remote { "remote-gate-failed" } else { "gate-failed" },
+                evidence_failure(evidence, &v, &tail),
+                "read first_failure and the output; fix the change (or, if the test is wrong, the spec), then run the same command again",
+                Some("--evidence"),
+            )),
+            v @ Evidence::Vacuous => Err(fail(
+                "vacuous-gate",
+                evidence_failure(evidence, &v, &tail),
+                "the gate ran zero tests: name tests that exist and run (a filter that matches nothing proves nothing)",
+                Some("--evidence"),
+            )),
+            v @ Evidence::Unrecognised => Err(fail(
+                "unrecognised-evidence",
+                evidence_failure(evidence, &v, &tail),
+                &format!("use a gate whose test runner hexa reads ({KNOWN_RUNNERS}), or declare it --uncounted"),
+                Some("--evidence"),
+            )),
+        },
+        Expect::Red => match read_red_evidence(evidence, exit_ok, output) {
+            RedEvidence::Red { .. } => Ok(Judged { tests: Some(counts), first_failure: first.clone() }),
+            RedEvidence::NotRed => Err(fail(
+                "not-red",
+                format!("--expect-red: the gate `{evidence}` passed, so these tests are not red"),
+                "tests written first must fail before the code: check that they test the new behaviour; to commit tests and code together, drop --expect-red",
+                Some("--expect-red"),
+            )),
+            RedEvidence::BuildError { line } => Err(fail(
+                "red-not-a-test-failure",
+                format!("--expect-red: a compile error is not a red test: {line}"),
+                "make the tests compile against the code as it is (declare the new items with bodies that fail), so that only assertions fail, then run again",
+                Some("--expect-red"),
+            )),
+            RedEvidence::Uncounted => Err(fail(
+                "red-not-a-test-failure",
+                format!("--expect-red: the gate `{evidence}` failed, but no test runner hexa reads counted a failed test ({KNOWN_RUNNERS})"),
+                "use a gate whose runner reports its tests, so a red is a counted test failure and not a crash or a script's exit 1",
+                Some("--expect-red"),
+            )),
+            RedEvidence::Vacuous => Err(fail(
+                "vacuous-gate",
+                format!("--expect-red: the gate `{evidence}` ran zero tests"),
+                "name tests that exist and run; zero tests is not red",
+                Some("--evidence"),
+            )),
+        },
+    }
+    .map_err(|mut f| {
+        f.output = Some(tail.clone());
+        f
+    })
+}
+
+/// A local `hexa do gate` that committed: the full commit id and the verdict.
+#[derive(Debug, Clone)]
+pub struct LocalGated {
+    pub commit: String,
+    pub judged: Judged,
+}
+
+/// The `Gate:` trailer's parenthesis for a gate's kind (ADR-2611231400 §4).
+pub fn gate_how(uncounted: bool, expect: Expect) -> &'static str {
+    match (expect, uncounted) {
+        (Expect::Red, _) => "expected red: failed on test assertions",
+        (Expect::Green, true) => "uncounted: its exit status alone decided",
+        (Expect::Green, false) => "counted",
+    }
+}
+
+/// [`gate_patch`], judged for `expect` and returning a [`GateFailure`]
+/// (ADR-2611231400 §1, §4). Runs the gate here.
+pub async fn gate_patch_local(
+    repo_root: &std::path::Path,
+    files: &[String],
+    evidence: &str,
+    message: &str,
+    uncounted: bool,
+    expect: Expect,
+) -> Result<LocalGated, Box<GateFailure>> {
+    let paths = gate_checks(repo_root, files).await.map_err(GateFailure::from_checks)?;
+    let (passed, output) = run_evidence(evidence, repo_root).await;
+    // A gate that is one bash script counts as one test (ADR-2611191120 §7).
+    let judged = judge_gate(evidence, passed, &output, uncounted, expect, false)?;
+    let git_fail = |what: &str, e: String| GateFailure::new("refused", format!("{what}: {e}"), "read the git error, fix it, then run again", None, true);
+    let add = tokio::process::Command::new("git")
+        .args(["add", "-A", "--"])
+        .args(&paths)
+        .current_dir(repo_root)
+        .output()
+        .await
+        .map_err(|e| git_fail("git add", e.to_string()))?;
+    if !add.status.success() {
+        return Err(git_fail("git add", String::from_utf8_lossy(&add.stderr).to_string()));
+    }
+    let adr = if expect == Expect::Red { "ADR-2611231400 §4" } else { "ADR-2611160730 §3" };
+    let msg = format!("{}\n\nGate: {evidence} ({}; hexa do gate, {adr})", message.trim(), gate_how(uncounted, expect));
+    let commit = tokio::process::Command::new("git")
+        .args(["commit", "-q", "-m", &msg, "--"])
+        .args(&paths)
+        .current_dir(repo_root)
+        .output()
+        .await
+        .map_err(|e| git_fail("git commit", e.to_string()))?;
+    if !commit.status.success() {
+        return Err(git_fail("git commit", String::from_utf8_lossy(&commit.stderr).to_string()));
+    }
+    let head = tokio::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo_root)
+        .output()
+        .await
+        .map_err(|e| git_fail("git rev-parse", e.to_string()))?;
+    Ok(LocalGated { commit: String::from_utf8_lossy(&head.stdout).trim().to_string(), judged })
+}
+
+/// What `hexa do gate` checks before any gate runs, locally or remotely
+/// (ADR-2611160730 §3, ADR-2611221610 §7, §8): a file is named, no path escapes
+/// the repository, none is a credential, each has a change, and no sealed test
+/// or spec record changed, except an amendment `hexa spec amend` recorded and
+/// the gate commits with its record. Returns the repo-relative paths.
+pub async fn gate_checks(repo_root: &std::path::Path, files: &[String]) -> Result<Vec<String>, String> {
     let Some((first, rest)) = files.split_first() else {
         return Err("name the files the change is in: --files <path>…".to_string());
     };
@@ -1635,53 +1998,96 @@ pub async fn gate_patch(
     if !unchanged.is_empty() {
         return Err(format!("nothing to commit in {}: no change against HEAD", unchanged.join(", ")));
     }
-    let broken = broken_seals(repo_root);
+    let broken = broken_seals_for_gate(repo_root, &paths);
     if !broken.is_empty() {
         return Err(format!(
             "refused: sealed test(s) or spec record(s) changed: {}. A sealed test changes through the spec, never in a fix \
-             (ADR-2610221540 §6); nothing committed",
+             (ADR-2610221540 §6): record a reviewed edit with `hexa spec amend`, then name the test and its spec record in \
+             --files (ADR-2611221610 §8); nothing committed",
             broken.join(", ")
         ));
     }
-    let (passed, output) = run_evidence(evidence, repo_root).await;
-    // A gate that is one bash script counts as one test (ADR-2611191120 §7).
-    let verdict = hexa_core::ports::evidence::read_gate_evidence(evidence, passed, &output, uncounted);
-    if !verdict.passes() {
-        let tail: String = {
-            let lines: Vec<&str> = output.lines().collect();
-            lines[lines.len().saturating_sub(40)..].join("\n")
-        };
-        return Err(format!("{}\nnothing committed; the change is left in the tree", evidence_failure(evidence, &verdict, &tail)));
+    Ok(paths)
+}
+
+/// [`broken_seals`], less what a recorded amendment covers (ADR-2611221610 §8):
+/// a changed spec record named in `named` whose only differences from HEAD's
+/// copy are its `sealed` map and amendments appended to `amendments`, each
+/// moved seal reached from HEAD's by the new amendments in order; with it,
+/// each named sealed file whose content is the hash the record now seals.
+fn broken_seals_for_gate(repo_root: &std::path::Path, named: &[String]) -> Vec<String> {
+    let broken = broken_seals(repo_root);
+    if broken.is_empty() {
+        return broken;
     }
-    let add = tokio::process::Command::new("git")
-        .args(["add", "-A", "--"])
-        .args(&paths)
+    let mut covered: Vec<String> = Vec::new();
+    for record in broken.iter().filter(|p| is_spec_record(p) && named.contains(p)) {
+        let Some(moved) = recorded_amendments(repo_root, record) else { continue };
+        covered.push(record.clone());
+        for (file, sealed) in moved {
+            let now = std::fs::read(repo_root.join(&file)).ok().map(|b| sha256_hex(&b));
+            if named.contains(&file) && now.as_deref() == Some(sealed.as_str()) {
+                covered.push(file);
+            }
+        }
+    }
+    broken.into_iter().filter(|p| !covered.contains(p)).collect()
+}
+
+/// The `(file, new seal)` pairs a spec record's amendments moved since HEAD,
+/// or `None` when the record changed in any other way or the chain does not
+/// hold (ADR-2611221610 §8).
+fn recorded_amendments(repo_root: &std::path::Path, record: &str) -> Option<Vec<(String, String)>> {
+    let head = std::process::Command::new("git")
+        .args(["show", &format!("HEAD:{record}")])
         .current_dir(repo_root)
         .output()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !add.status.success() {
-        return Err(format!("git add: {}", String::from_utf8_lossy(&add.stderr)));
+        .ok()
+        .filter(|o| o.status.success())?;
+    let mut old: Value = serde_json::from_slice(&head.stdout).ok()?;
+    let mut new: Value = serde_json::from_slice(&std::fs::read(repo_root.join(record)).ok()?).ok()?;
+    let take = |v: &mut Value, k: &str| v.as_object_mut().and_then(|o| o.remove(k)).unwrap_or(Value::Null);
+    let (old_sealed, new_sealed) = (take(&mut old, "sealed"), take(&mut new, "sealed"));
+    let (old_am, new_am) = (take(&mut old, "amendments"), take(&mut new, "amendments"));
+    if old != new {
+        return None;
     }
-    let how = if uncounted { "uncounted: its exit status alone decided" } else { "counted" };
-    let msg = format!("{}\n\nGate: {evidence} ({how}; hexa do gate, ADR-2611160730 §3)", message.trim());
-    let commit = tokio::process::Command::new("git")
-        .args(["commit", "-q", "-m", &msg, "--"])
-        .args(&paths)
-        .current_dir(repo_root)
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !commit.status.success() {
-        return Err(format!("git commit: {}", String::from_utf8_lossy(&commit.stderr)));
+    let old_sealed = old_sealed.as_object().cloned().unwrap_or_default();
+    let new_sealed = new_sealed.as_object().cloned()?;
+    let old_am = old_am.as_array().cloned().unwrap_or_default();
+    let new_am = new_am.as_array().cloned()?;
+    if new_am.len() <= old_am.len() || new_am[..old_am.len()] != old_am[..] {
+        return None;
     }
-    let head = tokio::process::Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .current_dir(repo_root)
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(String::from_utf8_lossy(&head.stdout).trim().to_string())
+    let mut keys_old: Vec<&String> = old_sealed.keys().collect();
+    let mut keys_new: Vec<&String> = new_sealed.keys().collect();
+    keys_old.sort();
+    keys_new.sort();
+    if keys_old != keys_new {
+        return None;
+    }
+    let added = &new_am[old_am.len()..];
+    if added.iter().any(|a| a["file"].as_str().is_none_or(|f| !new_sealed.contains_key(f))) {
+        return None;
+    }
+    let mut moved = Vec::new();
+    for (file, was) in &old_sealed {
+        let mut expected = was.as_str()?.to_string();
+        for a in added.iter().filter(|a| a["file"].as_str() == Some(file.as_str())) {
+            if a["from"].as_str() != Some(expected.as_str()) {
+                return None;
+            }
+            expected = a["to"].as_str()?.to_string();
+        }
+        let now = new_sealed.get(file)?.as_str()?;
+        if now != expected {
+            return None;
+        }
+        if now != was.as_str()? {
+            moved.push((file.clone(), now.to_string()));
+        }
+    }
+    (!moved.is_empty()).then_some(moved)
 }
 
 /// The tracked files the operator had already changed before the run, in the
@@ -1740,6 +2146,25 @@ pub async fn commit_with_also(
     start_dirty: &[String],
     also: &[String],
 ) -> Result<String, String> {
+    let subject = instruction.lines().next().unwrap_or("direct edit");
+    let msg = format!(
+        "feat(direct): {}\n\nProduced by the direct executor (ADR-2026-06-04-1740 Path A): \
+         one agent, one evidence-gated edit, no SOP pipeline.\n\n\
+         Co-Authored-By: hexa-direct <noreply@hexa.local>",
+        subject.chars().take(72).collect::<String>()
+    );
+    commit_with_also_message(repo_root, file, &msg, factory, start_dirty, also).await
+}
+
+/// [`commit_with_also`] with the whole commit message given.
+pub(crate) async fn commit_with_also_message(
+    repo_root: &std::path::Path,
+    file: &str,
+    msg: &str,
+    factory: bool,
+    start_dirty: &[String],
+    also: &[String],
+) -> Result<String, String> {
     // The code side may only make a sealed test pass, never change it
     // (ADR-2610221540 §6). Judged over the whole tree, not this commit's
     // paths: a test loosened and left uncommitted still made the gate pass.
@@ -1791,7 +2216,7 @@ pub async fn commit_with_also(
             paths.push(p);
         }
     }
-    let add = tokio::process::Command::new("git")
+    let add = child("git")
         .args(["add", "-A", "--"])
         .args(&paths)
         .current_dir(repo_root)
@@ -1801,17 +2226,10 @@ pub async fn commit_with_also(
     if !add.status.success() {
         return Err(format!("git add: {}", String::from_utf8_lossy(&add.stderr)));
     }
-    let subject = instruction.lines().next().unwrap_or("direct edit");
-    let msg = format!(
-        "feat(direct): {}\n\nProduced by the direct executor (ADR-2026-06-04-1740 Path A): \
-         one agent, one evidence-gated edit, no SOP pipeline.\n\n\
-         Co-Authored-By: hexa-direct <noreply@hexa.local>",
-        subject.chars().take(72).collect::<String>()
-    );
     // Isolated (autonomous) commits are authored by a distinct factory identity
     // (ADR-2606071323 §4) so they are attributable and never masquerade as the
     // operator's `hexa-coder`. `-c` keeps it commit-local (no global config change).
-    let mut cmd = tokio::process::Command::new("git");
+    let mut cmd = child("git");
     if factory {
         cmd.args([
             "-c",
@@ -1824,7 +2242,7 @@ pub async fn commit_with_also(
     // concurrently-changed file can't get swept in (the 2026-06-04 review swarm's fix,
     // generalized from one file to the captured set).
     let c = cmd
-        .args(["commit", "-m", &msg, "--"])
+        .args(["commit", "-m", msg, "--"])
         .args(&paths)
         .current_dir(repo_root)
         .output()
@@ -1839,7 +2257,7 @@ pub async fn commit_with_also(
     };
     // Unstage everything `git add` staged above, not just the target, so the
     // change is left in the working tree unstaged, as the hint says.
-    let _ = tokio::process::Command::new("git")
+    let _ = child("git")
         .args(["reset", "-q", "--"])
         .args(&paths)
         .current_dir(repo_root)
