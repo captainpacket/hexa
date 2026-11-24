@@ -1,6 +1,7 @@
 # ADR-2611161830: hexa speaks AG-UI
 
-**Status:** Proposed
+**Status:** Accepted
+> 2026-11-20 Accepted: Accepted in bulk on 2026-11-20 at Gary Berger's instruction ("accept all adrs"); not individually reviewed by the agent
 **Date:** 2026-11-16
 **Drivers:** "hexa should follow this specification https://docs.ag-ui.com/spec/draft"
 **Supersedes:** none. Builds on ADR-2611161800 (a plan ends on main), whose verbs are the first to speak it.
