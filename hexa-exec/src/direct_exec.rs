@@ -833,11 +833,19 @@ async fn exec_attempts(deps: &ExecDeps, task: &DirectTask, repo_root: &std::path
     };
 
     let mut last_error: Option<String> = None;
+    // The file as the run found it. Each attempt starts from it, and a run that
+    // never passes puts it back: applying attempt after attempt on top of the
+    // last appended one block three times and left it in the tree (git.local
+    // gary/hexa#18). The ReAct and frontier paths already restore.
+    let snapshot = FileSnapshot::capture(&abs_path);
 
     for attempt in 1..=max_attempts {
         result.attempts = attempt;
+        if attempt > 1 {
+            snapshot.restore();
+        }
 
-        // 1. Read the current file (re-read each attempt: prior attempt may have edited it).
+        // 1. Read the file as the run found it; the prior attempt's error is fed back instead.
         let content = match std::fs::read_to_string(&abs_path) {
             Ok(c) => c,
             Err(e) => {
@@ -900,9 +908,12 @@ async fn exec_attempts(deps: &ExecDeps, task: &DirectTask, repo_root: &std::path
         }
     }
 
+    snapshot.restore();
+    result.edit_applied = false;
     result.error = Some(format!(
-        "exhausted {} attempts without passing evidence. last: {}",
+        "exhausted {} attempts without passing evidence; {} is restored as the run found it. last: {}",
         max_attempts,
+        task.file,
         last_error.unwrap_or_default()
     ));
     result
