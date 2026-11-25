@@ -6,7 +6,7 @@
 > [`ARCHITECTURE.md`](../../ARCHITECTURE.md); for *why* a decision was made,
 > read the ADR itself.
 
-**87 ADRs** across 1 epochs.
+**88 ADRs** across 1 epochs.
 
 ## Epoch: `single-agent` — **current**
 
@@ -14,6 +14,7 @@ _One gateway-mediated agent loop; code-graph context as the differentiator_
 
 | ADR | Status | Title | Superseded-By |
 |-----|--------|-------|---------------|
+| ADR-2611250845 | accepted | ADR-2611250845: `hexa adr features` lists every feature the decisions name, with where each stands |  |
 | ADR-2611240900 | accepted | ADR-2611240900: The lifecycle runs its gates where the project says tests run |  |
 | ADR-2611231400 | accepted | ADR-2611231400: A remote gate commits red or green, tries itself first, and says what it did in one object |  |
 | ADR-2611221600 | accepted | ADR-2611221600: Every hexa project gets agent orientation |  |

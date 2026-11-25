@@ -1,6 +1,7 @@
 //! Value objects shared across the workspace. Pure data, no I/O.
 
 pub mod adr_board;
+pub mod adr_features;
 // AG-UI events and the rules a producer keeps (ADR-2611161830).
 pub mod agui;
 pub mod api_optimization;

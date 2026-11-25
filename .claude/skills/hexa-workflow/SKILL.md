@@ -226,6 +226,7 @@ hexa loop stage done                    # writes the evidence into the ADR
 | The steps this work is made of | `hexa loop task` |
 | A plain-English request, routed to the verb it names | `hexa hey "who uses src/parser.rs"` — exits 1 when no verb matches; asks before anything that changes the tree, every time |
 | Which decisions are done, how far each is built (from evidence, not status), who is on it | `hexa adr board` (`--text` for a table, `--html <file>` for a page, `--strict` to fail when a status is behind its evidence) |
+| Every feature the decisions name, and where each stands (proposed, accepted, completed, retired) and in which release | `hexa adr features` (`--md` for a fact sheet, `--md --check <file>` to fail when the committed sheet is stale, `--state`, `--adr`, `--all`, `--strict`); `hexa adr features extract <ADR>` drafts an ADR's `## Features` table |
 | Several agents in one repo: claim a task and the paths it may edit, close it, merge in order | `hexa agent register --task <name> --lease <path>`, `hexa agent report --id <id> --outcome passed --commit <sha>`, `hexa dev worktree merge-order` |
 | Whether a native C/C++ dependency (DuckDB, say) is rebuilt by each cargo command | `hexa dev build-keys` (`--selection "<cargo args>"` to compare commands) |
 | A lesson you will otherwise forget | `hexa memory store lesson:<topic> "<text>"` |
