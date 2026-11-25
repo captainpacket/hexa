@@ -54,7 +54,7 @@ pub fn judge_binding(scenario: &str, anchor: Option<&str>, moves: &[Move], curre
 ## Consequences
 
 - **A project whose history already moved a binding fails `verify` until each move is recorded** with `hexa spec move`. That is the point: those moves were never recorded. This repository records its own in the change that builds this.
-- A move record, like an amendment, can still be typed into the JSON by hand. This decision makes a move visible in the record, the diff and `verify`'s count; it does not make forging a record impossible. `hexa do` and `hexa harden` already refuse a run that touches a spec record (ADR-2611081151 §3).
+- A move record, like an amendment, can still be typed into the JSON by hand. This decision makes a move visible in the record, the diff and `verify`'s count; it does not make forging a record impossible. The same holds for an acceptance, which is a hash anyone can compute: a forged acceptance of altered text, committed and then reverted, would restart the anchor (§1), and shows only in the spec's history. `hexa do` and `hexa harden` already refuse a run that touches a spec record (ADR-2611081151 §3).
 - A shallow clone sees less history, and a binding with no visible anchor holds. The seal anchor has the same limit.
 
 ## Implementation
