@@ -113,6 +113,11 @@ Create `docs/adrs/ADR-{NNN}-{kebab-slug}.md` with all sections:
   - Blast Radius table (from Phase 2d)
   - Build Verification Gates (from Phase 2c)
 - **Decision**: clear imperative language ("We will...")
+- **Features** (`## Features`, before Consequences): one table, `| Feature | What it does | Phase |`, with a row for
+  each thing the decision gives a user, named as a person would say it. `Phase` is the id of the phase of this ADR
+  that builds it, or empty for the whole ADR. A process or tooling decision keeps the heading and the table's header
+  with no rows: that says it gives no feature. `hexa adr features` reads the table, and takes each row's state from
+  the ADR's status and its `**Built:**` lines, never from the table. `hexa adr features extract ADR-{NNN}` drafts it.
 - **Consequences**: positive, negative, mitigations
 - **Implementation**: phased table with validation gate per phase
 - **References**: related ADRs, issues, documents

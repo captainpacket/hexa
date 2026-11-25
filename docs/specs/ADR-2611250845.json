@@ -1,0 +1,366 @@
+{
+  "adr": "ADR-2611250845",
+  "feature": "adr-features",
+  "description": "hexa adr features lists every feature the decisions name, with where each stands",
+  "accepted": {
+    "by": "Gary Berger",
+    "sha256": "ef65c161f2580094c1fa29eedebed46bc92453252499e226143cb79c99cefe74"
+  },
+  "sealed": {
+    "hexa-cli/tests/adr_2611250845_spec.rs": "c6adfe489d4c922659aa8aee01a22f5a7128f8835c5d0d0c6d9cb95be300b054",
+    "hexa-core/tests/adr_2611250845_spec.rs": "4e485d0392028ca2cb15dc326558f0716896285a2aa72acf00d490203c4850cc"
+  },
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "A Features table gives one row per feature, with its sentence and its phase",
+      "given": "an accepted ADR ADR-1 titled 'Impact' with phases R1 and R2, and a `## Features` section whose table has the rows `| Blast radius | Says what goes down with a device | R2 |` and `| Impact list | Lists the affected services | |`",
+      "when": "features_of(\"ADR-1\", \"Impact\", \"accepted\", content)",
+      "then": "declared is true; two features: 'Blast radius' with what 'Says what goes down with a device' and phases [\"R2\"], and 'Impact list' with what 'Lists the affected services' and phases []; each has adr 'ADR-1', adr_title 'Impact' and declared true",
+      "test": "hexa-core/tests/adr_2611250845_spec.rs::s01_a_features_table_gives_one_row_per_feature_with_its_sentence_and_phase",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "Column names match without regard to case, `What` stands for `What it does`, and a row may name several phases",
+      "given": "an ADR with phases R1, R2 and R3 whose table header is `| feature | WHAT | phase |` and one row `| Trace | Follows a cable | R1, R3 |`",
+      "when": "features_of is called",
+      "then": "one feature 'Trace' with what 'Follows a cable' and phases [\"R1\", \"R3\"]; a row written `R1 R3` reads the same",
+      "test": "hexa-core/tests/adr_2611250845_spec.rs::s02_columns_match_without_case_what_stands_for_what_it_does_and_a_row_names_several_phases",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "A table inside a code fence, or after the first table of the section, is not read",
+      "given": "an ADR whose `## Features` section holds a fenced block containing a table row `| Fenced | no | |`, then a real table with the row `| Real | yes | |`, then a second table with the row `| Second | no | |`",
+      "when": "features_of is called",
+      "then": "the only feature is 'Real'",
+      "test": "hexa-core/tests/adr_2611250845_spec.rs::s03_a_table_in_a_code_fence_or_after_the_first_table_is_not_read",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "A Features section with no rows declares that the ADR gives no feature",
+      "given": "an accepted ADR with a `## Features` section holding only the header and separator rows of the table (and another with the heading and a sentence, no table)",
+      "when": "features_of is called",
+      "then": "declared is true and features is empty, in both; no title row stands in",
+      "test": "hexa-core/tests/adr_2611250845_spec.rs::s04_a_features_section_with_no_rows_declares_no_feature",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "A feature is completed when the phase its row names is built, and accepted when it is not",
+      "given": "an accepted ADR with `**Built:** R1 on 2026-11-14.`, phases R1 and R2, and rows `| A | a | R1 |` and `| B | b | R2 |`",
+      "when": "features_of is called",
+      "then": "A is completed with built 1 of 1; B is accepted with built 0 of 1",
+      "test": "hexa-core/tests/adr_2611250845_spec.rs::s05_a_feature_is_completed_when_its_phase_is_built_and_accepted_when_it_is_not",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "A row that names no phase takes the whole ADR: completed only when every unit is built",
+      "given": "three accepted ADRs, each with the row `| W | w | |`: one with no phases and a `**Built:** F1 on 2026-11-14.` line; one with phases R1 and R2 and only R1 built; one with no phases and no Built line",
+      "when": "features_of is called on each",
+      "then": "W is completed (1 of 1) in the first, accepted (1 of 2) in the second, accepted (0 of 1) in the third",
+      "test": "hexa-core/tests/adr_2611250845_spec.rs::s06_a_row_that_names_no_phase_takes_the_whole_adr",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "Proposed, retired and unreadable ADRs give their features those states",
+      "given": "the row `| P | p | |` in a proposed ADR with nothing built, in a superseded ADR, and in an ADR whose status word is 'draft'",
+      "when": "features_of is called on each with status 'proposed', 'superseded' and 'draft'",
+      "then": "P is proposed, retired and unknown",
+      "test": "hexa-core/tests/adr_2611250845_spec.rs::s07_proposed_retired_and_unreadable_adrs_give_their_features_those_states",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "The status word alone never makes a feature completed, and one built phase of two is not completed",
+      "given": "an accepted ADR with no Built line and the row `| X | x | |`; and an accepted ADR with phases R1 and R2, R1 built, and the row `| Y | y | R1, R2 |`",
+      "when": "features_of is called on each",
+      "then": "X is accepted, not completed; Y is accepted with built 1 of 2",
+      "test": "hexa-core/tests/adr_2611250845_spec.rs::s08_the_status_word_alone_never_completes_a_feature_and_one_phase_of_two_is_not_completed",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "A completed status builds every phase, as the board reads it",
+      "given": "an ADR with status 'completed', phases R1 and R2, no Built line, and the row `| Z | z | R2 |`",
+      "when": "features_of is called with status 'completed'",
+      "then": "Z is completed with built 1 of 1",
+      "test": "hexa-core/tests/adr_2611250845_spec.rs::s09_a_completed_status_builds_every_phase_as_the_board_reads_it",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "An ADR with no Features section gives one row: its title, with declared false",
+      "given": "an accepted ADR ADR-7 titled 'ADR-7: The power read' with a Built line and no `## Features` section",
+      "when": "features_of(\"ADR-7\", \"ADR-7: The power read\", \"accepted\", content)",
+      "then": "declared is false; one feature named 'The power read' (the id prefix is dropped), state completed, declared false, phases []",
+      "test": "hexa-core/tests/adr_2611250845_spec.rs::s10_an_adr_with_no_features_section_gives_one_row_its_title_with_declared_false",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "A retired ADR with no Features section gives no row",
+      "given": "a superseded ADR with no `## Features` section",
+      "when": "features_of is called with status 'superseded'",
+      "then": "declared is false and features is empty",
+      "test": "hexa-core/tests/adr_2611250845_spec.rs::s11_a_retired_adr_with_no_features_section_gives_no_row",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§4"
+      ],
+      "kind": "example",
+      "description": "The state of a feature agrees with adr_board::analyze for the same text",
+      "given": "the ADR texts of S05 to S09",
+      "when": "features_of and adr_board::analyze are both called on each",
+      "then": "for every row that names no phase: completed exactly when analyze's state is built, retired exactly when it is retired, unknown exactly when it is unknown, proposed exactly when it is proposed, accepted otherwise (accepted or building)",
+      "test": "hexa-core/tests/adr_2611250845_spec.rs::s12_the_state_of_a_feature_agrees_with_the_boards_analysis_of_the_same_text",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "features_of reads nothing but its arguments",
+      "given": "a current directory that holds no docs/adrs and is not a git repository",
+      "when": "features_of is called on an ADR text with a Features table",
+      "then": "it returns the same value as in any other directory; calling it twice returns equal values",
+      "test": "hexa-core/tests/adr_2611250845_spec.rs::s13_features_of_reads_nothing_but_its_arguments",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "hexa adr features --json prints every row and a summary by state",
+      "given": "a project whose docs/adrs holds: a built ADR with two declared features, an accepted ADR with one, a proposed ADR with no Features section, and a superseded ADR with one declared feature",
+      "when": "`hexa adr features --json` is run in it",
+      "then": "exit 0; ok is true; features has four rows (the retired one is left out), each with feature, what, state, adr, adr_title, phases, built.done, built.total, declared and released; summary.by_state says completed 2, accepted 1, proposed 1, retired 1; summary.undeclared is 1",
+      "test": "hexa-cli/tests/adr_2611250845_spec.rs::s14_json_prints_every_row_and_a_summary_by_state",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "Rows are ordered by state, then name without regard to case, then ADR id",
+      "given": "features 'zeta' (completed), 'Alpha' (completed), 'beta' (accepted, in ADR-2 and in ADR-1), 'Gamma' (proposed)",
+      "when": "`hexa adr features --json` is run, and sort_features is called on the same rows shuffled",
+      "then": "the order is Alpha, zeta, beta (ADR-1), beta (ADR-2), Gamma, in both",
+      "test": "hexa-cli/tests/adr_2611250845_spec.rs::s15_rows_are_ordered_by_state_then_name_without_case_then_adr_id",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "--state, --all and --adr choose the rows",
+      "given": "the project of S14",
+      "when": "`--state accepted`, `--state accepted --state proposed`, `--state retired`, `--all` and `--adr <the accepted ADR's id>` are each given",
+      "then": "one row; two rows; the one retired row; five rows; the accepted ADR's one row",
+      "test": "hexa-cli/tests/adr_2611250845_spec.rs::s16_state_all_and_adr_choose_the_rows",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S17",
+      "decision": [
+        "§5"
+      ],
+      "kind": "negative",
+      "description": "A state or an ADR that does not exist is refused by name",
+      "given": "the project of S14",
+      "when": "`hexa adr features --state shipped --json` and `hexa adr features --adr ADR-0000000000 --json` are run",
+      "then": "each exits non-zero with ok false and an error carrying code ('bad-state' and 'adr-not-found'), a hint that names the valid states or `hexa adr list`, and field ('state' and 'adr')",
+      "test": "hexa-cli/tests/adr_2611250845_spec.rs::s17_a_state_or_an_adr_that_does_not_exist_is_refused_by_name",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S18",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "--md prints a Markdown fact sheet grouped by state",
+      "given": "the project of S14",
+      "when": "`hexa adr features --md` is run",
+      "then": "stdout is Markdown with a heading per state that has rows, in the order completed, accepted, proposed, each followed by a table with the columns Feature, What it does, ADR and Released; the summary counts are stated above the first table; an undeclared row is marked as a title standing in",
+      "test": "hexa-cli/tests/adr_2611250845_spec.rs::s18_md_prints_a_markdown_fact_sheet_grouped_by_state",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S19",
+      "decision": [
+        "§6"
+      ],
+      "kind": "example",
+      "description": "released is the lowest version tag that holds the commit a Built line names",
+      "given": "a git repository where commit C built a feature (its ADR says `**Built:** F1 on 2026-11-14, <C's short id>.`), tags v0.2.0 and v0.10.0 both contain C, and v0.1.0 does not",
+      "when": "`hexa adr features --json` is run",
+      "then": "the row's released is 'v0.2.0' (v0.2.0 is lower than v0.10.0 as numbers)",
+      "test": "hexa-cli/tests/adr_2611250845_spec.rs::s19_released_is_the_lowest_version_tag_that_holds_the_commit_a_built_line_names",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S20",
+      "decision": [
+        "§6"
+      ],
+      "kind": "negative",
+      "description": "released is null when the commit is unknown, untagged or not named, and for a row that is not completed",
+      "given": "a completed feature whose Built line names no commit; one whose Built line names a commit that is not in the repository; one whose commit no version tag contains; and an accepted feature",
+      "when": "`hexa adr features --json` is run",
+      "then": "released is null on all four; the three completed rows are still completed",
+      "test": "hexa-cli/tests/adr_2611250845_spec.rs::s20_released_is_null_when_the_commit_is_unknown_untagged_or_not_named_and_for_a_row_not_completed",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S21",
+      "decision": [
+        "§7"
+      ],
+      "kind": "example",
+      "description": "--md --check passes on a current fact sheet and fails on a stale one",
+      "given": "the project of S14 with FEATURES.md written by `hexa adr features --md`",
+      "when": "`hexa adr features --md --check FEATURES.md` is run; then a Built line is added to the accepted ADR and it is run again",
+      "then": "the first run exits 0; the second exits 1 with the code 'fact-sheet-stale', naming FEATURES.md and the command `hexa adr features --md > FEATURES.md`, and leaves the file as it was",
+      "test": "hexa-cli/tests/adr_2611250845_spec.rs::s21_md_check_passes_on_a_current_fact_sheet_and_fails_on_a_stale_one",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S22",
+      "decision": [
+        "§7"
+      ],
+      "kind": "negative",
+      "description": "The fact sheet carries nothing that changes when no feature does, and a missing file is not a pass",
+      "given": "the project of S14",
+      "when": "`hexa adr features --md` is run twice a minute apart and after an unrelated commit; then `--md --check` is given a path that does not exist",
+      "then": "the three outputs are byte-identical; the check exits 1 with the code 'fact-sheet-missing' and a hint naming the command that writes it",
+      "test": "hexa-cli/tests/adr_2611250845_spec.rs::s22_the_fact_sheet_changes_only_when_a_feature_does_and_a_missing_file_is_not_a_pass",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S23",
+      "decision": [
+        "§8"
+      ],
+      "kind": "example",
+      "description": "A row naming a phase the ADR does not have is unknown, with a warning",
+      "given": "an accepted ADR with phases R1 and R2 and the row `| Ghost | g | R9 |`",
+      "when": "features_of is called",
+      "then": "Ghost has state unknown and warnings ['unknown-phase']",
+      "test": "hexa-core/tests/adr_2611250845_spec.rs::s23_a_row_naming_a_phase_the_adr_does_not_have_is_unknown_with_a_warning",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S24",
+      "decision": [
+        "§8"
+      ],
+      "kind": "example",
+      "description": "A table with no Feature column makes the ADR undeclared; an empty name is skipped; duplicates are kept and flagged",
+      "given": "an ADR whose table header is `| Name | What |`; an ADR with rows `|  | nameless | |` and `| Kept | k | |`; an ADR with rows `| Dup | one | |` and `| dup | two | |`",
+      "when": "features_of is called on each",
+      "then": "the first has warnings ['no-feature-column'], declared false and its title as its one row; the second has warnings ['empty-feature'] and the one feature 'Kept'; the third has both rows, each with warnings ['duplicate-feature']",
+      "test": "hexa-core/tests/adr_2611250845_spec.rs::s24_no_feature_column_is_undeclared_an_empty_name_is_skipped_and_duplicates_are_kept_and_flagged",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S25",
+      "decision": [
+        "§8"
+      ],
+      "kind": "negative",
+      "description": "Warnings do not fail the command unless --strict is given",
+      "given": "a project with the ADR of S23",
+      "when": "`hexa adr features --json` and `hexa adr features --json --strict` are run",
+      "then": "the first exits 0 and lists 'unknown-phase' with the ADR's id in warnings; the second prints the same and exits 1",
+      "test": "hexa-cli/tests/adr_2611250845_spec.rs::s25_warnings_do_not_fail_the_command_unless_strict_is_given",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S26",
+      "decision": [
+        "§9"
+      ],
+      "kind": "example",
+      "description": "extract prints a Features section for an ADR that has none, and writes nothing without --write",
+      "given": "an accepted ADR with phases R1 and R2, no `## Features` section and a `## Consequences` section; a completion model stubbed to name two features, one for R1",
+      "when": "`hexa adr features extract <id>` is run, then again with `--write`",
+      "then": "the first prints a `## Features` section with the table of decision 1 holding the two rows and leaves the file unchanged; the second inserts that section immediately before `## Consequences`; afterwards features_of reads the two rows as declared, with states by decision 2",
+      "test": "hexa-cli/tests/adr_2611250845_spec.rs::s26_extract_prints_a_features_section_and_writes_nothing_without_write",
+      "red": "25e9d2d"
+    },
+    {
+      "id": "S27",
+      "decision": [
+        "§9"
+      ],
+      "kind": "negative",
+      "description": "extract refuses an ADR that already declares its features, and cannot call a feature built",
+      "given": "an ADR that has a `## Features` section; and an accepted ADR with nothing built, with a model stubbed to answer that its feature is 'completed'",
+      "when": "`hexa adr features extract <id> --write` is run on each",
+      "then": "the first exits non-zero with the code 'features-declared' and changes nothing; the second writes a table with only the Feature, What it does and Phase columns, and features_of reads the feature as accepted",
+      "test": "hexa-cli/tests/adr_2611250845_spec.rs::s27_extract_refuses_a_declared_adr_and_cannot_call_a_feature_built",
+      "red": "25e9d2d"
+    }
+  ]
+}

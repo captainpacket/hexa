@@ -1,5 +1,6 @@
 pub mod board;
 pub mod doctor;
+pub mod features;
 
 use std::path::{Path, PathBuf};
 
@@ -42,6 +43,37 @@ pub enum AdrAction {
         #[arg(long, value_name = "DIR")]
         product: Vec<PathBuf>,
         /// Exit 1 when any ADR's status is behind its evidence
+        #[arg(long)]
+        strict: bool,
+    },
+    /// Every feature the ADRs name, with where each stands: proposed,
+    /// accepted, completed or retired, and the release that first held it
+    /// (ADR-2611250845). An ADR names its features in a `## Features` table.
+    Features {
+        #[command(subcommand)]
+        action: Option<FeaturesAction>,
+        /// JSON (the default when stdout is not a terminal)
+        #[arg(long)]
+        json: bool,
+        /// A table, even when stdout is not a terminal
+        #[arg(long)]
+        text: bool,
+        /// A Markdown fact sheet, grouped by state
+        #[arg(long)]
+        md: bool,
+        /// Exit 1 unless FILE is what --md prints now; it writes nothing
+        #[arg(long, value_name = "FILE")]
+        check: Option<PathBuf>,
+        /// List only rows in this state: proposed, accepted, completed or retired (repeatable)
+        #[arg(long, value_name = "STATE")]
+        state: Vec<String>,
+        /// Read one ADR
+        #[arg(long, value_name = "ID")]
+        adr: Option<String>,
+        /// List retired rows too
+        #[arg(long)]
+        all: bool,
+        /// Exit 1 when a `## Features` section says what its ADR cannot support
         #[arg(long)]
         strict: bool,
     },
@@ -156,8 +188,28 @@ pub enum AdrAction {
     },
 }
 
+#[derive(Subcommand)]
+pub enum FeaturesAction {
+    /// Draft the `## Features` section of an ADR that has none, by asking the
+    /// T1 tier. It prints the section and writes nothing unless --write is given.
+    Extract {
+        /// The ADR's id
+        adr: String,
+        /// Insert the section before `## Consequences` (or at the end)
+        #[arg(long)]
+        write: bool,
+        /// JSON: the section, its rows, and whether it was written
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 pub async fn run(action: AdrAction) -> anyhow::Result<()> {
     match action {
+        AdrAction::Features { action: Some(FeaturesAction::Extract { adr, write, json }), .. } => features::extract(adr, write, json).await,
+        AdrAction::Features { action: None, json, text, md, check, state, adr, all, strict } => {
+            features::run(features::Options { json, text, md, check, state, adr, all, strict }).await
+        }
         AdrAction::List => list().await,
         AdrAction::Gates { ci, dry_run } => run_gates(ci, dry_run).await,
         AdrAction::Board { json, text, html, also, product, strict } => board::run(json, text, html, also, product, strict).await,
@@ -1374,6 +1426,12 @@ const BUILT_IN_ADR_TEMPLATE: &str = "# ADR-{YYMMDDHHMM}: {Title}
 
 1. {the first decision}
 
+## Features
+
+| Feature | What it does | Phase |
+|---|---|---|
+| {a feature this decision gives a user; no rows when it gives none} | {one sentence} | {the phase that builds it, or empty} |
+
 ## Consequences
 
 ## Implementation
@@ -1423,6 +1481,12 @@ async fn schema() -> anyhow::Result<()> {
     println!("  ## References");
     println!();
 
+    println!("{}", "── Optional sections ──".bold());
+    println!("  ## Features   one table (Feature | What it does | Phase) of what the decision gives a user;");
+    println!("                `hexa adr features` reads it. No rows: the decision gives no feature.");
+    println!("  ## Phases     `### R1. Title` headings; `hexa adr board` reads what is built from them.");
+    println!();
+
     println!("{}", "── Template ──".bold());
     // Read and display the template
     // The project's own TEMPLATE.md wins; without one, the built-in template.
@@ -1446,6 +1510,10 @@ async fn schema() -> anyhow::Result<()> {
         "filename_pattern": "ADR-{YYMMDDHHMM}-{kebab-slug}.md",
         "valid_statuses": ADR_STATUSES,
         "required_sections": ["Context", "Decision", "Consequences", "Implementation", "References"],
+        "optional_sections": {
+            "Features": "one table with the columns Feature | What it does | Phase, before Consequences: what the decision gives a user, read by `hexa adr features`. Phase is a phase id of this ADR or empty; no rows means the decision gives no feature",
+            "Phases": "`### R1. Title` headings; `hexa adr board` reads what is built from them and from `**Built:**` lines"
+        },
         "frontmatter_fields": {
             "Status": "required — one of valid_statuses",
             "Date": "required — YYYY-MM-DD",
