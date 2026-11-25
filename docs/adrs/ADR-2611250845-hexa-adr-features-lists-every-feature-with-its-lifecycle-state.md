@@ -2,7 +2,11 @@
 
 **Status:** Accepted
 > 2026-11-25 Accepted: the owner asked for it (gary, 2026-11-25, in datum: "we need a definitive fact sheet on all features, so we can manage the product lifecycle", then "we should be able to extract a feature from an ADR than lists that feature in a table relevant to proposed, accepted or completed, this should be in hexa", then "start the hexa features verb now"). Recorded by the implementing agent on his behalf. The spec is drafted, not accepted: `hexa spec accept ADR-2611250845` is his.
+> 2026-11-25 The spec was accepted by Gary Berger (`e985045`). Its 27 scenarios are 28 tests, written by hand from the scenarios, red at `25e9d2d` on tt (hexa-core 16 failed on the unimplemented panic, hexa-cli 12 failed on their assertions, none passed) and sealed at `0b3fceb`.
 **Date:** 2026-11-25
+**Built:** F1 on 2026-11-25, `e666a39` and `77e6a05`, on `feat/adr-features`: the domain rules, the port, and `hexa adr features` with `--json`, `--text`, `--md`, `--check`, `--state`, `--adr`, `--all` and `--strict`. On tt at `77e6a05`: S01 to S18 and S21 to S25 pass.
+**Built:** F2 on 2026-11-25, `e666a39`: `released`, read through `hexa-git`. On tt at `77e6a05`: S19 and S20 pass.
+**Built:** F3 on 2026-11-25, `e666a39`: `hexa adr features extract`, through the T1 tier. On tt at `77e6a05`: S26 and S27 pass. `hexa spec verify ADR-2611250845` there: 27 passed, 0 failed.
 **Drivers:** datum, 2026-11-25. Its owner asked "where is our feature list verified" and there was no one answer: the release scope is one manifest, the admin's switches another, `datum describe` a third, and the data sheet and the trailer make claims nothing ties to the code. Every feature datum has was decided in an ADR (176 of them), and `hexa adr board` already reads from each ADR's text how far it is built (ADR-2611151030). What is missing is the unit a product is managed by. An ADR is a decision; one ADR may give three features and another none (a CI rule, a naming rule).
 **Supersedes:** none. Builds on ADR-2611151030 (the board): a feature's state is the board's reading of its ADR, never a second opinion.
 
@@ -99,6 +103,25 @@ Decision 9.
 - A feature decided across several ADRs appears once per ADR. Joining them under one name is not decided.
 - Tying a marketing claim to a feature row.
 - A feature's later states (deprecated, removed in a release).
+
+## Addendum: what the build settled (2026-11-25)
+
+The decisions and the 27 scenarios left these open. Each was settled in the build, by the builder, and is the owner's to overrule.
+
+- **A proposed ADR with part built.** A row is `proposed` only while nothing that builds it is built. With some of it built the row is `accepted`, as the board calls that ADR `building` (S12 says so for a row that names no phase; a row that names phases follows the same rule).
+- **A retired or unreadable ADR decides the row first.** A row of a superseded ADR is `retired` and a row of an ADR whose status cannot be read is `unknown`, whatever its phases say.
+- **`adr_title` is the title without the ADR's id**, as the feature name of an undeclared ADR is.
+- **`summary`.** It counts every row read, listed or not, so `--state` does not change it. `by_state` names all five states, at zero too. `undeclared` counts the ADRs whose title stands in for a feature, so a retired ADR with no section is not counted. `summary.features` and `summary.adrs` are the totals.
+- **`warnings`** is a list of `{code, adr, feature, message}`; `feature` is null for a finding about the section (`no-feature-column`, `empty-feature`). `empty-feature` is listed once for each row skipped.
+- **Errors** are one object on stdout with `ok: false`, `code`, `message`, `hint`, `field` and `retryable`, as `hexa adr board` prints them. With `--md` and no `--check` the object goes to stderr, so a failed `--md > FEATURES.md` does not write an error into the sheet. A project with no `docs/adrs/` is refused with the board's code, `no_adrs`.
+- **`--check` implies `--md`.** It compares bytes. The command it names repeats `--all`, `--state` and `--adr` when they were given. A file that cannot be read for any reason is `fact-sheet-missing`.
+- **`--state` takes only the four states.** A row that is `unknown` is listed by default and by `--all`, and cannot be asked for alone. `--all` with `--state` lists everything.
+- **The fact sheet.** A `# Features` heading, one sentence of counts (`5 features in 4 ADRs: 2 completed, 1 accepted, 1 proposed, 1 retired.`, then how many are listed when that is fewer), a sentence when a title stands in, then `## Completed`, `## Accepted`, `## Proposed`, `## Retired`, `## Unknown` for the states that have rows. A title standing in is marked `*(ADR title)*`. `Released` is the version, `not released` for a completed row without one, and empty otherwise.
+- **Which `**Built` lines built a row** (decision 6). For a row that names phases: the header `**Built:**` lines that name one of them, and the `**Built` lines under those phases' headings. For a row that names none: every `**Built` line. A commit is a word of 7 to 40 lower-case hex digits that does not follow `ADR-`. A long number on such a line is therefore read as a commit the repository does not hold, which leaves `released` null and never names a wrong release. A row completed by a `completed` status with no `**Built` line has `released: null`.
+- **Git is read through `hexa-git`** (`hexa_git::tags_containing`, in `hexa-git/src/release.rs`), once per commit. Outside a repository every `released` is null and nothing fails.
+- **Extraction** (decision 9). The T1 model is `inference.tier_models.t1`; with none configured the verb refuses with `no-t1-model`. The model is asked for one Markdown table. The verb reads the first table in the reply that has a `Feature` column, keeps the name, the sentence and the phases, drops every other column and every phase the ADR does not have, and writes the three-column table itself. `extract` prints the section as Markdown, also when stdout is not a terminal, and `--json` prints it with its rows. A reply with no such table is `extract-unreadable`, a tier that does not answer is `extract-failed` (both `retryable`), and `--write` refuses a draft with no rows (`extract-empty`): a section with no rows is a statement a person makes. An ADR that has the heading already is refused, whatever is under it.
+- **The tests.** `hexa spec tests` could not run (no completion model was reachable), so the tests were written by hand from the accepted scenarios, by the route `hexa gap pr link-hand-written-tests` prints. S15 has two tests: the spec links the command-line one, and its sort half is `s15_sort_features_orders_by_state_then_name_without_case_then_adr_id` in the sealed `hexa-core` file. The tests fix three things the scenarios did not: the T1 model is stubbed with `HEXA_COMPLETION_COMMAND`; the fact sheet states its counts as `<n> <state>`; and a title standing in carries the word `title` on its row.
+- **Source was committed with `git commit`, not `hexa do gate`.** This repository declares no `test.remote`, so `do gate` would have built on the developer's Mac, which the owner forbids. Every build and test ran on `tt`, for the pushed commit.
 
 ## Gate
 
