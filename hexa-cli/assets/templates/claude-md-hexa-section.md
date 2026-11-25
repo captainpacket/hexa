@@ -22,6 +22,7 @@ natural language to a verb.
 | a lesson you will forget | `hexa memory store lesson:<topic> "<text>"` | None |
 | claim something about the repo | `hexa verify "<claim>"` | None; it reads only |
 | guess which decisions are done, or what another agent is on | `hexa adr board` (progress from evidence) and `hexa agent list` (who holds which paths) | None |
+| keep a feature list by hand, or guess what is shipped | `hexa adr features`: every feature the ADRs name, with its state and release (`--md` for a fact sheet) | None; it writes nothing |
 | edit paths another agent may be editing | `hexa agent register --task <name> --lease <path>`, and `hexa agent report` when done | Before the first edit |
 | wonder why a native (C/C++) dependency rebuilds per command | `hexa dev build-keys` | None |
 

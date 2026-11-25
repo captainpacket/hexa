@@ -1426,6 +1426,12 @@ const BUILT_IN_ADR_TEMPLATE: &str = "# ADR-{YYMMDDHHMM}: {Title}
 
 1. {the first decision}
 
+## Features
+
+| Feature | What it does | Phase |
+|---|---|---|
+| {a feature this decision gives a user; no rows when it gives none} | {one sentence} | {the phase that builds it, or empty} |
+
 ## Consequences
 
 ## Implementation
@@ -1475,6 +1481,12 @@ async fn schema() -> anyhow::Result<()> {
     println!("  ## References");
     println!();
 
+    println!("{}", "── Optional sections ──".bold());
+    println!("  ## Features   one table (Feature | What it does | Phase) of what the decision gives a user;");
+    println!("                `hexa adr features` reads it. No rows: the decision gives no feature.");
+    println!("  ## Phases     `### R1. Title` headings; `hexa adr board` reads what is built from them.");
+    println!();
+
     println!("{}", "── Template ──".bold());
     // Read and display the template
     // The project's own TEMPLATE.md wins; without one, the built-in template.
@@ -1498,6 +1510,10 @@ async fn schema() -> anyhow::Result<()> {
         "filename_pattern": "ADR-{YYMMDDHHMM}-{kebab-slug}.md",
         "valid_statuses": ADR_STATUSES,
         "required_sections": ["Context", "Decision", "Consequences", "Implementation", "References"],
+        "optional_sections": {
+            "Features": "one table with the columns Feature | What it does | Phase, before Consequences: what the decision gives a user, read by `hexa adr features`. Phase is a phase id of this ADR or empty; no rows means the decision gives no feature",
+            "Phases": "`### R1. Title` headings; `hexa adr board` reads what is built from them and from `**Built:**` lines"
+        },
         "frontmatter_fields": {
             "Status": "required — one of valid_statuses",
             "Date": "required — YYYY-MM-DD",
