@@ -136,7 +136,7 @@ pub enum SealVerdict {
     Rewritten,
     /// An amendment's `from` does not continue the chain; the index of the first such.
     BrokenChain(usize),
-    /// No blob at the red commit to anchor to.
+    /// No commit in the branch's history holds the file, so there is no blob to anchor to (ADR-2611081151 §1, §2).
     Unanchored,
 }
 

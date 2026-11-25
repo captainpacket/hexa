@@ -1016,7 +1016,7 @@ fn report_seals(root: &Path, id: &str, raw: &Value, also: &[String], ci: bool) -
                 Some(_) => (format!("seal broken: {f} changed since sealing. A sealed test changes through the spec"), true),
             },
             SealVerdict::Unanchored => (
-                format!("seal unanchored: no commit in history holds {f}; re-anchor it with `hexa spec tests --red-at <commit>`"),
+                format!("seal unanchored: no commit in history holds {f}; commit it, so history can anchor the seal"),
                 ci,
             ),
         };
