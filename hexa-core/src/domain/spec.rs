@@ -124,6 +124,41 @@ pub struct Amendment {
     pub base_commit: String,
 }
 
+/// One recorded change of the test a scenario is bound to (ADR-2611251652 §2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Move {
+    pub scenario: String,
+    pub from: String,
+    pub to: String,
+    pub by: String,
+    pub reason: String,
+    pub at: String,
+    pub base_commit: String,
+}
+
+/// Whether one scenario's test binding still holds (ADR-2611251652 §2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BindingVerdict {
+    Holds,
+    /// The spec's ref is not the one the anchor and the moves reach.
+    Moved { expected: String },
+    /// A move's `from` does not continue the chain; the index of the first such.
+    BrokenChain(usize),
+}
+
+/// The anchor (ADR-2611251652 §1). `history` is the spec file's revisions,
+/// oldest first, each with whether its acceptance holds. `current` is the
+/// scenario now.
+pub fn binding_anchor(_current: &Scenario, _history: &[(bool, Spec)]) -> Option<String> {
+    unimplemented!("ADR-2611251652 §1")
+}
+
+/// Judge one binding (ADR-2611251652 §2). `moves` are all of the spec's,
+/// oldest first: only those for `scenario` apply.
+pub fn judge_binding(_scenario: &str, _anchor: Option<&str>, _moves: &[Move], _current: Option<&str>) -> BindingVerdict {
+    unimplemented!("ADR-2611251652 §2")
+}
+
 /// Whether one sealed file still holds (ADR-2611081151 §1, §2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SealVerdict {
