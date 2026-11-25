@@ -228,7 +228,7 @@ fn state_of(analysis: &Analysis, done: usize, total: usize) -> FeatureState {
 }
 
 /// The title without the id an ADR's heading starts with: `The power read`
-/// from `ADR-7: The power read`.
+/// from `<id>: The power read`.
 fn without_id<'a>(id: &str, title: &'a str) -> &'a str {
     let t = title.trim();
     match t.get(..id.len()) {
