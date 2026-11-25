@@ -11,13 +11,13 @@ use serde::Serialize;
 use super::adr_board::{analyze, phase_heading, unfenced_lines, Analysis, State, Units};
 
 /// A row names a phase the ADR does not have. The row's state is `unknown`.
-pub const WARN_UNKNOWN_PHASE: &str = "unknown-phase";
+const WARN_UNKNOWN_PHASE: &str = "unknown-phase";
 /// The section has a table with no `Feature` column. The ADR is undeclared.
-pub const WARN_NO_FEATURE_COLUMN: &str = "no-feature-column";
+const WARN_NO_FEATURE_COLUMN: &str = "no-feature-column";
 /// A row whose `Feature` cell is empty. The row is skipped.
-pub const WARN_EMPTY_FEATURE: &str = "empty-feature";
+const WARN_EMPTY_FEATURE: &str = "empty-feature";
 /// Two rows of one ADR with the same name, ignoring case. Both are kept.
-pub const WARN_DUPLICATE_FEATURE: &str = "duplicate-feature";
+const WARN_DUPLICATE_FEATURE: &str = "duplicate-feature";
 
 /// Where a feature stands (decision 2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
