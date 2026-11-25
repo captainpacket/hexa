@@ -8,6 +8,10 @@
     "§3",
     "§4"
   ],
+  "accepted": {
+    "by": "craigjohnson",
+    "sha256": "59e642ad27dc64a98ad0581f4bc276dfdf939ae6111ae848057d17a4cb99d27c"
+  },
   "specs": [
     {
       "id": "S01",
