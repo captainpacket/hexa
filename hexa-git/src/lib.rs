@@ -7,9 +7,17 @@
 //! timeline join) stay in hexa-nexus and consume this crate.
 
 pub mod history;
+pub mod release;
 pub mod worktree;
 
 use std::path::{Path, PathBuf};
+
+/// Every tag whose history contains `commit`, or `None` when `repo` is not a
+/// repository or holds no such commit (ADR-2611250845, decision 6). A caller
+/// asks here; which adapter answers is this crate's wiring.
+pub fn tags_containing(repo: &Path, commit: &str) -> Option<Vec<String>> {
+    release::tags_containing(repo, commit)
+}
 
 /// Validates that `root_path` is a real git repository and returns its canonical
 /// working directory (or the repo path for a bare repo). Returns an error string

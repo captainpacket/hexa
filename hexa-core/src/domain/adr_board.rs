@@ -120,7 +120,8 @@ pub fn analyze(status: &str, content: &str) -> Analysis {
 
 /// The lines outside a fenced code block. A `###` or `**Built` inside a fence
 /// is an example, not structure.
-fn unfenced_lines(content: &str) -> Vec<&str> {
+/// Shared with `adr_features`, which reads the same text by the same rule.
+pub(super) fn unfenced_lines(content: &str) -> Vec<&str> {
     let mut fenced = false;
     let mut out = Vec::new();
     for line in content.lines() {
@@ -167,7 +168,8 @@ fn is_phase_id(s: &str) -> bool {
 }
 
 /// `### R1. Title` -> ("R1", "Title"). Anything else is not a phase heading.
-fn phase_heading(line: &str) -> Option<(String, String)> {
+/// Shared with `adr_features`, so a phase is found one way.
+pub(super) fn phase_heading(line: &str) -> Option<(String, String)> {
     let rest = line.strip_prefix("### ")?;
     let (id, title) = rest.split_once('.')?;
     is_phase_id(id).then(|| (id.to_string(), title.trim().to_string()))
