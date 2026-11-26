@@ -57,7 +57,7 @@ mod part_1 {
 
 
 # Keeps bookmarks.
-# @hexa:api bookmarks
+# @hexa:api service=bookmarks
 class Bookmarks(Protocol):
     # List all bookmarks.
     # @hexa:api GET /bookmarks
@@ -68,7 +68,7 @@ class Bookmarks(Protocol):
 "##;
         let port = only_port(source);
         assert_eq!(port.name, "Bookmarks");
-        assert_eq!(port.tag.as_deref().map(str::trim), Some("bookmarks"));
+        assert_eq!(port.tag.as_deref().map(str::trim), Some("service=bookmarks"));
         assert_eq!(port.methods.len(), 1);
         assert_eq!(
             port.methods[0].tag.as_deref().map(str::trim),
@@ -95,7 +95,7 @@ class Bookmarks(Protocol):
 from typing import final
 
 
-# @hexa:api bookmarks
+# @hexa:api service=bookmarks
 @final
 class Bookmarks(ABC):
     # Fetch every bookmark.
@@ -107,7 +107,7 @@ class Bookmarks(ABC):
 "##;
         let port = only_port(source);
         assert_eq!(port.name, "Bookmarks");
-        assert_eq!(port.tag.as_deref().map(str::trim), Some("bookmarks"));
+        assert_eq!(port.tag.as_deref().map(str::trim), Some("service=bookmarks"));
 
         let b = build_py(source);
         assert!(b.errors.is_empty(), "{:?}", b.errors);
@@ -124,7 +124,7 @@ class Bookmarks(ABC):
         let source = r##"from typing import Protocol
 
 
-# @hexa:api bookmarks
+# @hexa:api service=bookmarks
 class Bookmarks(Protocol):
     # @hexa:api GET /first
     # @hexa:status 404 Not found
@@ -166,7 +166,7 @@ class Bookmarks(Protocol):
         let source = r##"from typing import Protocol
 
 
-# @hexa:api bookmarks
+# @hexa:api service=bookmarks
 class Bookmarks(Protocol):
     # @hexa:api GET /tagged
     def tagged(self) -> str:
@@ -302,7 +302,7 @@ export interface Bookmarks {
         let overload = r##"from typing import Protocol, overload
 
 
-# @hexa:api bookmarks
+# @hexa:api service=bookmarks
 class Bookmarks(Protocol):
     # @hexa:api GET /healthy
     def healthy(self) -> str:
@@ -316,7 +316,7 @@ class Bookmarks(Protocol):
         let property = r##"from typing import Protocol
 
 
-# @hexa:api bookmarks
+# @hexa:api service=bookmarks
 class Bookmarks(Protocol):
     # @hexa:api GET /healthy
     def healthy(self) -> str:
@@ -361,7 +361,7 @@ class Bookmarks(Protocol):
             // One method is always tagged, at a varying position.
             let forced = next() % count;
             let mut source = String::from(
-            "from abc import abstractmethod\nfrom typing import Protocol, overload\n\n\n# @hexa:api bookmarks\nclass Bookmarks(Protocol):\n",
+            "from abc import abstractmethod\nfrom typing import Protocol, overload\n\n\n# @hexa:api service=bookmarks\nclass Bookmarks(Protocol):\n",
         );
             let mut expected = BTreeSet::new();
             for i in 0..count {
@@ -425,7 +425,7 @@ class Bookmarks(Protocol):
         let source = r##"from typing import Protocol
 
 
-# @hexa:api items
+# @hexa:api service=items
 class Items(Protocol):
     # @hexa:api GET /items/{id}
     def fetch(this, id: str) -> str:
@@ -484,7 +484,7 @@ class Bookmark:
     title: str
 
 
-# @hexa:api bookmarks
+# @hexa:api service=bookmarks
 class Bookmarks(Protocol):
     # @hexa:api POST /a/{id}
     def plain(self, id: str, bookmark: Bookmark) -> Bookmark:
@@ -525,7 +525,7 @@ class Bookmarks(Protocol):
         let source = r##"from typing import Protocol
 
 
-# @hexa:api items
+# @hexa:api service=items
 class Items(Protocol):
     # @hexa:api DELETE /items/{id}
     def remove(self, id: str) -> None:
@@ -634,7 +634,7 @@ mod part_2 {
     /// A one-method tagged port whose method is written on one line.
     fn one_line_port(decorator: Option<&str>, def_line: &str) -> String {
         let mut s = String::from(
-        "from typing import Protocol\n\n\n# @hexa:api bookmarks\nclass Bookmarks(Protocol):\n    # @hexa:api GET /find\n",
+        "from typing import Protocol\n\n\n# @hexa:api service=bookmarks\nclass Bookmarks(Protocol):\n    # @hexa:api GET /find\n",
     );
         if let Some(d) = decorator {
             s.push_str("    ");
@@ -670,7 +670,7 @@ mod part_2 {
             q("list[str]"),
             q("str | None")
         ));
-            s.push_str("# @hexa:api bookmarks\nclass Bookmarks(Protocol):\n");
+            s.push_str("# @hexa:api service=bookmarks\nclass Bookmarks(Protocol):\n");
             s.push_str(&format!(
                 "    # @hexa:api POST /bookmarks\n    def save(self, bookmark: {}) -> {}: ...\n\n",
                 q("Bookmark"),
@@ -856,7 +856,7 @@ mod part_2 {
             }
             s.push_str("from dataclasses import dataclass\nfrom typing import Any, Awaitable, Coroutine, Protocol\n\n\n");
             s.push_str("@dataclass\nclass Item:\n    title: str\n    count: int\n\n\n");
-            s.push_str("# @hexa:api items\nclass Items(Protocol):\n");
+            s.push_str("# @hexa:api service=items\nclass Items(Protocol):\n");
             s.push_str(&format!(
                 "    # @hexa:api {}\n    {}def handle({}) -> {}: ...\n",
                 sig.tag,
@@ -968,7 +968,7 @@ mod part_2 {
 
 
 # Saved links.
-# @hexa:api bookmarks
+# @hexa:api service=bookmarks
 # @hexa:status 401 caller is not signed in
 class Bookmarks(Protocol):
     # Fetch one link.
@@ -1047,7 +1047,7 @@ class Conflict(Exception):
 from domain.errors import Conflict, NotFound
 
 
-# @hexa:api bookmarks
+# @hexa:api service=bookmarks
 class Bookmarks(Protocol):
     # Fetch one link.
     # @hexa:api GET /bookmarks/{ident}
@@ -1103,7 +1103,7 @@ class Bookmarks(Protocol):
             let method_codes: Vec<Vec<u16>> =
                 (0..method_count).map(|_| subset(&mut state)).collect();
 
-            let mut source = String::from("from typing import Protocol\n\n\n# @hexa:api things\n");
+            let mut source = String::from("from typing import Protocol\n\n\n# @hexa:api service=things\n");
             for code in &class_codes {
                 source.push_str(&format!("# @hexa:status {code} class wide\n"));
             }
@@ -1176,7 +1176,7 @@ class Modelled(BaseModel):
     visit_Count: int
 
 
-# @hexa:api bookmarks
+# @hexa:api service=bookmarks
 class Bookmarks(Protocol):
     # @hexa:api GET /saved
     def saved(self) -> Saved: ...
@@ -2126,6 +2126,7 @@ mod part_4 {
         if let Some(info) = doc.get_mut("info").and_then(Value::as_object_mut) {
             info.remove("title");
             info.remove("version");
+            info.remove("x-generated-by");
         }
         doc
     }

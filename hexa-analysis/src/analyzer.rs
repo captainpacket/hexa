@@ -489,6 +489,19 @@ pub fn source_files_sync(root: &Path) -> Vec<String> {
     files
 }
 
+/// The files the API contract is read from, by `hexa api` and by the grade's
+/// API findings alike. Its Python is exactly the Python the grade reads
+/// (ADR-2611261303 §5); the other languages are listed as they always were.
+pub fn api_files_sync(root: &Path) -> std::io::Result<Vec<String>> {
+    let mut files = source_files_sync(root);
+    files.retain(|f| !is_python_file(f));
+    // A tree that cannot be walked is an error: read as empty, it said there
+    // were no tagged ports.
+    files.extend(walk_graded_files(root)?.into_iter().filter(|f| is_python_file(f)));
+    files.sort();
+    Ok(files)
+}
+
 /// Exports and identifier counts for every graded file, synchronously.
 /// Imports are left empty; the display detectors do not read them.
 pub fn load_file_data_sync(root: &Path, adapter: &dyn AstPort) -> Vec<FileData> {
@@ -539,7 +552,7 @@ pub fn python_is_graded(root: &Path) -> bool {
 
 /// How many Python files the grade would read and does not, because the
 /// project does not say it is Python.
-fn ungraded_python_count(root: &Path) -> std::io::Result<usize> {
+pub fn ungraded_python_count(root: &Path) -> std::io::Result<usize> {
     let files = walk_source_files(root)?;
     if declares_python(root, &files) {
         return Ok(0);
@@ -882,7 +895,7 @@ impl ArchAnalysisPort for ArchAnalyzer {
         // The API contract (ADR-2610092245 §6): a tag that cannot be read is
         // a rule error, and a tagged port no primary adapter names is a port
         // nothing uses.
-        let api = api_contract::findings(root_path, &source_files_sync(root_path), self.ast.as_ref())?;
+        let api = api_contract::findings(root_path, &api_files_sync(root_path)?, self.ast.as_ref())?;
         let health_score = ArchAnalysisResult::compute_health_score(
             violations.len(),
             circular_deps.len(),

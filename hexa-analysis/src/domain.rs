@@ -486,6 +486,9 @@ pub struct FieldDecl {
     /// Absent from the wire when empty: `omitempty`, `?:`.
     pub optional: bool,
     pub line: usize,
+    /// Why the contract cannot say what this field is, though its type reads:
+    /// an error at `line` wherever the field's class is used.
+    pub fault: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -509,6 +512,15 @@ pub enum TypeBody {
     /// Another name for a type: `pub use … as X`, `type X = Y`.
     Alias(TypeRef),
     Enum(Vec<VariantDecl>),
+    /// A schema class whose schema cannot be trusted, and why: an error at
+    /// its declaration wherever it is used (ADR-2611261303 §4).
+    Refused(String),
+    /// A name that declares no schema, and what it is: an error where it is
+    /// used.
+    Foreign(String),
+    /// A class with these bases that says it is no kind of schema class: a
+    /// refused one if a base is a schema class, and no schema otherwise.
+    Derived(Vec<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -526,6 +538,8 @@ pub struct ApiFacts {
     pub ports: Vec<ApiPortDecl>,
     pub types: Vec<TypeDecl>,
     pub stray_tags: Vec<usize>,
+    /// What the parser could not read of a tagged port: (line, why).
+    pub faults: Vec<(usize, String)>,
 }
 
 /// One thing wrong with the contract, where it is written.
