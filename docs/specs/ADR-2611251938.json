@@ -6,6 +6,10 @@
     "§1",
     "§2"
   ],
+  "accepted": {
+    "by": "craigjohnson",
+    "sha256": "885406a5e590b0597836139270bf88b001ff1a87ab20c2c2f0478a533c13b246"
+  },
   "specs": [
     {
       "id": "S01",
