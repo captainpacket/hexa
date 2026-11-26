@@ -352,5 +352,37 @@
       "reason": "S07, S09 and S11 moved to hexa-cli/tests/adr_2611221646_spec_3.rs, re-proved against the JSON fixtures hexa bench reads (hexa spec tests --only --red-at f1b4ae3 --because, red at 796f3c4): their tests here invented a YAML fixture format. Only those three tests leave this file; the scenarios and every other test are unchanged. The re-prove resealed the file without recording this amendment (gap:reaccept-reseal-amend-catch22).",
       "to": "d3d7fc624aa1b29aa7c06bb1005286703504386520d4dc9e143b7c3018f7af26"
     }
+  ],
+  "moves": [
+    {
+      "at": "2026-11-26T02:14:33.300084729+00:00",
+      "base_commit": "9f7e6082648061c92ac123b10feafcc46b18fdf4",
+      "by": "Claude Code agent (baseline from history, for review)",
+      "from": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s07_missing_bun_stops_bench",
+      "reason": "recorded from history (baseline for ADR-2611251652): this binding moved before moves were recorded",
+      "scenario": "S07",
+      "sha256": "f26a1375222cd4d7049f0b6d901762eb910f96659eb59f8737d2aa7bf242f6fc",
+      "to": "hexa-cli/tests/adr_2611221646_spec_3.rs::s07_missing_bun_refuses_before_any_fixture"
+    },
+    {
+      "at": "2026-11-26T02:14:33.550357382+00:00",
+      "base_commit": "9f7e6082648061c92ac123b10feafcc46b18fdf4",
+      "by": "Claude Code agent (baseline from history, for review)",
+      "from": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s09_one_missing_program_refuses_whole_run",
+      "reason": "recorded from history (baseline for ADR-2611251652): this binding moved before moves were recorded",
+      "scenario": "S09",
+      "sha256": "f26a1375222cd4d7049f0b6d901762eb910f96659eb59f8737d2aa7bf242f6fc",
+      "to": "hexa-cli/tests/adr_2611221646_spec_3.rs::s09_one_missing_program_refuses_whole_run"
+    },
+    {
+      "at": "2026-11-26T02:14:33.806324101+00:00",
+      "base_commit": "9f7e6082648061c92ac123b10feafcc46b18fdf4",
+      "by": "Claude Code agent (baseline from history, for review)",
+      "from": "hexa-cli/tests/adr_2611221646_spec_2.rs::part_1::s11_bench_runs_nothing_unless_all_programs_resolve",
+      "reason": "recorded from history (baseline for ADR-2611251652): this binding moved before moves were recorded",
+      "scenario": "S11",
+      "sha256": "f26a1375222cd4d7049f0b6d901762eb910f96659eb59f8737d2aa7bf242f6fc",
+      "to": "hexa-cli/tests/adr_2611221646_spec_3.rs::s11_runs_nothing_unless_every_program_resolves"
+    }
   ]
 }

@@ -110,6 +110,12 @@ The commit holding them is recorded as `red` and the files are sealed. No
 change to a sealed test is accepted afterwards; a requirement changes through
 the ADR, then the spec, then a new acceptance.
 
+A scenario's test is anchored in history, as its seal is: `spec verify` fails
+when it points somewhere else with no record. `spec tests --only` and
+`--replace` record their own moves. To rename or relocate a test yourself,
+commit the new file, then run `hexa spec move ADR-<id> --scenario <S>=<file>::<name>
+--reason "<why>"`, which shows the diff, then again with `--confirm <sha256>`.
+
 When the scenarios are unchanged and only a sealed test's setup must change
 (a fixture, never an assertion), record it with `hexa spec amend ADR-<id> --file
 <test> --reason "<why>"`, which shows the diff, then again with `--confirm

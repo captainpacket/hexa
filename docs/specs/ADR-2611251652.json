@@ -13,7 +13,7 @@
     "sha256": "59e642ad27dc64a98ad0581f4bc276dfdf939ae6111ae848057d17a4cb99d27c"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611251652_spec.rs": "f714e3278eed155afe0438826040c4d32f79efbdb0e0d408725d71b332413186"
+    "hexa-cli/tests/adr_2611251652_spec.rs": "48ab15ffa2e67d50b505fbc00ccf1fb419357d0dbb00b2d1ad663ffd5d953f44"
   },
   "red": "a68a476",
   "specs": [
@@ -340,6 +340,17 @@
       "when": "`hexa spec move` is run.",
       "then": "The spec changes only if the value equals the current hash. In that case, the only change in behaviour or records is one appended move for the named scenario, which also takes the requested ref if it did not already hold it. No run changes a test file, a seal or the acceptance.",
       "test": "hexa-cli/tests/adr_2611251652_spec.rs::part_3::s27_only_the_current_hash_writes_and_only_one_record"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-26T00:14:13.317662673+00:00",
+      "base_commit": "a68a476eb58f8ee22df130b920d37d2db8f1cc61",
+      "by": "Claude Code agent (for review)",
+      "file": "hexa-cli/tests/adr_2611251652_spec.rs",
+      "from": "f714e3278eed155afe0438826040c4d32f79efbdb0e0d408725d71b332413186",
+      "reason": "Fixture defects only, no assertion changed: the spec_red helper called `hexa spec red` without its required commit; S19 did not seal the newly bound file, as spec red asks; S21 read the committed spec after --replace without committing it",
+      "to": "48ab15ffa2e67d50b505fbc00ccf1fb419357d0dbb00b2d1ad663ffd5d953f44"
     }
   ]
 }
