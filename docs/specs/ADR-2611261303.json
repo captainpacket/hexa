@@ -14,7 +14,7 @@
     "sha256": "cec80ba9e66230c0a95ba08e6784d7c594606799ba0f7d86a971314d0cac07d3"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611261303_spec.rs": "55a2e6907ef798a65b681a99e06e4342fce985bd60489cc2e041e06e87f0204f"
+    "hexa-cli/tests/adr_2611261303_spec.rs": "b6ea047c40dccf574b7554e99a09bb32ab4a29603e5244c9f4cbb3cb476dd9cf"
   },
   "red": "e4a792c",
   "specs": [
@@ -449,6 +449,17 @@
       "when": "`hexa api` and the grade are run",
       "then": "API operations and tag diagnostics come only from files the grade reads. Whenever no operation is found and some Python files were left ungraded, the output gives their count and how to have them graded.",
       "test": "hexa-cli/tests/adr_2611261303_spec.rs::part_4::s36_api_commands_read_exactly_the_files_the_grade_reads"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-26T14:56:25.279354858+00:00",
+      "base_commit": "e4a792c2b5256f52f8bb7482c5e8cf21d3195205",
+      "by": "craigjohnson",
+      "file": "hexa-cli/tests/adr_2611261303_spec.rs",
+      "from": "55a2e6907ef798a65b681a99e06e4342fce985bd60489cc2e041e06e87f0204f",
+      "reason": "Fixture only: class tags written as bare names are invalid under ADR-2610092245 section 1 and become service=<name>; the shared-document comparison ignores info.x-generated-by (section 7)",
+      "to": "b6ea047c40dccf574b7554e99a09bb32ab4a29603e5244c9f4cbb3cb476dd9cf"
     }
   ]
 }
