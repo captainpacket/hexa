@@ -1570,7 +1570,10 @@ fn new_overlaps(project_dir: &Path, reported: &mut Vec<String>) -> Vec<String> {
 /// Text the host generated to tell the session something happened, rather
 /// than a person asking for work.
 fn is_host_notification(text: &str) -> bool {
-    const MARKERS: [&str; 4] = ["[SYSTEM NOTIFICATION", "<task-notification>", "<system-reminder>", "<local-command-caveat>"];
+    // A message from another Claude session arrives wrapped the same way: it
+    // is a peer's note, not a person asking this session for work.
+    const MARKERS: [&str; 5] =
+        ["[SYSTEM NOTIFICATION", "<task-notification>", "<system-reminder>", "<local-command-caveat>", "<cross-session-message"];
     let head: String = text.chars().take(400).collect();
     MARKERS.iter().any(|m| head.contains(m))
 }
