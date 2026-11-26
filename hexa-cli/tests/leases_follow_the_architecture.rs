@@ -420,6 +420,25 @@ fn python_absolute_and_relative_imports_count_as_consumers() {
     );
 }
 
+#[test]
+fn go_package_imports_count_as_consumers() {
+    let (_t, home, repo) = repo_with(&[
+        ("go.mod", "module example.com/billing\n\ngo 1.22\n"),
+        ("domain/invoice.go", "package domain\n\ntype Invoice struct{ Total int }\n"),
+        ("ports/billing.go", "package ports\n\nimport \"example.com/billing/domain\"\n\ntype Billing interface{ Charge(domain.Invoice) }\n"),
+        ("ports/billing_test.go", "package ports\n"),
+        ("usecases/charge.go", "package usecases\n\nimport (\n\t\"fmt\"\n\tp \"example.com/billing/ports\"\n)\n\nfunc Charge(b p.Billing) { fmt.Println(b) }\n"),
+        ("adapters/secondary/pg/store.go", "package pg\n\nimport \"example.com/billing/ports\"\n\ntype Pg struct{ ports.Billing }\n"),
+    ]);
+    // a package import freezes the package's non-test files; std and foreign imports are not repo files
+    let uc = ok(&register(&home, &repo, "charge", &["usecases/charge.go"], &[]));
+    assert_eq!(strs(&uc["frozen"]), vec!["ports/billing.go"], "{uc}");
+    let pg = ok(&register(&home, &repo, "pg", &["adapters/secondary/pg"], &[]));
+    assert_eq!(strs(&pg["frozen"]), vec!["ports/billing.go"], "{pg}");
+    let v = refused(&register(&home, &repo, "port", &["ports/billing.go"], &[]), "lease_contract_in_use");
+    assert!(v["message"].as_str().unwrap().contains("usecases/charge.go"), "{v}");
+}
+
 // ── 3. merge order ───────────────────────────────────────────────────────────
 
 #[test]

@@ -12,7 +12,7 @@
 //!
 //! Who imports what is read by a direct scan of the current files — Rust
 //! `crate::` paths (including grouped `use crate::{…}`), TS/JS relative
-//! specifiers, and Python `import`/`from … import` statements (absolute, from
+//! specifiers, Go package imports inside the module (a package is its non-test files), and Python `import`/`from … import` statements (absolute, from
 //! the repo root or any directory above the file; and relative) — not from `graph-out/graph.json`. That file carries no
 //! freshness signal, so a contract check read from it could pass on a graph
 //! built before the import existed. A scan of the files on disk cannot be
@@ -158,7 +158,7 @@ pub fn merge_rank(l: HexLayer) -> u8 {
     }
 }
 
-const SOURCE_EXTS: &[&str] = &["rs", "py", "ts", "tsx", "mts", "js", "jsx", "mjs", "cjs"];
+const SOURCE_EXTS: &[&str] = &["rs", "py", "go", "ts", "tsx", "mts", "js", "jsx", "mjs", "cjs"];
 const TS_EXTS: &[&str] = &["ts", "tsx", "mts", "js", "jsx", "mjs", "cjs"];
 
 impl Arch {
@@ -264,6 +264,12 @@ impl Arch {
             for path in rust_crate_paths(&strip_rust_comments(&text)) {
                 if let Some(t) = self.resolve_rust(&src, &path) {
                     out.push(t);
+                }
+            }
+        } else if ext == "go" {
+            if let Some((module, root)) = self.go_module(file) {
+                for path in go_import_paths(&text) {
+                    out.extend(self.resolve_go(&module, &root, &path));
                 }
             }
         } else if ext == "py" {
@@ -402,6 +408,49 @@ impl Arch {
             }
         }
         out
+    }
+
+    /// The module path and directory of the nearest `go.mod` above `file`.
+    fn go_module(&self, file: &str) -> Option<(String, String)> {
+        let mut dir = file.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default();
+        loop {
+            let manifest = if dir.is_empty() { "go.mod".to_string() } else { format!("{dir}/go.mod") };
+            if self.exists(&manifest) {
+                let text = std::fs::read_to_string(self.root.join(&manifest)).ok()?;
+                let module = text.lines().find_map(|l| l.trim().strip_prefix("module"))?.trim().trim_matches('"').to_string();
+                return Some((module, dir));
+            }
+            if dir.is_empty() {
+                return None;
+            }
+            dir = dir.rsplit_once('/').map(|(p, _)| p.to_string()).unwrap_or_default();
+        }
+    }
+
+    /// A Go import is a package, a directory: its non-test `.go` files, when the
+    /// path is inside `module`.
+    fn resolve_go(&self, module: &str, root: &str, path: &str) -> Vec<String> {
+        let rest = if path == module {
+            ""
+        } else if let Some(r) = path.strip_prefix(&format!("{module}/")) {
+            r
+        } else {
+            return Vec::new();
+        };
+        let pkg = match (root.is_empty(), rest.is_empty()) {
+            (true, _) => rest.to_string(),
+            (false, true) => root.to_string(),
+            (false, false) => format!("{root}/{rest}"),
+        };
+        self.files
+            .iter()
+            .filter(|f| {
+                f.ends_with(".go")
+                    && !f.ends_with("_test.go")
+                    && f.rsplit_once('/').map(|(d, _)| d).unwrap_or("") == pkg
+            })
+            .cloned()
+            .collect()
     }
 
     fn resolve_ts(&self, dir: &str, spec: &str) -> Option<String> {
@@ -630,6 +679,24 @@ fn parse_tree(s: &str, mut prefix: Vec<String>, out: &mut Vec<Vec<String>>) -> u
         }
         return i;
     }
+}
+
+/// The quoted paths of a Go file's `import` declarations, single or grouped.
+fn go_import_paths(text: &str) -> Vec<String> {
+    use std::sync::OnceLock;
+    static DECL: OnceLock<regex::Regex> = OnceLock::new();
+    static QUOTED: OnceLock<regex::Regex> = OnceLock::new();
+    let decl = DECL.get_or_init(|| {
+        regex::Regex::new(r#"(?m)^[ \t]*import[ \t]*(\([^)]*\)|[^\n]*)"#).unwrap()
+    });
+    let quoted = QUOTED.get_or_init(|| regex::Regex::new(r#""([^"\n]+)""#).unwrap());
+    let mut out = Vec::new();
+    for d in decl.captures_iter(text) {
+        for q in quoted.captures_iter(&d[1]) {
+            out.push(q[1].to_string());
+        }
+    }
+    out
 }
 
 /// One Python import statement: `import a.b` has no names; `from .a import b, c`
