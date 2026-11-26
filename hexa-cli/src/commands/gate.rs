@@ -246,8 +246,8 @@ fn starts_a_type_alias(line: &str) -> bool {
 
 /// Braces opened minus braces closed on one line.
 fn brace_delta(line: &str) -> i32 {
-    line.chars().filter(|c| *c == '{').count() as i32
-        - line.chars().filter(|c| *c == '}').count() as i32
+    let count = |b: char| i32::try_from(line.chars().filter(|c| *c == b).count()).unwrap_or(i32::MAX);
+    count('{') - count('}')
 }
 
 /// Restores a deleted file when it goes out of scope, however it goes out of
