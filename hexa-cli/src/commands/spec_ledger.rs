@@ -881,6 +881,24 @@ fn record_generated(spec: &mut Spec, refs: &BTreeMap<String, String>, red: &str,
 }
 
 /// `hexa spec seal <ADR>` — hash every test file the scenarios name (§6).
+/// `hexa spec seal`: seal, then name any sealed file no commit holds. Such a
+/// seal is made (the hash is recorded) but history cannot anchor it, so `spec
+/// verify --ci` fails it as unanchored until the file is committed.
+pub fn seal_verb(adr: &str) -> anyhow::Result<()> {
+    seal(adr)?;
+    let root = std::env::current_dir()?;
+    let a = find(&root, adr)?;
+    if let Some((_, spec)) = load_text(&root, &a.id)? {
+        for f in spec.sealed.keys().filter(|f| seal_anchor(&root, f).is_none()) {
+            println!(
+                "  {} {f} is not committed: `hexa spec verify --ci` reports this seal unanchored until you commit it",
+                "!".yellow()
+            );
+        }
+    }
+    Ok(())
+}
+
 pub fn seal(adr: &str) -> anyhow::Result<()> {
     let root = std::env::current_dir()?;
     let a = find(&root, adr)?;

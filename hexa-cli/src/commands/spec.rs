@@ -171,7 +171,7 @@ pub async fn run(action: SpecAction) -> anyhow::Result<()> {
         }
         SpecAction::Check { adr } => super::spec_ledger::check(adr.as_deref()),
         SpecAction::Accept { adr, by } => super::spec_ledger::accept(&adr, by.as_deref()),
-        SpecAction::Seal { adr } => super::spec_ledger::seal(&adr),
+        SpecAction::Seal { adr } => super::spec_ledger::seal_verb(&adr),
         SpecAction::Amend { adr, reason, file, confirm, by } => {
             super::spec_ledger::amend(&adr, &reason, file.as_deref(), confirm.as_deref(), by.as_deref())
         }
