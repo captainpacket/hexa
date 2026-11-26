@@ -25,7 +25,12 @@ use super::path_normalizer::{normalize_path, normalize_path_in, resolve_import_p
 use super::ports::{AnalysisError, AstPort, ArchAnalysisPort};
 
 /// Source file glob patterns for supported languages.
-const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "go", "rs", "py"];
+const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "go", "rs", "py", "pyi"];
+
+/// The manifests that make a directory a Python project, in the order one is
+/// named (ADR-2611211324 §4). Python is graded where one is present, or where
+/// `analyze.layers` declares a layer for it (ADR-2611251938 §1).
+pub const PYTHON_MANIFESTS: [&str; 4] = ["pyproject.toml", "setup.py", "manage.py", "requirements.txt"];
 
 /// What the grade leaves out. A pattern starting with `/` is a directory,
 /// matched as a whole path segment; any other is matched within the path
@@ -197,9 +202,11 @@ fn resolved_target(
 }
 
 /// The Python files an import may name: every `.py` file under the root that
-/// is not excluded, by the same walk the grade makes.
+/// is not excluded, by the same walk the grade makes. Not filtered by whether
+/// the project grades Python: the single-file check asks about a file that may
+/// be the first one a layer key covers, before it is written.
 async fn python_files(root: &Path) -> Result<HashSet<String>, AnalysisError> {
-    Ok(collect_source_files(root).await?.into_iter().filter(|f| f.ends_with(".py")).collect())
+    Ok(walk_source_files(root)?.into_iter().filter(|f| is_python_file(f)).collect())
 }
 
 /// Re-score `result` with the project's error-severity rule findings
@@ -255,6 +262,11 @@ pub async fn source_violations(
         return Ok(Vec::new());
     }
     let layers = LayerMap::from_project(root).map_err(AnalysisError::Other)?;
+    // Python the grade does not read has no findings here either. A file a
+    // layer key covers opts the project in, even before it is written.
+    if lang == Language::Python && layers.declared(rel_path).is_none() && !python_is_graded(root) {
+        return Ok(Vec::new());
+    }
     let packages = discover_packages(root);
     let go_mod = detect_go_module_prefix(root).await;
     let imports = ast.extract_imports(Path::new(rel_path), source, lang)?;
@@ -470,6 +482,9 @@ pub fn source_files_sync(root: &Path) -> Vec<String> {
             files.push(rel);
         }
     }
+    if !python_is_graded(root) {
+        files.retain(|f| !is_python_file(f));
+    }
     files.sort();
     files
 }
@@ -496,11 +511,57 @@ pub(crate) async fn collect_source_files(root: &Path) -> Result<Vec<String>, Ana
     Ok(walk_graded_files(root)?)
 }
 
-/// The grade's walk: every directory not matched by `EXCLUDE_PATTERNS` or
-/// `analyze.exclude` (symlinked directories followed), every source file in
-/// them that is not a Python test or excluded. One walk, shared by the grade
-/// and by [`graded_files_sync`], so the two cannot drift apart.
+fn is_python_file(path: &str) -> bool {
+    Language::from_path(path) == Language::Python
+}
+
+/// Whether the project says it is Python (ADR-2611251938 §1): it has a Python
+/// manifest, or an `analyze.layers` key covers one of the Python files in
+/// `files`.
+fn declares_python(root: &Path, files: &[String]) -> bool {
+    if has_python_manifest(root) {
+        return true;
+    }
+    // A layer map that does not parse is reported by the analysis itself.
+    let layers = LayerMap::from_project(root).unwrap_or_default();
+    files.iter().any(|f| is_python_file(f) && layers.declared(f).is_some())
+}
+
+fn has_python_manifest(root: &Path) -> bool {
+    PYTHON_MANIFESTS.iter().any(|m| root.join(m).is_file())
+}
+
+/// Whether the grade reads this project's Python. A manifest answers without
+/// walking the tree, so an unreadable folder cannot turn Python off.
+pub fn python_is_graded(root: &Path) -> bool {
+    has_python_manifest(root) || walk_source_files(root).is_ok_and(|files| declares_python(root, &files))
+}
+
+/// How many Python files the grade would read and does not, because the
+/// project does not say it is Python.
+fn ungraded_python_count(root: &Path) -> std::io::Result<usize> {
+    let files = walk_source_files(root)?;
+    if declares_python(root, &files) {
+        return Ok(0);
+    }
+    Ok(files.iter().filter(|f| is_python_file(f)).count())
+}
+
+/// The grade's walk: [`walk_source_files`], less the Python of a project that
+/// does not say it is Python. One walk, shared by the grade and by
+/// [`graded_files_sync`], so the two cannot drift apart.
 fn walk_graded_files(root: &Path) -> std::io::Result<Vec<String>> {
+    let mut files = walk_source_files(root)?;
+    if !declares_python(root, &files) {
+        files.retain(|f| !is_python_file(f));
+    }
+    Ok(files)
+}
+
+/// Every directory not matched by `EXCLUDE_PATTERNS` or `analyze.exclude`
+/// (symlinked directories followed), every source file in them that is not a
+/// Python test or excluded.
+fn walk_source_files(root: &Path) -> std::io::Result<Vec<String>> {
     let mut files = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     let project_ex_owned = project_excludes(root);
@@ -533,6 +594,20 @@ fn walk_graded_files(root: &Path) -> std::io::Result<Vec<String>> {
 
     files.sort();
     Ok(files)
+}
+
+/// Whether `path` is a `.pyi` stub with its `.py` module beside it.
+fn describes_a_module(path: &str, py_files: &HashSet<String>) -> bool {
+    path.strip_suffix(".pyi").is_some_and(|stem| py_files.contains(&format!("{stem}.py")))
+}
+
+/// Per file, the names its own code uses (ADR-2611251938 §2).
+type HomeUses = HashMap<String, HashSet<String>>;
+
+/// `dead`, less each name the module that defines it uses itself.
+fn without_home_uses(mut dead: Vec<DeadExport>, uses: &HomeUses) -> Vec<DeadExport> {
+    dead.retain(|d| !uses.get(&d.file).is_some_and(|names| names.contains(&d.export_name)));
+    dead
 }
 
 /// Test file patterns — files matching these are collected as additional consumers.
@@ -599,13 +674,14 @@ impl ArchAnalyzer {
         &self,
         root: &Path,
         go_module_prefix: Option<&str>,
-    ) -> Result<(Vec<ImportEdge>, Vec<FileData>), AnalysisError> {
+    ) -> Result<(Vec<ImportEdge>, Vec<FileData>, HomeUses), AnalysisError> {
         let source_files = collect_source_files(root).await?;
-        let py_files: HashSet<String> = source_files.iter().filter(|f| f.ends_with(".py")).cloned().collect();
+        let py_files: HashSet<String> = source_files.iter().filter(|f| is_python_file(f)).cloned().collect();
         let layers = LayerMap::from_project(root).map_err(AnalysisError::Other)?;
         let packages = discover_packages(root);
         let mut all_edges = Vec::new();
         let mut all_file_data = Vec::new();
+        let mut home_uses = HomeUses::new();
 
         for rel_path in &source_files {
             let abs_path = root.join(rel_path);
@@ -615,14 +691,26 @@ impl ArchAnalyzer {
             let imports = self
                 .ast
                 .extract_imports(Path::new(rel_path), &source, lang)?;
-            let exports = self
+            let mut exports = self
                 .ast
                 .extract_exports(Path::new(rel_path), &source, lang)?;
-            let references = self
+            let mut references = self
                 .ast
                 .extract_references(Path::new(rel_path), &source, lang)?;
+            // A stub beside its module describes it (ADR-2611251938 §1): the
+            // names are the module's, judged there. Left in, each read as a
+            // dead export, and naming them hid the module's own dead ones.
+            if describes_a_module(rel_path, &py_files) {
+                for export in exports.drain(..) {
+                    references.remove(&export.name);
+                }
+            }
 
             let from_file = normalize_path(rel_path);
+            let used = self.ast.names_used_at_home(&source, lang)?;
+            if !used.is_empty() {
+                home_uses.insert(from_file.clone(), used);
+            }
 
             let paths = self.ast.module_paths(Path::new(rel_path), &source, lang)?;
             let mut edges = edges_of(rel_path, &imports, &packages, &layers, go_module_prefix, &py_files);
@@ -648,7 +736,7 @@ impl ArchAnalyzer {
             });
         }
 
-        Ok((all_edges, all_file_data))
+        Ok((all_edges, all_file_data, home_uses))
     }
 
     /// Collect test files as import consumers (their imports count, exports don't).
@@ -657,7 +745,11 @@ impl ArchAnalyzer {
         root: &Path,
         go_module_prefix: Option<&str>,
     ) -> Result<Vec<FileData>, AnalysisError> {
-        let test_files = collect_test_files(root).await?;
+        let mut test_files = collect_test_files(root).await?;
+        // Ungraded Python is not parsed, so it consumes nothing either.
+        if !python_is_graded(root) {
+            test_files.retain(|f| !is_python_file(f));
+        }
         let packages = discover_packages(root);
         let py_files = python_files(root).await?;
         let mut test_data = Vec::new();
@@ -702,7 +794,7 @@ impl ArchAnalyzer {
 impl ArchAnalysisPort for ArchAnalyzer {
     async fn analyze(&self, root_path: &Path) -> Result<ArchAnalysisResult, AnalysisError> {
         let go_mod = detect_go_module_prefix(root_path).await;
-        let (edges, file_data) =
+        let (edges, file_data, home_uses) =
             self.collect_file_data(root_path, go_mod.as_deref()).await?;
 
         let layers = LayerMap::from_project(root_path).map_err(AnalysisError::Other)?;
@@ -722,7 +814,10 @@ impl ArchAnalysisPort for ArchAnalyzer {
         let test_file_data = self
             .collect_test_file_data(root_path, go_mod.as_deref())
             .await?;
-        let dead_exports = dead_export_finder::find_dead_exports_with(&file_data, &test_file_data, &layers);
+        let dead_exports = without_home_uses(
+            dead_export_finder::find_dead_exports_with(&file_data, &test_file_data, &layers),
+            &home_uses,
+        );
 
         // Orphan files: no incoming or outgoing edges
         let connected: HashSet<&str> = edges
@@ -813,6 +908,7 @@ impl ArchAnalysisPort for ArchAnalyzer {
             coverage,
             api,
             config_errors,
+            ungraded_python_files: ungraded_python_count(root_path)?,
         })
     }
 
@@ -821,7 +917,7 @@ impl ArchAnalysisPort for ArchAnalyzer {
         root_path: &Path,
     ) -> Result<Vec<DependencyViolation>, AnalysisError> {
         let go_mod = detect_go_module_prefix(root_path).await;
-        let (edges, file_data) = self.collect_file_data(root_path, go_mod.as_deref()).await?;
+        let (edges, file_data, _) = self.collect_file_data(root_path, go_mod.as_deref()).await?;
         let layers = LayerMap::from_project(root_path).map_err(AnalysisError::Other)?;
         let (adapters, _) = adapters_from_project(root_path, &layers);
         Ok(name_target_files(boundary_checker::find_violations_in(&edges, &adapters), &file_data))
@@ -832,11 +928,11 @@ impl ArchAnalysisPort for ArchAnalyzer {
         root_path: &Path,
     ) -> Result<Vec<DeadExport>, AnalysisError> {
         let go_mod = detect_go_module_prefix(root_path).await;
-        let (_, file_data) = self.collect_file_data(root_path, go_mod.as_deref()).await?;
+        let (_, file_data, home_uses) = self.collect_file_data(root_path, go_mod.as_deref()).await?;
         // Test files consume; an export only a test names is alive.
         let tests = self.collect_test_file_data(root_path, go_mod.as_deref()).await?;
         let layers = LayerMap::from_project(root_path).map_err(AnalysisError::Other)?;
-        Ok(dead_export_finder::find_dead_exports_with(&file_data, &tests, &layers))
+        Ok(without_home_uses(dead_export_finder::find_dead_exports_with(&file_data, &tests, &layers), &home_uses))
     }
 
     async fn detect_circular_deps(
@@ -844,7 +940,7 @@ impl ArchAnalysisPort for ArchAnalyzer {
         root_path: &Path,
     ) -> Result<Vec<Vec<String>>, AnalysisError> {
         let go_mod = detect_go_module_prefix(root_path).await;
-        let (edges, _) = self.collect_file_data(root_path, go_mod.as_deref()).await?;
+        let (edges, _, _) = self.collect_file_data(root_path, go_mod.as_deref()).await?;
         Ok(cycle_detector::detect_cycles(&edges))
     }
 }

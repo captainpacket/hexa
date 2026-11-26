@@ -8,7 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::domain::{DeadExport, ExportDeclaration, ExportKind, HexLayer, ImportStatement};
+use super::domain::{DeadExport, ExportDeclaration, ExportKind, HexLayer, ImportStatement, Language};
 use super::layer_classifier::LayerMap;
 use super::path_normalizer::normalize_path;
 
@@ -263,7 +263,11 @@ pub fn find_dead_exports_with(
             // this explicit (a private type in a public signature is an
             // error); TypeScript and Go leave it implicit. The finder treats
             // all three the same. A value named only at home is still dead.
+            // Not Python: what a module there uses itself is read from its
+            // code, outside the name's own definition (ADR-2611251938 §2),
+            // and a name `__all__` lists is an export however it is used.
             let named_at_home = exp.kind == ExportKind::Type
+                && Language::from_path(&normalized) != Language::Python
                 && file.references.get(&exp.name).copied().unwrap_or(0) >= 2;
 
             if !is_directly_used && !is_transitively_used && !named_elsewhere && !named_at_home {

@@ -101,7 +101,11 @@ pub fn resolve_python_import(from_file: &str, module: &str, name: Option<&str>, 
             return None;
         }
         let stem = segs.join("/");
-        [format!("{stem}.py"), format!("{stem}/__init__.py")].into_iter().find(|c| files.contains(c))
+        // A stub is the module only where there is no `.py`: a compiled
+        // extension, or a package that ships types (ADR-2611251938 §1).
+        [format!("{stem}.py"), format!("{stem}/__init__.py"), format!("{stem}.pyi"), format!("{stem}/__init__.pyi")]
+            .into_iter()
+            .find(|c| files.contains(c))
     };
     for base in bases {
         let mut module_path = base.clone();

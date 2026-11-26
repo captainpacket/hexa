@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use colored::Colorize;
+use hexa_analysis::analyzer::PYTHON_MANIFESTS;
 use hexa_analysis::ports::HexLayer as Layer;
 use hexa_analysis::layer_classifier::{get_violation_rule, LayerMap};
 
@@ -278,7 +279,7 @@ pub async fn run(
                 for dir in go_dirs {
                     let layer_path = root.join(dir);
                     if layer_path.is_dir() {
-                        let count = collect_source_files(&layer_path).len();
+                        let count = collect_graded_files(&root, &layer_path).len();
                         total += count;
                         println!("    {} {} ({} files)", "\u{2713}".green(), dir, count);
                     }
@@ -310,7 +311,7 @@ pub async fn run(
         // Count total source files across the project
         let mut total_files = 0usize;
         if has_src {
-            total_files += collect_source_files(&root.join("src")).len();
+            total_files += collect_graded_files(&root, &root.join("src")).len();
         }
         total_files += rust_total;
         total_files += go_files_total;
@@ -353,6 +354,7 @@ pub async fn run(
         // nothing, and every boundary claim below is then computed from an
         // empty edge set (ADR-2609140020).
         let mut parsed_files: Option<usize> = None;
+        let mut ungraded_python = 0usize;
         let deep_score: Option<u64> = match deep_analysis(&root).await {
             Ok(result) => {
                 // This count used to be printed and then dropped. `--exit-code`
@@ -388,6 +390,7 @@ pub async fn run(
                     println!("    {} {}", "\u{2717}".red(), e.red());
                 }
                 parsed_files = Some(result.file_count);
+                ungraded_python = result.ungraded_python_files;
                 graded_violations = Some(result.violations.len());
                 println!(
                     "    {} Analysed {} files, {} import edges",
@@ -415,6 +418,14 @@ pub async fn run(
                 None
             }
         };
+
+        if ungraded_python > 0 {
+            println!(
+                "    {} Python files not graded: {} (no Python manifest; add pyproject.toml, setup.py, manage.py or requirements.txt, or an analyze.layers key in .hexa/project.json that covers one)",
+                "\u{2023}".dimmed(),
+                ungraded_python
+            );
+        }
 
         // "0 boundary violations" is a claim about files that were read.
         // Saying it over a tree the parser could not open states the one
@@ -1065,7 +1076,7 @@ fn scan_local_violations(root: &Path) -> Vec<ImportViolation> {
     let src = root.join("src");
     let mut all_violations = Vec::new();
 
-    let files = collect_source_files(&src);
+    let files = collect_graded_files(root, &src);
 
     for path in &files {
         let rel = path
@@ -1122,14 +1133,21 @@ fn is_test_file(rel: &str) -> bool {
         || name.contains(".spec.")
 }
 
-/// The manifests that make a directory a Python project, in the order one is
-/// named (ADR-2611211324 §4).
-const PYTHON_MANIFESTS: [&str; 4] = ["pyproject.toml", "setup.py", "manage.py", "requirements.txt"];
-
 /// Whether there is TypeScript to grade under `root`: a `package.json`
 /// with none is tooling.
 fn has_typescript_sources(root: &Path) -> bool {
     collect_source_files(root).iter().any(|f| f.extension().is_some_and(|e| e == "ts" || e == "tsx"))
+}
+
+/// [`collect_source_files`] under `dir`, less the Python of a project at `root`
+/// that does not say it is Python (ADR-2611251938 §1). For the scans that
+/// judge or count what the grade reads.
+fn collect_graded_files(root: &Path, dir: &Path) -> Vec<PathBuf> {
+    let mut files = collect_source_files(dir);
+    if !hexa_analysis::analyzer::python_is_graded(root) {
+        files.retain(|f| f.extension().is_none_or(|e| e != "py"));
+    }
+    files
 }
 
 /// Recursively collect `.rs`, `.ts`, `.js`, `.go`, and `.py` source files under a directory.
@@ -1715,7 +1733,7 @@ fn evaluate_import_policies(
     // The whole tree, not just `src/`: Go puts its layers under `internal/`
     // and `cmd/`, and a policy that silently skipped them would report a
     // clean domain because it never looked at one.
-    let mut files = collect_source_files(root);
+    let mut files = collect_graded_files(root, root);
     files.sort();
     // A policy whose `layer` names a layer also covers the files an explicit
     // `analyze.layers` key declares in it (ADR-2611230900 §1, §2).
@@ -2014,7 +2032,7 @@ fn check_adr_compliance_inner(root: &Path, announce: bool) -> AdrCompliance {
     // one of which named a crate that no longer exists — so in an eight-crate
     // workspace the rules were checked against one crate and reported as
     // though they had been checked against all of them.
-    let mut all_files = collect_source_files(&root.join("src"));
+    let mut all_files = collect_graded_files(root, &root.join("src"));
     let mut members: Vec<PathBuf> = std::fs::read_dir(root)
         .map(|entries| {
             entries
@@ -2026,7 +2044,7 @@ fn check_adr_compliance_inner(root: &Path, announce: bool) -> AdrCompliance {
         .unwrap_or_default();
     members.sort();
     for sub in members {
-        all_files.extend(collect_source_files(&sub));
+        all_files.extend(collect_graded_files(root, &sub));
     }
 
     for path in &all_files {
@@ -2277,9 +2295,10 @@ async fn run_json(root: &Path, strict: bool, adr_compliance_only: bool, exit_cod
         match deep_analysis(root).await {
             Err(e) => deep_failed = Some(e.to_string()),
             Ok(deep) if deep.file_count == 0 => {
+                result["ungraded_python_files"] = serde_json::json!(deep.ungraded_python_files);
                 not_graded = Some(format!(
                     "{} source files scanned, 0 parsed: hexa parses Rust, Go, TypeScript and Python, and nothing here was read",
-                    collect_source_files(root).len()
+                    collect_graded_files(root, root).len()
                 ))
             }
             Ok(deep) => {

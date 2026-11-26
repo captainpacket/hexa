@@ -5,6 +5,7 @@
 //!
 //! ADR-034 Phase 2.
 
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use tree_sitter::{Language as TsLanguage, Node as TsNode, Parser, Tree};
 
@@ -176,6 +177,135 @@ fn extract_python_exports(root: &tree_sitter::Node, source: &str, file: &str) ->
             .collect(),
         None => defined.into_iter().filter(|(n, _, _, _)| !n.starts_with('_')).map(|(n, l, k, t)| export(n, l, k, t)).collect(),
     })
+}
+
+/// The public top-level names `source` uses outside their own definitions, or
+/// none when it assigns `__all__` (ADR-2611251938 §2). A use is an identifier
+/// that reads the module's name: not an attribute or keyword of that spelling,
+/// not a binding, not a local that shadows it. Comments and strings hold no
+/// identifiers; an f-string's `{…}` is code, and counts.
+fn python_home_uses(root: TsNode<'_>, source: &str) -> HashSet<String> {
+    // Each public name, with the byte ranges of the statements defining it.
+    let mut defined: HashMap<String, Vec<std::ops::Range<usize>>> = HashMap::new();
+    for ch in named_children_of(root) {
+        let d = python_definition(ch);
+        let names: Vec<String> = match d.kind() {
+            "function_definition" | "class_definition" => {
+                d.child_by_field_name("name").map(|n| node_text(n, source)).into_iter().collect()
+            }
+            _ => python_assignments(d, source).into_iter().map(|(n, _)| n).collect(),
+        };
+        for name in names {
+            if name == "__all__" {
+                return HashSet::new();
+            }
+            if !name.starts_with('_') {
+                defined.entry(name).or_default().push(ch.byte_range());
+            }
+        }
+    }
+    let mut used = HashSet::new();
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        if n.kind() == "identifier" {
+            let name = node_text(n, source);
+            let outside = defined.get(&name).is_some_and(|at| !at.iter().any(|r| r.contains(&n.start_byte())));
+            if outside && python_reads(n) && !python_shadowed(n, &name, source) {
+                used.insert(name);
+            }
+            continue;
+        }
+        if matches!(n.kind(), "import_statement" | "import_from_statement" | "global_statement" | "nonlocal_statement") {
+            continue;
+        }
+        let mut cur = n.walk();
+        stack.extend(n.named_children(&mut cur));
+    }
+    used
+}
+
+/// Whether the identifier `n` reads a name, rather than naming an attribute, a
+/// keyword argument, a definition, a parameter or the target of a binding.
+fn python_reads(n: TsNode<'_>) -> bool {
+    let Some(parent) = n.parent() else { return true };
+    let is_field = |field: &str| parent.child_by_field_name(field).is_some_and(|f| f.id() == n.id());
+    match parent.kind() {
+        "attribute" => !is_field("attribute"),
+        "keyword_argument" | "function_definition" | "class_definition" => !is_field("name"),
+        _ => !python_binds(n),
+    }
+}
+
+/// Whether the identifier `n` is bound where it stands: a parameter, or a
+/// target of an assignment, a loop, `as` or `:=`.
+fn python_binds(n: TsNode<'_>) -> bool {
+    let Some(parent) = n.parent() else { return false };
+    let is_field = |field: &str| parent.child_by_field_name(field).is_some_and(|f| f.id() == n.id());
+    match parent.kind() {
+        "parameters" | "lambda_parameters" | "as_pattern_target" => true,
+        "typed_parameter" => !is_field("type"),
+        "default_parameter" | "typed_default_parameter" | "named_expression" => is_field("name"),
+        "assignment" | "for_statement" | "for_in_clause" => is_field("left"),
+        // `a, b = …`, `(a, b) = …`, `*args`: bound if the whole pattern is.
+        "pattern_list" | "tuple_pattern" | "list_pattern" | "list_splat_pattern" | "dictionary_splat_pattern" => python_binds(parent),
+        _ => false,
+    }
+}
+
+/// Whether `name` at `n` is a local of a function, lambda or comprehension
+/// around it, and so not the module's.
+fn python_shadowed(n: TsNode<'_>, name: &str, source: &str) -> bool {
+    let mut at = n;
+    while let Some(scope) = at.parent() {
+        let is_scope = matches!(
+            scope.kind(),
+            "function_definition" | "lambda" | "list_comprehension" | "set_comprehension" | "dictionary_comprehension" | "generator_expression"
+        );
+        // A default or an annotation is read outside the function it is on.
+        let in_header = scope.kind() == "function_definition"
+            && scope.child_by_field_name("body").is_some_and(|b| !b.byte_range().contains(&n.start_byte()));
+        if is_scope && !in_header && python_scope_binds(scope, name, source) {
+            return true;
+        }
+        at = scope;
+    }
+    false
+}
+
+/// Whether the scope binds `name` as its own local. `global name` says it does
+/// not.
+fn python_scope_binds(scope: TsNode<'_>, name: &str, source: &str) -> bool {
+    let mut bound = false;
+    let mut stack = named_children_of(scope);
+    while let Some(n) = stack.pop() {
+        match n.kind() {
+            "global_statement" if named_children_of(n).iter().any(|i| node_text(*i, source) == name) => return false,
+            // A nested definition binds its own name here, and nothing in it.
+            "function_definition" | "class_definition" => {
+                bound |= n.child_by_field_name("name").is_some_and(|i| node_text(i, source) == name);
+            }
+            // So does a lambda or a comprehension: its names are its own.
+            "lambda" | "list_comprehension" | "set_comprehension" | "dictionary_comprehension" | "generator_expression" => {}
+            "import_statement" | "import_from_statement" => bound |= python_import_binds(n, name, source),
+            "identifier" => bound |= node_text(n, source) == name && python_binds(n),
+            _ => stack.extend(named_children_of(n)),
+        }
+    }
+    bound
+}
+
+/// Whether the import statement `n` binds `name`: the alias, else the name it
+/// takes, else the first part of the module `import a.b` names.
+fn python_import_binds(n: TsNode<'_>, name: &str, source: &str) -> bool {
+    let mut cur = n.walk();
+    let bound = n.children_by_field_name("name", &mut cur).any(|item| {
+        let text = match item.child_by_field_name("alias") {
+            Some(alias) => node_text(alias, source),
+            None => node_text(item, source),
+        };
+        text.split('.').next() == Some(name)
+    });
+    bound
 }
 
 /// Whether the run of `#` comment lines directly above `row` carries
@@ -495,6 +625,14 @@ impl AstPort for TreeSitterAdapter {
 
     fn extract_api(&self, _path: &Path, source: &str, lang: Language) -> Result<ApiFacts, AnalysisError> {
         super::treesitter_api::extract(source, lang)
+    }
+
+    fn names_used_at_home(&self, source: &str, lang: Language) -> Result<HashSet<String>, AnalysisError> {
+        if lang != Language::Python {
+            return Ok(HashSet::new());
+        }
+        let tree = parse_source(source, lang)?;
+        Ok(python_home_uses(tree.root_node(), source))
     }
 
     fn extract_members(

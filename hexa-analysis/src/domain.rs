@@ -182,6 +182,10 @@ pub struct ArchAnalysisResult {
     /// naming what is wrong. Each is a rule error (ADR-2610271649 §3).
     #[serde(default)]
     pub config_errors: Vec<String>,
+    /// Python files left unread because the project does not say it is Python
+    /// (ADR-2611251938 §1). They have no findings and no part in the score.
+    #[serde(default)]
+    pub ungraded_python_files: usize,
 }
 
 /// The share of the graded files that have a layer. An import touching an
