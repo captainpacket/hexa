@@ -425,9 +425,15 @@ fn collect(command: &str, cwd: &Path, read_script: &dyn Fn(&Path) -> Option<Stri
                 }
             }
             p if is_python(p) || matches!(p, "node" | "nodejs" | "bun" | "deno" | "ruby") => {
-                if let Some((code, argv)) = interpreter_code(p, args, &simple.stdin_text, &cwd, read_script) {
+                if let Some((code, argv, script)) = interpreter_code(p, args, &simple.stdin_text, &cwd, read_script) {
                     for lit in code_write_targets(&code, &argv) {
-                        out.extend(resolve(&cwd, &lit));
+                        // Running a script is not editing it: its own name, in a
+                        // usage line, is a literal it merely mentions.
+                        let target = resolve(&cwd, &lit);
+                        if target.is_some() && target == script {
+                            continue;
+                        }
+                        out.extend(target);
                     }
                 }
             }
@@ -575,7 +581,7 @@ fn interpreter_code(
     stdin_text: &[String],
     cwd: &Path,
     read_script: &dyn Fn(&Path) -> Option<String>,
-) -> Option<(String, Vec<String>)> {
+) -> Option<(String, Vec<String>, Option<PathBuf>)> {
     let python = is_python(prog);
     let code_flags: &[&str] = if python { &["-c"] } else { &["-e", "--eval", "-p", "--print"] };
     // Flags that take a value and are not code.
@@ -584,7 +590,7 @@ fn interpreter_code(
     while i < args.len() {
         let a = args[i].as_str();
         if code_flags.contains(&a) {
-            return args.get(i + 1).map(|c| (c.clone(), args[i + 2..].to_vec()));
+            return args.get(i + 1).map(|c| (c.clone(), args[i + 2..].to_vec(), None));
         }
         if python && a == "-m" {
             return None; // a module: `python -m pytest`
@@ -593,7 +599,7 @@ fn interpreter_code(
             return None; // a test runner or package script
         }
         if a == "-" {
-            return Some((stdin_text.join("\n"), args[i + 1..].to_vec()));
+            return Some((stdin_text.join("\n"), args[i + 1..].to_vec(), None));
         }
         if valued.contains(&a) {
             i += 2;
@@ -606,12 +612,12 @@ fn interpreter_code(
         let script = resolve(cwd, a)?;
         let mut code = read_script(&script)?;
         code.truncate(floor_char_boundary(&code, SCRIPT_READ_CAP));
-        return Some((code, args[i + 1..].to_vec()));
+        return Some((code, args[i + 1..].to_vec(), Some(script)));
     }
     if stdin_text.is_empty() {
         None
     } else {
-        Some((stdin_text.join("\n"), Vec::new()))
+        Some((stdin_text.join("\n"), Vec::new(), None))
     }
 }
 
@@ -816,6 +822,18 @@ mod tests {
         assert_eq!(targets_with("python3 /tmp/w.py src/y.rs", Some(by_arg)), vec!["/repo/src/y.rs"]);
         // A script that cannot be read is not a candidate.
         assert!(targets_with("python3 /tmp/missing.py", None).is_empty());
+    }
+
+    #[test]
+    fn a_script_is_not_a_write_target_of_itself() {
+        // A script that opens a variable path for writing makes every
+        // path-like string in it a candidate; its own name, in a usage line, is
+        // one. Running it is not editing it.
+        let gen = "SOURCE = \"examples/world/gen.py\"\nUSAGE = \"python3 -I examples/world/gen.py OUTDIR\"\nwith open(path, \"w\") as f:\n    f.write(\"x\")\n";
+        assert!(targets_with("python3 -I examples/world/gen.py --help", Some(gen)).is_empty());
+        assert!(targets_with("python3 examples/world/gen.py --help 2>&1 | head -3", Some(gen)).is_empty());
+        // Control: a path it is given is still a candidate.
+        assert_eq!(targets_with("python3 examples/world/gen.py out/x.txt", Some(gen)), vec!["/repo/out/x.txt"]);
     }
 
     #[test]
