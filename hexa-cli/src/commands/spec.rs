@@ -115,6 +115,24 @@ pub enum SpecAction {
         #[arg(long)]
         by: Option<String>,
     },
+    /// Record a move of a scenario's test to another ref: the first call shows
+    /// the diff, `--confirm` records it. Also records a move history already
+    /// holds (ADR-2611251652 §4)
+    Move {
+        adr: String,
+        /// `<scenario>=<file>::<name>`: the scenario, and the ref it moves to
+        #[arg(long)]
+        scenario: String,
+        /// Why the binding moves
+        #[arg(long)]
+        reason: String,
+        /// The sha256 of the new file as the first call showed it
+        #[arg(long)]
+        confirm: Option<String>,
+        /// Who moves it; defaults to `git config user.name`
+        #[arg(long)]
+        by: Option<String>,
+    },
     /// Run each scenario's sealed test alone; drift fails (ADR-2610221540 §8)
     Verify {
         adr: Option<String>,
@@ -126,7 +144,7 @@ pub enum SpecAction {
         /// exist and fail there; a test green there is a mirror (§5)
         #[arg(long)]
         prove: bool,
-        /// List each amendment with its reason
+        /// List each amendment and move with its reason
         #[arg(long)]
         verbose: bool,
         /// Run the tests on this machine even when .hexa/project.json sets
@@ -156,6 +174,9 @@ pub async fn run(action: SpecAction) -> anyhow::Result<()> {
         SpecAction::Seal { adr } => super::spec_ledger::seal(&adr),
         SpecAction::Amend { adr, reason, file, confirm, by } => {
             super::spec_ledger::amend(&adr, &reason, file.as_deref(), confirm.as_deref(), by.as_deref())
+        }
+        SpecAction::Move { adr, scenario, reason, confirm, by } => {
+            super::spec_ledger::move_binding(&adr, &scenario, &reason, confirm.as_deref(), by.as_deref())
         }
         SpecAction::Verify { adr, ci, prove, verbose, local } => {
             super::spec_ledger::verify(adr.as_deref(), ci, prove, verbose, local).await

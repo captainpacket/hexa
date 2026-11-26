@@ -611,6 +611,8 @@ mod part_2 {
     fn spec_red(r: &Repo, id: &str, to: &str) -> Output {
         let help = text(&r.hexa(&["spec", "red", "--help"]));
         let pair = format!("{id}={to}");
+        // `spec red` takes the commit the test is red at: the one just made.
+        let head = r.git(&["rev-parse", "HEAD"]);
         let flag = ["--bind", "--scenario", "--test", "--map", "--set"]
             .into_iter()
             .find(|f| {
@@ -618,8 +620,8 @@ mod part_2 {
                     .any(|w| w == *f)
             });
         match flag {
-            Some(f) => r.hexa(&["spec", "red", ADR, f, &pair]),
-            None => r.hexa(&["spec", "red", ADR, &pair]),
+            Some(f) => r.hexa(&["spec", "red", ADR, &head, f, &pair]),
+            None => r.hexa(&["spec", "red", ADR, &head, &pair]),
         }
     }
 
@@ -962,6 +964,9 @@ mod part_2 {
         r.commit("new red test");
         let o = spec_red(&r, X, "ci/new.sh");
         assert!(o.status.success(), "the binding is accepted: {}", text(&o));
+        // A newly bound file is sealed by its own step, as `spec red` says.
+        let sealed = r.hexa(&["spec", "seal", ADR]);
+        assert!(sealed.status.success(), "{}", text(&sealed));
         assert_eq!(test_of(&r.spec(), X).as_deref(), Some("ci/new.sh"));
         assert!(moves_for(&r.spec(), X).is_empty());
         r.write("answer2", "7\n");
@@ -1607,6 +1612,8 @@ mod part_3 {
         );
         let (ok, _, out) = r.hexa(&["spec", "tests", ADR, "--replace", "--because", "rename y"]);
         assert!(ok, "--replace failed: {out}");
+        // `--replace` leaves the spec record for its caller to commit.
+        r.commit("record the replacement");
         check_moves(&r, &before, &["X", "Y", "Z"], &["Y"], "rename y");
 
         let before = r.spec();
@@ -1617,6 +1624,7 @@ mod part_3 {
         );
         let (ok, _, out) = r.hexa(&["spec", "tests", ADR, "--replace", "--because", "same names"]);
         assert!(ok, "second --replace failed: {out}");
+        r.commit("record the second replacement");
         check_moves(&r, &before, &["X", "Y", "Z"], &[], "same names");
     }
 

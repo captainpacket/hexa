@@ -58,6 +58,18 @@ pub struct Scenario {
 }
 
 impl Scenario {
+    /// Whether two revisions of a scenario say the same thing: everything a
+    /// person accepts, and nothing written after (ADR-2610281628 §1).
+    pub fn same_text(&self, other: &Scenario) -> bool {
+        self.id == other.id
+            && self.decision == other.decision
+            && self.kind == other.kind
+            && self.description == other.description
+            && self.given == other.given
+            && self.when == other.when
+            && self.then == other.then
+    }
+
     /// This scenario's red commit, else the spec's. Empty is none.
     pub fn red_commit<'a>(&'a self, spec: &'a Spec) -> Option<&'a str> {
         self.red.as_deref().or(spec.red.as_deref()).filter(|r| !r.trim().is_empty())
@@ -149,14 +161,33 @@ pub enum BindingVerdict {
 /// The anchor (ADR-2611251652 §1). `history` is the spec file's revisions,
 /// oldest first, each with whether its acceptance holds. `current` is the
 /// scenario now.
-pub fn binding_anchor(_current: &Scenario, _history: &[(bool, Spec)]) -> Option<String> {
-    unimplemented!("ADR-2611251652 §1")
+pub fn binding_anchor(current: &Scenario, history: &[(bool, Spec)]) -> Option<String> {
+    let mut anchor = None;
+    for (_, spec) in history.iter().rev().filter(|(holds, _)| *holds) {
+        let Some(then) = spec.specs.iter().find(|s| s.id == current.id && s.same_text(current)) else { break };
+        if then.test.is_some() {
+            anchor = then.test.clone();
+        }
+    }
+    anchor
 }
 
 /// Judge one binding (ADR-2611251652 §2). `moves` are all of the spec's,
 /// oldest first: only those for `scenario` apply.
-pub fn judge_binding(_scenario: &str, _anchor: Option<&str>, _moves: &[Move], _current: Option<&str>) -> BindingVerdict {
-    unimplemented!("ADR-2611251652 §2")
+pub fn judge_binding(scenario: &str, anchor: Option<&str>, moves: &[Move], current: Option<&str>) -> BindingVerdict {
+    let (Some(anchor), Some(current)) = (anchor, current) else { return BindingVerdict::Holds };
+    let mut expected = anchor;
+    for (i, m) in moves.iter().enumerate().filter(|(_, m)| m.scenario == scenario) {
+        if m.from != expected {
+            return BindingVerdict::BrokenChain(i);
+        }
+        expected = &m.to;
+    }
+    if current == expected {
+        BindingVerdict::Holds
+    } else {
+        BindingVerdict::Moved { expected: expected.to_string() }
+    }
 }
 
 /// Whether one sealed file still holds (ADR-2611081151 §1, §2).
@@ -641,17 +672,9 @@ pub fn unpassable_sites(test_source: &str) -> Vec<(usize, String)> {
 /// The accepted spec with each unchanged scenario's `test` and `red` carried
 /// over from `previous` (ADR-2610281628 §1).
 pub fn rebind(previous: &Spec, accepted: &Spec) -> Spec {
-    let same = |a: &Scenario, b: &Scenario| {
-        a.decision == b.decision
-            && a.kind == b.kind
-            && a.description == b.description
-            && a.given == b.given
-            && a.when == b.when
-            && a.then == b.then
-    };
     let mut out = accepted.clone();
     for s in out.specs.iter_mut() {
-        match previous.specs.iter().find(|p| p.id == s.id && same(p, s)) {
+        match previous.specs.iter().find(|p| p.same_text(s)) {
             Some(p) if p.test.is_some() => {
                 s.test = p.test.clone();
                 // Proved at the spec-level red: that red, written onto it.
