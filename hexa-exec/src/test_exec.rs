@@ -279,35 +279,7 @@ pub fn plan_test(root: &Path, r: &str, cfg: &TestConfig, prefix: &str) -> Result
             let dir = dir.unwrap_or_else(|| root.to_path_buf());
             let cd = if dir == root { String::new() } else { format!("cd {} && ", shell_quote(&rel(root, &dir))) };
             let target = format!("{}::{name}", rel(&dir, &abs));
-            // The project's own Python, as vitest is the package's own
-            // (ADR-2611230832): uv when a uv.lock is at or above the pytest
-            // directory, else a virtualenv's interpreter there, else python3.
-            // Searched from the pytest directory up to the repository root.
-            let from = dir.join("_");
-            let python = if nearest(root, &from, "uv.lock").is_some() {
-                "uv run python".to_string()
-            } else if let Some(v) = {
-                // The nearest interpreter wins; at the same depth `.venv` wins
-                // over `venv`, as ADR-2611230832 §2 lists them.
-                let mut found: Option<(usize, PathBuf)> = None;
-                for m in [".venv/bin/python", "venv/bin/python"] {
-                    if let Some(d) = nearest(root, &from, m) {
-                        let depth = d.components().count();
-                        if found.as_ref().is_none_or(|(best, _)| depth > *best) {
-                            found = Some((depth, d.join(m)));
-                        }
-                    }
-                }
-                found.map(|(_, p)| p)
-            } {
-                // Relative to the directory pytest runs from (the command
-                // `cd`s there), so the plan names no path of this machine and
-                // runs the same under test.remote.
-                let v = pathdiff(&v, &dir);
-                if v.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c)) { v } else { shell_quote(&v) }
-            } else {
-                "python3".to_string()
-            };
+            let python = project_python(root, &dir);
             Ok(Planned { cmd: format!("{prefix}{cd}{python} -m pytest {} -q", shell_quote(&target)), judge: Judge::Pytest })
         }
         Runner::Configured(template) => {
@@ -344,6 +316,36 @@ pub fn judge(p: &Planned, ok: bool, out: &str) -> TestRun {
         Verdict::Vacuous => TestRun::Vacuous,
         Verdict::Ambiguous(n) => TestRun::Ambiguous(n),
         Verdict::Unreadable(why) => TestRun::Broken { compile: false, tail: format!("{why}\n{}", tail(out, 10)) },
+    }
+}
+
+/// The project's own Python for work run from `dir`, as vitest is the
+/// package's own (ADR-2611230832): uv when a uv.lock is at or above `dir`, else
+/// a virtualenv's interpreter there, else python3. Searched from `dir` up to
+/// `root`. A relative path is relative to `dir`, so a command that names it
+/// names no path of this machine and runs the same under test.remote.
+pub fn project_python(root: &Path, dir: &Path) -> String {
+    let from = dir.join("_");
+    if nearest(root, &from, "uv.lock").is_some() {
+        return "uv run python".to_string();
+    }
+    // The nearest interpreter wins; at the same depth `.venv` wins over
+    // `venv`, as ADR-2611230832 §2 lists them.
+    let mut found: Option<(usize, PathBuf)> = None;
+    for m in [".venv/bin/python", "venv/bin/python"] {
+        if let Some(d) = nearest(root, &from, m) {
+            let depth = d.components().count();
+            if found.as_ref().is_none_or(|(best, _)| depth > *best) {
+                found = Some((depth, d.join(m)));
+            }
+        }
+    }
+    match found {
+        Some((_, v)) => {
+            let v = pathdiff(&v, dir);
+            if v.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c)) { v } else { shell_quote(&v) }
+        }
+        None => "python3".to_string(),
     }
 }
 
