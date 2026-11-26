@@ -7,6 +7,7 @@ date: 2026-11-26
 
 **Status:** Proposed
 **Date:** 2026-11-26
+**Built:** all five decisions, 2026-11-26, 3eaa6ed (36 sealed scenarios)
 **Drivers:** hexa reads Python (ADR-2611211324), and a Python project that tags its driving port with `@hexa:api` is told it has no tagged operations. The tags are ignored without a word about why: the parser returns nothing for Python.
 **Supersedes:** none. Extends ADR-2610092245 to a fourth language.
 
