@@ -1910,6 +1910,39 @@ struct DestructiveOp {
     branch: String,
 }
 
+/// `cmd` without the bodies of heredocs that only WRITE text. `cat > t.sh
+/// <<'EOF' … EOF` makes a file; the lines in it are data, not commands run now,
+/// so a force-push inside a test script it writes is not a force-push. A
+/// heredoc whose line has a shell on it (`bash <<EOF`, `cat <<EOF | sh`) is
+/// fed to that shell and stays, because there its body is run.
+fn without_written_heredocs(cmd: &str) -> String {
+    use std::sync::OnceLock;
+    static START: OnceLock<regex::Regex> = OnceLock::new();
+    let start = START.get_or_init(|| regex::Regex::new(r#"<<-?\s*(?:'([^']+)'|"([^"]+)"|\\?([A-Za-z_][A-Za-z0-9_]*))"#).unwrap());
+    const SHELLS: [&str; 9] = ["bash", "sh", "zsh", "dash", "ksh", "source", ".", "eval", "xargs"];
+    let mut out = String::new();
+    let mut lines = cmd.lines();
+    while let Some(line) = lines.next() {
+        out.push_str(line);
+        out.push('\n');
+        let Some(c) = start.captures(line) else { continue };
+        let tag = c.get(1).or_else(|| c.get(2)).or_else(|| c.get(3)).map(|m| m.as_str().to_string()).unwrap_or_default();
+        let runs = line
+            .split(|ch: char| ch.is_whitespace() || matches!(ch, '|' | ';' | '&' | '(' | ')'))
+            .any(|w| SHELLS.contains(&w.rsplit('/').next().unwrap_or(w)));
+        if runs {
+            continue;
+        }
+        // Drop the body, up to and including the terminator line.
+        for body in lines.by_ref() {
+            if body.trim() == tag {
+                break;
+            }
+        }
+    }
+    out
+}
+
 /// The destructive operations in `cmd`, a shell command line run in `cwd`:
 /// force-push, `reset --hard`, `clean -f`, `rm -rf` outside a temp folder,
 /// and `branch -D`. Each `&&`/`||`/`;`/`|` segment is read on its own, with
@@ -1918,6 +1951,7 @@ struct DestructiveOp {
 /// directory it runs in when it names none.
 fn destructive_ops(cmd: &str, cwd: &Path) -> Vec<DestructiveOp> {
     let mut found = Vec::new();
+    let cmd = &without_written_heredocs(cmd);
     let normalized = cmd.replace("&&", "\n").replace("||", "\n").replace([';', '|'], "\n");
     for segment in normalized.lines() {
         let toks: Vec<String> = segment
@@ -2709,6 +2743,18 @@ mod tests {
         assert_eq!(whats("sudo rm -rf ./build"), ["rm -rf"]);
         assert_eq!(whats("rm -r -f build"), ["rm -rf"]);
         assert_eq!(whats("git branch -D old"), ["branch -D"]);
+        // A heredoc that only WRITES a script is data, not a command run now; one a
+        // shell reads is still a command.
+        let wrote = "cat > t.sh <<'EOF'\ngit -C rel push -qf origin main\nrm -rf build\nEOF\nls";
+        assert!(destructive_ops(wrote, &cwd).is_empty(), "a written script was read as commands: {:?}", destructive_ops(wrote, &cwd));
+        let tee = "tee t.sh <<EOF >/dev/null\ngit push --force origin main\nEOF";
+        assert!(destructive_ops(tee, &cwd).is_empty());
+        for run in ["bash <<'EOF'\ngit push -f origin main\nEOF", "sh -s <<EOF\ngit push -f origin main\nEOF", "cat <<EOF | bash\ngit push -f origin main\nEOF"] {
+            let ops = destructive_ops(run, &cwd);
+            assert!(ops.iter().any(|o| o.protected), "a heredoc a shell runs must still be read: {run:?} -> {ops:?}");
+        }
+        let after = "cat > t.sh <<'EOF'\necho hi\nEOF\ngit push -f origin main";
+        assert!(destructive_ops(after, &cwd).iter().any(|o| o.protected), "a command after the heredoc is still read");
         for safe in ["git push origin feat", "git branch -d merged", "rm -rf /tmp/x", "rm -rf $TMPDIR/x", "git clean -n", "echo git push --force-ish", "grep -rf pattern"] {
             assert!(whats(safe).iter().all(|w| *w != "force-push" && *w != "rm -rf" && *w != "clean -f"), "{safe}: {:?}", whats(safe));
         }
