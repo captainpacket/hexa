@@ -302,9 +302,15 @@ impl WorkspacePackages {
         self.ts_paths = paths;
     }
 
-    /// A TypeScript file of the project, which an import can name.
+    /// A TypeScript or JavaScript file of the project, which an import can name.
     pub fn add_ts_file(&mut self, rel: &str) {
         self.ts_files.insert(rel.to_string());
+    }
+
+    /// Whether `rel` is a TypeScript or JavaScript file of the project, by the
+    /// name it has: an import that resolved to one keeps that name.
+    pub fn knows_ts_file(&self, rel: &str) -> bool {
+        self.ts_files.contains(rel)
     }
 
     /// The project file a TypeScript import names: a relative import by the
@@ -429,7 +435,12 @@ impl TsPaths {
     /// is not.
     pub fn load(read: &dyn Fn(&str) -> Option<String>) -> Self {
         let (mut chain, mut budget) = (Vec::new(), TSCONFIG_READ_BUDGET);
-        let (paths, base) = tsconfig_settings("tsconfig.json", read, &mut chain, &mut budget);
+        let (mut paths, mut base) = tsconfig_settings("tsconfig.json", read, &mut chain, &mut budget);
+        // A project with no tsconfig.json paths may declare them in a
+        // jsconfig.json, read the same way (ADR-2611270420 §3).
+        if paths.is_none() {
+            (paths, base) = tsconfig_settings("jsconfig.json", read, &mut chain, &mut budget);
+        }
         let Some((map, decl_dir)) = paths else { return Self::default() };
         let base_dir = base.unwrap_or(decl_dir);
         let patterns = map
@@ -477,22 +488,50 @@ impl TsPaths {
     }
 }
 
-/// The file a TypeScript module path names, by the extensions and index files
-/// an import tries: as written, `.js`/`.jsx` read as `.ts`/`.tsx`, then
-/// `.ts`, `.tsx`, `/index.ts`, `/index.tsx`.
+/// The extensions of JavaScript source (ADR-2611270420 §1).
+const JS_EXTENSIONS: &[&str] = &["js", "jsx", "mjs", "cjs"];
+
+/// Whether `path` is a JavaScript file by its extension.
+pub fn is_js_file(path: &str) -> bool {
+    path.rsplit_once('.').is_some_and(|(_, ext)| JS_EXTENSIONS.contains(&ext))
+}
+
+/// The name a file goes by in the graph. A TypeScript file is named as it has
+/// always been (`.js` read as `.ts`: a NodeNext import says `./a.js` for
+/// `a.ts`); a JavaScript file is a file of its own and keeps the name it has
+/// (ADR-2611270420 §1).
+pub fn file_id(path: &str) -> String {
+    if is_js_file(path) {
+        let mut p = path;
+        while let Some(rest) = p.strip_prefix("./") {
+            p = rest;
+        }
+        p.to_string()
+    } else {
+        normalize_path(path)
+    }
+}
+
+/// The file a TypeScript or JavaScript module path names, by the extensions and
+/// index files an import tries: as written, `.js`/`.jsx` read as `.ts`/`.tsx`
+/// when that file exists, then `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`
+/// added to it, then the same under `/index` (ADR-2611221645 §1,
+/// ADR-2611270420 §3). A TypeScript file wins a tie, as the compiler's mapping
+/// of `./a.js` to `a.ts` does.
 fn ts_file_named(path: &str, exists: &dyn Fn(&str) -> bool) -> Option<String> {
-    let mut candidates = vec![path.to_string()];
+    let mut candidates = Vec::new();
     if let Some(stem) = path.strip_suffix(".js") {
         candidates.extend([format!("{stem}.ts"), format!("{stem}.tsx")]);
     } else if let Some(stem) = path.strip_suffix(".jsx") {
         candidates.push(format!("{stem}.tsx"));
     }
-    candidates.extend([
-        format!("{path}.ts"),
-        format!("{path}.tsx"),
-        format!("{path}/index.ts"),
-        format!("{path}/index.tsx"),
-    ]);
+    candidates.push(path.to_string());
+    for ext in ["ts", "tsx", "js", "jsx", "mjs", "cjs"] {
+        candidates.push(format!("{path}.{ext}"));
+    }
+    for ext in ["ts", "tsx", "js", "jsx", "mjs", "cjs"] {
+        candidates.push(format!("{path}/index.{ext}"));
+    }
     candidates.into_iter().find(|c| exists(c))
 }
 

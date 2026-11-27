@@ -1172,7 +1172,7 @@ fn collect_source_files_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
             }
             collect_source_files_recursive(&path, out);
         } else if let Some(ext) = path.extension().and_then(|x| x.to_str()) {
-            if matches!(ext, "rs" | "ts" | "js" | "go" | "py") {
+            if matches!(ext, "rs" | "ts" | "js" | "jsx" | "mjs" | "cjs" | "go" | "py") {
                 out.push(path);
             }
         }

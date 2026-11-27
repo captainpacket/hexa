@@ -36,16 +36,18 @@ fn write(base: &std::path::Path, rel: &str, body: &str) {
     std::fs::write(p, body).expect("write");
 }
 
-/// A hexagonal-looking tree hexa lists and does not parse: plain `.js`
-/// files (the grade reads `.ts`/`.tsx`). This was Python until hexa read
-/// Python (ADR-2611211324).
+/// A hexagonal-looking tree hexa lists and does not parse: Python files in a
+/// project with no Python manifest, which the grade leaves out until the
+/// project says it is Python (ADR-2611251938). This was Python until hexa read
+/// Python (ADR-2611211324), then plain `.js` until hexa read JavaScript
+/// (ADR-2611270420).
 fn unparsed_tree() -> std::path::PathBuf {
-    let dir = scratch("js");
-    write(&dir, "src/domain/board.js", "export class Board {}\n");
-    write(&dir, "src/ports/store.js", "export class Store {}\n");
-    write(&dir, "src/usecases/play.js", "import { Db } from '../adapters/db.js';\n");
-    write(&dir, "src/adapters/db.js", "export class Db {}\n");
-    write(&dir, "src/composition/main.js", "export * from '../usecases/play.js';\n");
+    let dir = scratch("py");
+    write(&dir, "src/domain/board.py", "class Board:\n    pass\n");
+    write(&dir, "src/ports/store.py", "class Store:\n    pass\n");
+    write(&dir, "src/usecases/play.py", "from adapters.db import Db\n");
+    write(&dir, "src/adapters/db.py", "class Db:\n    pass\n");
+    write(&dir, "src/composition/main.py", "from usecases.play import *\n");
     dir
 }
 

@@ -1,6 +1,6 @@
 //! The "Hex layers" tally lists the grade's own files (ADR-2611221646 §3):
-//! the grade reads `.tsx` and not `.js`, and it reads a file in a hidden
-//! directory (it skips only its listed patterns), so the tally does the same.
+//! the grade reads `.tsx` and `.js` (ADR-2611270420), and it reads a file in a
+//! hidden directory (it skips only its listed patterns), so the tally does the same.
 
 use std::path::Path;
 use std::process::Command;
@@ -26,10 +26,11 @@ fn hex_layers_block(root: &Path) -> String {
     all[start..].lines().take(8).collect::<Vec<_>>().join("\n")
 }
 
-/// One `.ts` and two `.tsx` use cases, and a `.ts` in a hidden directory, all of
-/// which the grade reads; two `.js` files it does not.
+/// One `.ts` and two `.tsx` use cases, two `.js`, and a `.ts` in a hidden directory,
+/// all of which the grade reads. The `.js` files were the ones it did not read until
+/// ADR-2611270420.
 #[test]
-fn tsx_and_hidden_dirs_are_counted_and_js_is_not() {
+fn tsx_js_and_hidden_dirs_are_counted() {
     let d = tempfile::tempdir().unwrap();
     let r = d.path();
     write(r, "package.json", "{\"name\":\"fx\",\"version\":\"0.1.0\"}\n");
@@ -41,7 +42,7 @@ fn tsx_and_hidden_dirs_are_counted_and_js_is_not() {
     write(r, "src/usecases/.cache/e.ts", "export const e = 5;\n");
     let block = hex_layers_block(r);
     assert!(
-        block.contains("Use Cases (4 files)"),
-        "expected the four .ts/.tsx files the grade reads (one in a hidden folder), not the .js files:\n{block}"
+        block.contains("Use Cases (6 files)"),
+        "expected the six .ts/.tsx/.js files the grade reads (one in a hidden folder):\n{block}"
     );
 }

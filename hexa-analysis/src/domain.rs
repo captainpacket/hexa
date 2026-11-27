@@ -57,6 +57,7 @@ impl Language {
     pub fn from_path(path: &str) -> Self {
         if path.ends_with(".ts") || path.ends_with(".tsx")
             || path.ends_with(".js") || path.ends_with(".jsx")
+            || path.ends_with(".mjs") || path.ends_with(".cjs")
         {
             Self::TypeScript
         } else if path.ends_with(".go") {

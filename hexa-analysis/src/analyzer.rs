@@ -21,11 +21,11 @@ use super::domain::{
 };
 use super::frontend_checker;
 use super::layer_classifier::{adapters_from_project, LayerMap};
-use super::path_normalizer::{normalize_path, normalize_path_in, resolve_import_path, resolve_python_import, TsPaths, WorkspacePackages};
+use super::path_normalizer::{file_id, is_js_file, normalize_path, normalize_path_in, resolve_import_path, resolve_python_import, TsPaths, WorkspacePackages};
 use super::ports::{AnalysisError, AstPort, ArchAnalysisPort};
 
 /// Source file glob patterns for supported languages.
-const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "go", "rs", "py", "pyi"];
+const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "mjs", "cjs", "go", "rs", "py", "pyi"];
 
 /// The manifests that make a directory a Python project, in the order one is
 /// named (ADR-2611211324 §4). Python is graded where one is present, or where
@@ -54,6 +54,15 @@ const EXCLUDE_PATTERNS: &[&str] = &[
     // (ADR-2611221706 §1).
     ".test.tsx",
     ".spec.tsx",
+    // JavaScript's tests are named as TypeScript's are (ADR-2611270420 §5).
+    ".test.js",
+    ".spec.js",
+    ".test.jsx",
+    ".spec.jsx",
+    ".test.mjs",
+    ".spec.mjs",
+    ".test.cjs",
+    ".spec.cjs",
     "_test.go",
     ".test.rs",
     "/tests/",
@@ -147,7 +156,7 @@ fn edges_of(
     go_module_prefix: Option<&str>,
     py_files: &HashSet<String>,
 ) -> Vec<ImportEdge> {
-    let from_file = normalize_path(rel_path);
+    let from_file = file_id(rel_path);
     let edge = |to_file: String, imp: &ImportStatement| ImportEdge {
         from_file: from_file.clone(),
         from_layer: layers.classify(&from_file),
@@ -164,7 +173,12 @@ fn edges_of(
         .iter()
         .map(|imp| {
             let resolved = resolve_in(packages, rel_path, &imp.raw_path, go_module_prefix);
-            // The importing file decides the language, not the resolved target.
+            // A project file keeps the name it has: a `.js` import of a `.js` file
+            // is not that file's `.ts` namesake (ADR-2611270420 §3). The importing
+            // file decides the language, not the resolved target.
+            if packages.knows_ts_file(&resolved) {
+                return edge(resolved, imp);
+            }
             edge(normalize_path_in(&resolved, Language::from_path(rel_path)), imp)
         })
         .collect()
@@ -198,7 +212,11 @@ fn resolved_target(
     if Language::from_path(rel_path) == Language::Python {
         return python_targets(rel_path, imp, py_files).into_iter().next().unwrap_or_else(|| imp.raw_path.clone());
     }
-    normalize_path_in(&resolve_in(packages, rel_path, &imp.raw_path, go_module_prefix), Language::from_path(rel_path))
+    let resolved = resolve_in(packages, rel_path, &imp.raw_path, go_module_prefix);
+    if packages.knows_ts_file(&resolved) {
+        return resolved;
+    }
+    normalize_path_in(&resolved, Language::from_path(rel_path))
 }
 
 /// The Python files an import may name: every `.py` file under the root that
@@ -358,7 +376,7 @@ pub(crate) fn discover_packages(root: &Path) -> WorkspacePackages {
                 }
                 continue;
             }
-            if name.ends_with(".ts") || name.ends_with(".tsx") {
+            if name.ends_with(".ts") || name.ends_with(".tsx") || is_js_file(&name) {
                 pkgs.add_ts_file(&if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") });
                 continue;
             }
@@ -514,7 +532,7 @@ pub fn load_file_data_sync(root: &Path, adapter: &dyn AstPort) -> Vec<FileData> 
         let exports = adapter.extract_exports(Path::new(&rel), &source, lang).unwrap_or_default();
         let references = adapter.extract_references(Path::new(&rel), &source, lang).unwrap_or_default();
         let members = adapter.extract_members(Path::new(&rel), &source, lang).unwrap_or_default();
-        out.push(FileData { path: normalize_path(&rel), imports: vec![], exports, references, members });
+        out.push(FileData { path: file_id(&rel), imports: vec![], exports, references, members });
     }
     out
 }
@@ -624,7 +642,10 @@ fn without_home_uses(mut dead: Vec<DeadExport>, uses: &HomeUses) -> Vec<DeadExpo
 }
 
 /// Test file patterns — files matching these are collected as additional consumers.
-const TEST_PATTERNS: &[&str] = &[".test.ts", ".spec.ts", ".test.tsx", ".spec.tsx", "_test.go", ".test.rs"];
+const TEST_PATTERNS: &[&str] = &[
+    ".test.ts", ".spec.ts", ".test.tsx", ".spec.tsx", ".test.js", ".spec.js", ".test.jsx", ".spec.jsx", ".test.mjs", ".spec.mjs",
+    ".test.cjs", ".spec.cjs", "_test.go", ".test.rs",
+];
 
 /// A Python test module by its name: `test_*.py` or `*_test.py` (pytest's
 /// discovery rule; ADR-2611211324 §4).
@@ -719,7 +740,7 @@ impl ArchAnalyzer {
                 }
             }
 
-            let from_file = normalize_path(rel_path);
+            let from_file = file_id(rel_path);
             let used = self.ast.names_used_at_home(&source, lang)?;
             if !used.is_empty() {
                 home_uses.insert(from_file.clone(), used);
@@ -783,7 +804,7 @@ impl ArchAnalyzer {
                 .extract_references(Path::new(rel_path), &source, lang)
                 .unwrap_or_default();
 
-            let from_file = normalize_path(rel_path);
+            let from_file = file_id(rel_path);
             test_data.push(FileData {
                 path: from_file,
                 imports: imports
@@ -969,7 +990,7 @@ fn is_ports_path(p: &str) -> bool {
 /// and the declaring file carries `.ts`.
 fn same_module(a: &str, b: &str) -> bool {
     fn stem(p: &str) -> &str {
-        let p = p.strip_suffix(".js").or_else(|| p.strip_suffix(".ts")).or_else(|| p.strip_suffix(".rs")).or_else(|| p.strip_suffix(".go")).unwrap_or(p);
+        let p = p.strip_suffix(".js").or_else(|| p.strip_suffix(".mjs")).or_else(|| p.strip_suffix(".cjs")).or_else(|| p.strip_suffix(".jsx")).or_else(|| p.strip_suffix(".ts")).or_else(|| p.strip_suffix(".rs")).or_else(|| p.strip_suffix(".go")).unwrap_or(p);
         p.strip_suffix("/index").or_else(|| p.strip_suffix("/mod")).unwrap_or(p)
     }
     let (sa, sb) = (stem(a), stem(b));

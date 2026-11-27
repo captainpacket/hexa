@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::domain::{DeadExport, ExportDeclaration, ExportKind, HexLayer, ImportStatement, Language};
 use super::layer_classifier::LayerMap;
-use super::path_normalizer::normalize_path;
+use super::path_normalizer::file_id;
 
 /// Entry-point function names that are never dead despite having no importers.
 const ENTRY_EXPORTS: &[&str] = &[
@@ -28,6 +28,20 @@ const ENTRY_POINT_SUFFIXES: &[&str] = &[
     "/cli.ts",
     "/main.ts",
     "/composition-root.ts",
+    // JavaScript's, by the same roles (ADR-2611270420 §5).
+    "/index.js",
+    "/index.jsx",
+    "/index.mjs",
+    "/index.cjs",
+    "/cli.js",
+    "/cli.mjs",
+    "/cli.cjs",
+    "/main.js",
+    "/main.mjs",
+    "/main.cjs",
+    "/composition-root.js",
+    "/composition-root.mjs",
+    "/composition-root.cjs",
     "/composition-root.go",
     "/composition-root.rs",
     "/composition_root.rs",
@@ -139,7 +153,7 @@ pub fn find_dead_exports_with(
     let mut reexport_chain: HashMap<String, HashMap<String, String>> = HashMap::new();
 
     for file in source_files {
-        let normalized = normalize_path(&file.path);
+        let normalized = file_id(&file.path);
         if !is_reexporter(file) {
             continue;
         }
@@ -218,7 +232,7 @@ pub fn find_dead_exports_with(
     let mut dead = Vec::new();
 
     for file in source_files {
-        let normalized = normalize_path(&file.path);
+        let normalized = file_id(&file.path);
 
         if is_entry_point(&normalized) {
             continue;
@@ -256,7 +270,7 @@ pub fn find_dead_exports_with(
             let is_transitively_used = transitive.is_some_and(|n| n.contains(&exp.name));
             let named_elsewhere = referenced_in
                 .get(exp.name.as_str())
-                .is_some_and(|files| files.iter().any(|f| normalize_path(f) != normalized));
+                .is_some_and(|files| files.iter().any(|f| file_id(f) != normalized));
             // A type its own file names again is the file's API surface: the
             // return type of a live function, the receiver of a method, the
             // shape a caller gets by inference and never imports. Rust makes

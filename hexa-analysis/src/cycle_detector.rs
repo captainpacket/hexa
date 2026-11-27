@@ -257,7 +257,8 @@ mod tests {
 /// Rust modules are built and is not one.
 fn module_key(path: &str) -> String {
     // A Python import names a file (ADR-2611211324 §2): the file is the node.
-    if path.ends_with(".py") || path.ends_with(".pyi") {
+    // So does a JavaScript one, as a TypeScript one does (ADR-2611270420 §1).
+    if path.ends_with(".py") || path.ends_with(".pyi") || super::path_normalizer::is_js_file(path) {
         return path.to_string();
     }
     if path.ends_with(".go") {

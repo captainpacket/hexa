@@ -791,7 +791,82 @@ fn extract_ts_imports(
         }
     }
 
+    // CommonJS `require("x")`, wherever it is written (ADR-2611270420 §2).
+    collect_require_calls(root, source, from_file, &mut imports);
+
     Ok(imports)
+}
+
+/// Every `require("literal")` call under `node`, in document order: an import
+/// edge to what the string names. A call whose argument is anything but one
+/// plain string (`require(name)`, `require("./" + dir)`) names no file hexa
+/// can see and is not guessed at (ADR-2611270420 §2).
+fn collect_require_calls(node: &tree_sitter::Node, source: &str, from_file: &str, imports: &mut Vec<ImportStatement>) {
+    if node.kind() == "call_expression" {
+        if let Some(func) = node.child_by_field_name("function") {
+            if func.kind() == "identifier" && node_text(func, source) == "require" {
+                if let Some(args) = node.child_by_field_name("arguments") {
+                    let mut ac = args.walk();
+                    let named: Vec<_> = args.named_children(&mut ac).collect();
+                    if let [arg] = named.as_slice() {
+                        if arg.kind() == "string" {
+                            let raw_path = unquote(node_text(*arg, source));
+                            imports.push(ImportStatement {
+                                from_file: from_file.to_string(),
+                                raw_path: raw_path.clone(),
+                                resolved_path: raw_path,
+                                names: require_names(node, source),
+                                line: node.start_position().row + 1,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_require_calls(&child, source, from_file, imports);
+    }
+}
+
+/// The names a `require(...)` call takes from the module: `const { a, b } =
+/// require(..)` names `a` and `b`; `require(..).a` names `a`; anything else
+/// (`const m = require(..)`, a bare call) takes the module whole, as an
+/// `import * as` does.
+fn require_names(call: &tree_sitter::Node, source: &str) -> Vec<String> {
+    let whole = || vec!["*".to_string()];
+    let Some(parent) = call.parent() else { return whole() };
+    match parent.kind() {
+        "variable_declarator" => {
+            let Some(pattern) = parent.child_by_field_name("name") else { return whole() };
+            if pattern.kind() != "object_pattern" {
+                return whole();
+            }
+            let mut names = Vec::new();
+            let mut cursor = pattern.walk();
+            for part in pattern.named_children(&mut cursor) {
+                match part.kind() {
+                    "shorthand_property_identifier_pattern" => names.push(node_text(part, source)),
+                    "pair_pattern" => match part.child_by_field_name("key") {
+                        Some(k) => names.push(unquote(node_text(k, source))),
+                        None => return whole(),
+                    },
+                    "object_assignment_pattern" => match part.child_by_field_name("left") {
+                        Some(l) => names.push(node_text(l, source)),
+                        None => return whole(),
+                    },
+                    _ => return whole(),
+                }
+            }
+            if names.is_empty() { whole() } else { names }
+        }
+        "member_expression" => match parent.child_by_field_name("property") {
+            Some(p) => vec![node_text(p, source)],
+            None => whole(),
+        },
+        _ => whole(),
+    }
 }
 
 /// The `"pkg"` of an `import x = require("pkg")`, if this is one.
@@ -1213,6 +1288,12 @@ fn extract_ts_exports(
     let mut cursor = root.walk();
 
     for child in root.children(&mut cursor) {
+        // `module.exports = …`, `module.exports.a = …`, `exports.a = …`
+        // (ADR-2611270420 §4).
+        if child.kind() == "expression_statement" {
+            extract_commonjs_exports(&child, source, file, &mut exports);
+            continue;
+        }
         if child.kind() != "export_statement" {
             continue;
         }
@@ -1278,6 +1359,62 @@ fn extract_ts_exports(
     }
 
     Ok(exports)
+}
+
+/// The exports a CommonJS assignment statement makes. `module.exports = { a, b:
+/// x, c() {} }` exports `a`, `b` and `c` (a spread says nothing about names and
+/// adds none); `module.exports = f` exports the module's default; `exports.a =`
+/// and `module.exports.a =` export `a`.
+fn extract_commonjs_exports(stmt: &tree_sitter::Node, source: &str, file: &str, out: &mut Vec<ExportDeclaration>) {
+    let mut cursor = stmt.walk();
+    let Some(assign) = stmt.named_children(&mut cursor).find(|c| c.kind() == "assignment_expression") else { return };
+    let (Some(left), Some(right)) = (assign.child_by_field_name("left"), assign.child_by_field_name("right")) else { return };
+    if left.kind() != "member_expression" {
+        return;
+    }
+    let hexa_public = has_hex_public_annotation(stmt, source);
+    let line = stmt.start_position().row + 1;
+    let kind_of = |value: &tree_sitter::Node| match value.kind() {
+        "function_expression" | "arrow_function" | "function" | "generator_function" => ExportKind::Function,
+        "class" | "class_declaration" => ExportKind::Type,
+        _ => ExportKind::Value,
+    };
+    let push = |out: &mut Vec<ExportDeclaration>, name: String, kind: ExportKind| {
+        out.push(ExportDeclaration { file: file.to_string(), name, line, hexa_public, kind });
+    };
+    let text = node_text(left, source);
+    if text == "module.exports" {
+        if right.kind() == "object" {
+            let mut oc = right.walk();
+            for prop in right.named_children(&mut oc) {
+                match prop.kind() {
+                    "shorthand_property_identifier" => push(out, node_text(prop, source), ExportKind::Value),
+                    "pair" => {
+                        if let Some(k) = prop.child_by_field_name("key") {
+                            let kind = prop.child_by_field_name("value").map(|v| kind_of(&v)).unwrap_or(ExportKind::Value);
+                            push(out, unquote(node_text(k, source)), kind);
+                        }
+                    }
+                    "method_definition" => {
+                        if let Some(n) = prop.child_by_field_name("name") {
+                            push(out, node_text(n, source), ExportKind::Function);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        } else {
+            push(out, "default".to_string(), ExportKind::Default);
+        }
+        return;
+    }
+    let name = text
+        .strip_prefix("module.exports.")
+        .or_else(|| text.strip_prefix("exports."))
+        .filter(|n| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$'));
+    if let Some(name) = name {
+        push(out, name.to_string(), kind_of(&right));
+    }
 }
 
 fn extract_lexical_names(node: &tree_sitter::Node, source: &str) -> Vec<String> {
