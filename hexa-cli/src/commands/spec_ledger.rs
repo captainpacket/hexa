@@ -1628,6 +1628,148 @@ pub async fn verify(adr: Option<&str>, ci: bool, prove: bool, verbose: bool, loc
     Ok(())
 }
 
+/// The commit that first added `file` to this branch's history: where its seal's
+/// chain is anchored (ADR-2611081151 §1).
+fn anchor_commit(root: &Path, file: &str) -> Option<String> {
+    let adds = std::process::Command::new("git")
+        .args(["log", "--diff-filter=A", "--format=%H", "--", file])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    String::from_utf8_lossy(&adds.stdout).lines().last().map(str::to_string)
+}
+
+/// `hexa spec amend <ADR> --file <f> --reason <why> --at <commit>…`: record steps
+/// of a sealed file's chain that went unrecorded (every move of a seal is an
+/// amendment, ADR-2611081151 §1, and a hexa verb or a test edited before it was
+/// sealed left some out). It adds no way to reach a new state: each step's hash
+/// is the file's blob at a named commit of this branch, the commits run oldest
+/// first from the anchor, and they must end at exactly the hash the chain already
+/// needs (where its first recorded amendment starts, else the recorded seal). The
+/// first call shows the diffs and writes nothing; `--confirm` with the digest it
+/// printed records them, before the amendments already there.
+pub fn amend_history(adr: &str, reason: &str, file: Option<&str>, at: &[String], confirm: Option<&str>, by: Option<&str>) -> anyhow::Result<()> {
+    let root = std::env::current_dir()?;
+    let a = find(&root, adr)?;
+    let id = a.id.as_str();
+    if reason.trim().is_empty() {
+        anyhow::bail!("{id}: --reason is empty: say why these steps were not recorded when they happened");
+    }
+    let Some(file) = file.map(|f| f.trim_start_matches("./")) else {
+        anyhow::bail!("{id}: --file <path> is required with --at: steps are recorded for one sealed file at a time");
+    };
+    let (text, spec) = load_text(&root, id)?.ok_or_else(|| anyhow::anyhow!("{id} has no spec to amend"))?;
+    if let Err(why) = acceptance_holds(&spec) {
+        anyhow::bail!("{id}: {why}. Steps are recorded against an accepted spec");
+    }
+    let Some(recorded) = spec.sealed.get(file).cloned() else {
+        let all: Vec<&str> = spec.sealed.keys().map(String::as_str).collect();
+        anyhow::bail!("{id}: {file} is not a sealed file of this spec (sealed: {})", all.join(", "));
+    };
+    if !is_test_file(file) {
+        anyhow::bail!("{id}: {file} is not a test file (ADR-2611191120 §8)");
+    }
+    let git = |args: &[&str]| -> Option<String> {
+        let o = std::process::Command::new("git").args(args).current_dir(&root).output().ok()?;
+        o.status.success().then(|| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    let Some(anchor_at) = anchor_commit(&root, file) else {
+        anyhow::bail!("{id}: no commit in history holds {file}, so its chain has no anchor to continue from: commit it first");
+    };
+    let Some(anchor_bytes) = blob_at(&root, &anchor_at, file) else {
+        anyhow::bail!("{id}: {file} has no version at its anchor {anchor_at}");
+    };
+    let anchor = sha256_hex(&anchor_bytes);
+    let mut amended = amendments_of(&text);
+    // Where the recorded chain has to be reached: the hash its first amendment starts from.
+    let first_existing = amended.iter().position(|m| m["file"] == file);
+    let target = match first_existing {
+        Some(i) => amended[i]["from"].as_str().unwrap_or_default().to_string(),
+        None => recorded.clone(),
+    };
+
+    // The commits: real, on this branch, oldest first, none before the anchor.
+    let mut steps: Vec<(String, String, Vec<u8>)> = Vec::new(); // (commit, hash, bytes)
+    let mut earlier = anchor_at.clone();
+    for c in at {
+        let sha = git(&["rev-parse", "--verify", "--quiet", &format!("{c}^{{commit}}")]).ok_or_else(|| anyhow::anyhow!("{id}: {c} is not a commit"))?;
+        if git(&["merge-base", "--is-ancestor", &sha, "HEAD"]).is_none() {
+            anyhow::bail!("{id}: {c} is not an ancestor of HEAD: a step is recorded from this branch's history");
+        }
+        if git(&["merge-base", "--is-ancestor", &earlier, &sha]).is_none() {
+            anyhow::bail!("{id}: {c} is not after the previous commit (or the anchor {}): name the commits oldest first", &anchor_at[..anchor_at.len().min(8)]);
+        }
+        let bytes = blob_at(&root, &sha, file).ok_or_else(|| anyhow::anyhow!("{id}: {file} does not exist at {c}"))?;
+        steps.push((sha.clone(), sha256_hex(&bytes), bytes));
+        earlier = sha;
+    }
+    // Only the steps that change the file are steps.
+    let mut hops: Vec<(String, String, String, Vec<u8>, Vec<u8>)> = Vec::new(); // (commit, from, to, old, new)
+    let (mut cur, mut cur_bytes) = (anchor.clone(), anchor_bytes);
+    for (sha, h, bytes) in &steps {
+        if *h != cur {
+            hops.push((sha.clone(), cur.clone(), h.clone(), cur_bytes.clone(), bytes.clone()));
+            cur = h.clone();
+            cur_bytes = bytes.clone();
+        }
+    }
+    if cur != target {
+        anyhow::bail!(
+            "{id}: these commits do not reach where the chain needs to: they end at {}…, and {file}'s record needs {}… ({}). Name the commit at which the file had that hash as the last --at",
+            &cur[..cur.len().min(12)],
+            &target[..target.len().min(12)],
+            if first_existing.is_some() { "where its first recorded amendment starts" } else { "its recorded seal" }
+        );
+    }
+    if hops.is_empty() {
+        anyhow::bail!("{id}: nothing to record: {file}'s chain already starts at its anchor and reaches {}…", &target[..target.len().min(12)]);
+    }
+    // One digest over the steps as shown, so --confirm confirms exactly these.
+    let digest = sha256_hex(hops.iter().map(|h| format!("{}>{}@{}\n", h.1, h.2, h.0)).collect::<String>().as_bytes());
+    let Some(given) = confirm else {
+        println!("{} {id} {file}: {} unrecorded step(s) from its anchor", "\u{2b21} spec amend --at".cyan().bold(), hops.len());
+        for (i, (sha, from, to, old, new)) in hops.iter().enumerate() {
+            println!("\nstep {} at {}: {}… → {}…", i + 1, &sha[..sha.len().min(10)], &from[..from.len().min(12)], &to[..to.len().min(12)]);
+            let diff = unified_diff(file, old, new)?;
+            let hunks: Vec<&str> = diff.lines().skip(2).collect();
+            println!("{}", hunks.join("\n"));
+        }
+        println!("\n  The diffs above and your reason are the review: this verb cannot tell whether a step weakened a test. It records steps history already holds and reaches no state the record did not already need.");
+        let ats: String = at.iter().map(|c| format!(" --at {c}")).collect();
+        println!("  To record them, as shown:\n\n    hexa spec amend {id} --file {file} --reason {reason:?}{ats} --confirm {digest}\n");
+        return Ok(());
+    };
+    if !given.trim().eq_ignore_ascii_case(&digest) {
+        anyhow::bail!("{id}: --confirm {given} is not the digest of the steps as they stand, so it confirms steps that were not shown. Run again without --confirm to see them");
+    }
+    let by = git_user_or_env(by)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let records: Vec<Value> = hops
+        .iter()
+        .map(|(sha, from, to, _, _)| {
+            serde_json::json!({
+                "file": file,
+                "from": from,
+                "to": to,
+                "by": by,
+                "reason": format!("recorded from history (the step went unrecorded when it happened): {reason}"),
+                "at": now,
+                "base_commit": sha,
+            })
+        })
+        .collect();
+    // Before the amendments already there: they continue from where these end.
+    let at_index = first_existing.unwrap_or(amended.len());
+    for (k, r) in records.into_iter().enumerate() {
+        amended.insert(at_index + k, r);
+    }
+    write_records(&root, &spec, Some(&amended), &[])?;
+    println!("  {} {id} {file}: {} step(s) recorded by {by}, oldest first, before any amendment already there", "\u{2713}".green(), hops.len());
+    println!("\n  Commit {}.", spec_rel(&root, id));
+    Ok(())
+}
+
 /// `hexa spec amend <ADR> --reason <why> [--file <f>] [--confirm <sha256>]`
 /// (ADR-2611062141). The scenarios are unchanged and a sealed file's content
 /// has to change. The first call shows the diff and writes nothing; the call
