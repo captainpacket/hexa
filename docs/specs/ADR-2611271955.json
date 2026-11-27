@@ -1,6 +1,10 @@
 {
   "adr": "ADR-2611271955",
   "feature": "a package.json project is JavaScript when its sources are",
+  "accepted": {
+    "by": "craigjohnson",
+    "sha256": "792be3a9b751af80d9528fcc540986637f630106d48f91e1a96a879a591eb59b"
+  },
   "specs": [
     {
       "id": "S01",
