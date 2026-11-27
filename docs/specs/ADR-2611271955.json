@@ -1,0 +1,193 @@
+{
+  "adr": "ADR-2611271955",
+  "feature": "a package.json project is JavaScript when its sources are",
+  "specs": [
+    {
+      "id": "S01",
+      "decision": [
+        "§1"
+      ],
+      "kind": "example",
+      "description": "A package.json project with only JavaScript sources is javascript.",
+      "given": "a project with package.json and src/index.js, no TypeScript and no tsconfig.json",
+      "when": "hexa analyze runs on it",
+      "then": "Its language line reads javascript (package.json)."
+    },
+    {
+      "id": "S02",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "A project with any TypeScript source stays typescript, JavaScript beside it or not.",
+      "given": "a project with package.json, src/a.ts and src/b.js",
+      "when": "hexa analyze runs on it",
+      "then": "Its language line reads typescript (package.json), not javascript."
+    },
+    {
+      "id": "S03",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "A tsconfig.json at the root keeps a project typescript before it has a source.",
+      "given": "a project with package.json, a root tsconfig.json and src/a.js only",
+      "when": "hexa analyze runs on it",
+      "then": "Its language line reads typescript (package.json)."
+    },
+    {
+      "id": "S04",
+      "decision": [
+        "§1"
+      ],
+      "kind": "negative",
+      "description": "A package.json with no source is typescript, as before.",
+      "given": "a project with only a package.json",
+      "when": "hexa analyze runs on it",
+      "then": "Its language line reads typescript (package.json)."
+    },
+    {
+      "id": "S05",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "hexa doctor names the same language.",
+      "given": "a project with package.json and src/index.js, and one with package.json and src/a.ts",
+      "when": "hexa doctor runs in each",
+      "then": "The type line reads javascript (package.json) for the first and typescript (package.json) for the second."
+    },
+    {
+      "id": "S06",
+      "decision": [
+        "§2"
+      ],
+      "kind": "example",
+      "description": "The session-start fingerprint names the same language.",
+      "given": "a project with package.json and src/index.js",
+      "when": "the session-start hook prints its project block",
+      "then": "The Language entry is javascript."
+    },
+    {
+      "id": "S07",
+      "decision": [
+        "§2"
+      ],
+      "kind": "negative",
+      "description": "The session-start fingerprint still names typescript for a TypeScript project.",
+      "given": "a project with package.json and src/a.ts",
+      "when": "the session-start hook prints its project block",
+      "then": "The Language entry is typescript."
+    },
+    {
+      "id": "S08",
+      "decision": [
+        "§3"
+      ],
+      "kind": "example",
+      "description": "Beside a Python manifest, JavaScript sources list javascript.",
+      "given": "a project with a pyproject.toml, package.json and src/index.js and no TypeScript",
+      "when": "hexa analyze runs on it",
+      "then": "Its language line lists javascript (package.json) and python (pyproject.toml)."
+    },
+    {
+      "id": "S09",
+      "decision": [
+        "§3"
+      ],
+      "kind": "negative",
+      "description": "Beside a Python manifest, a package.json that is tooling only is not listed.",
+      "given": "a project with a pyproject.toml and a package.json and no JavaScript or TypeScript source",
+      "when": "hexa analyze runs on it",
+      "then": "Its language line lists python only."
+    },
+    {
+      "id": "S10",
+      "decision": [
+        "§4"
+      ],
+      "kind": "negative",
+      "description": "JavaScript in node_modules or in analyze.exclude does not make a project javascript.",
+      "given": "a project with a package.json whose only JavaScript is under node_modules and in a path listed in analyze.exclude",
+      "when": "hexa analyze runs on it",
+      "then": "Its language line reads typescript (package.json)."
+    },
+    {
+      "id": "S11",
+      "decision": [
+        "§4"
+      ],
+      "kind": "example",
+      "description": "A test file does not make a project javascript, and a source file does.",
+      "given": "a project with package.json, src/a.test.js and src/index.js",
+      "when": "hexa analyze runs on it",
+      "then": "Its language line reads javascript (package.json); with src/index.js removed it reads typescript (package.json)."
+    },
+    {
+      "id": "S12",
+      "decision": [
+        "§5"
+      ],
+      "kind": "example",
+      "description": "The layer inventory's language column is unchanged for JavaScript files.",
+      "given": "a JavaScript project with files in layers",
+      "when": "hexa analyze --json runs on it",
+      "then": "Each layer_inventory row for those files names language typescript, as before."
+    },
+    {
+      "id": "S13",
+      "decision": [
+        "§6"
+      ],
+      "kind": "negative",
+      "description": "The label change moves no grade, score or finding.",
+      "given": "the JavaScript scaffold",
+      "when": "hexa analyze --json runs on it",
+      "then": "The grade is A+, the score is 100 and there are no violations or dead exports."
+    },
+    {
+      "id": "S14",
+      "decision": [
+        "§6"
+      ],
+      "kind": "negative",
+      "description": "The Rust, Go and Python labels are unchanged.",
+      "given": "a Rust, a Go and a Python scaffold",
+      "when": "hexa analyze runs on each",
+      "then": "The language lines read rust (Cargo.toml), go (go.mod) and python (pyproject.toml)."
+    },
+    {
+      "id": "S15",
+      "decision": [
+        "§6"
+      ],
+      "kind": "property",
+      "description": "Naming JavaScript does not depend on the order of the files.",
+      "given": "a JavaScript project and a shuffle of the order its files are written in",
+      "when": "hexa analyze runs on each",
+      "then": "Every run names javascript (package.json)."
+    },
+    {
+      "id": "S16",
+      "decision": [
+        "§6"
+      ],
+      "kind": "example",
+      "description": "The TypeScript scaffold keeps its label and its grade.",
+      "given": "the TypeScript scaffold",
+      "when": "hexa analyze --json runs on it",
+      "then": "Its language line reads typescript (package.json) and the grade is A+."
+    },
+    {
+      "id": "S17",
+      "decision": [
+        "§5"
+      ],
+      "kind": "negative",
+      "description": "The inventory gains no javascript row.",
+      "given": "a JavaScript project",
+      "when": "hexa analyze --json runs on it",
+      "then": "No layer_inventory row names the language javascript, and the files of a mixed project are not split between two rows by extension."
+    }
+  ]
+}
