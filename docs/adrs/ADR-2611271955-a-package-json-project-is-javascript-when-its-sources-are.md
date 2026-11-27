@@ -14,7 +14,7 @@
 
 ## Decision
 
-1. **A `package.json` project's language is `javascript` when it has graded JavaScript source (`.js`, `.jsx`, `.mjs`, `.cjs`), no graded TypeScript source (`.ts`, `.tsx`, `.mts`, `.cts`) and no `tsconfig.json` at its root; otherwise it is `typescript`.** A `package.json` with no source, or with TypeScript among its sources, or a `tsconfig.json` and no source yet, is `typescript`, as it is today.
+1. **A `package.json` project's language is `javascript` when it has graded JavaScript source (`.js`, `.jsx`, `.mjs`, `.cjs`), no graded TypeScript source (`.ts` or `.tsx`, the TypeScript the grade reads) and no `tsconfig.json` at its root; otherwise it is `typescript`.** A `package.json` with no source, or with TypeScript among its sources, or a `tsconfig.json` and no source yet, is `typescript`, as it is today.
 2. **The rule is one function, used by every surface that names the language:** the `language:` line of `hexa analyze`, the `type:` line of `hexa doctor`, and the `Language:` line of the session-start fingerprint, in both code paths that set it.
 3. **Beside a Python manifest, the `package.json` language is listed only when the project has graded sources of it:** `typescript` when it has TypeScript, else `javascript` when it has JavaScript, as `typescript` alone is today. A `package.json` that is tooling only is not listed.
 4. **"Graded source" is the grade's own list,** so a file in `node_modules`, in build output, a test file, or a path in `analyze.exclude` does not make a project JavaScript.

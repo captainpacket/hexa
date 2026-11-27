@@ -458,6 +458,33 @@ pub fn graded_files_sync(root: &Path) -> Vec<String> {
     walk_graded_files(root).unwrap_or_default()
 }
 
+/// The language the graded sources of a `package.json` project are in: `typescript`
+/// when any is `.ts` or `.tsx`, else `javascript` when any is JavaScript, else
+/// `None` (a `package.json` that is tooling only). The grade's own list, so
+/// `node_modules`, build output, test files and `analyze.exclude` do not count
+/// (ADR-2611271955 §1, §3, §4).
+pub fn node_sources_language(root: &Path) -> Option<&'static str> {
+    let files = graded_files_sync(root);
+    if files.iter().any(|f| f.ends_with(".ts") || f.ends_with(".tsx")) {
+        Some("typescript")
+    } else if files.iter().any(|f| is_js_file(f)) {
+        Some("javascript")
+    } else {
+        None
+    }
+}
+
+/// What a `package.json` project is called: `typescript` when it has a
+/// `tsconfig.json` at its root or TypeScript among its graded sources or no
+/// source at all, `javascript` when its graded sources are JavaScript only
+/// (ADR-2611271955 §1). One rule for every surface that names the language.
+pub fn package_language(root: &Path) -> &'static str {
+    if root.join("tsconfig.json").is_file() {
+        return "typescript";
+    }
+    node_sources_language(root).unwrap_or("typescript")
+}
+
 /// The files `hexa analyze` grades, listed synchronously for the display
 /// detectors. Same rules as the async walk: `EXCLUDE_PATTERNS`, the
 /// project's `analyze.exclude`, test files out. Paths are project-relative

@@ -6,7 +6,7 @@
     "sha256": "792be3a9b751af80d9528fcc540986637f630106d48f91e1a96a879a591eb59b"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611271955_spec.rs": "e0c5b12784f950aad97b4096917408c7a17c10cae3eec0b15bdd82e13205debc"
+    "hexa-cli/tests/adr_2611271955_spec.rs": "55b661b93457af4c64a602668b5014b3de554c8b193d5a04ddb8507c78b73908"
   },
   "specs": [
     {
@@ -229,6 +229,17 @@
       "then": "No layer_inventory row names the language javascript, and the files of a mixed project are not split between two rows by extension.",
       "test": "hexa-cli/tests/adr_2611271955_spec.rs::s17_no_javascript_row",
       "red": "5c002a9"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-27T20:20:02.861181304+00:00",
+      "base_commit": "5c002a9b46d4622a403799102258576a9bdba9fa",
+      "by": "craigjohnson",
+      "file": "hexa-cli/tests/adr_2611271955_spec.rs",
+      "from": "e0c5b12784f950aad97b4096917408c7a17c10cae3eec0b15bdd82e13205debc",
+      "reason": "test setup only, no scenario text changes: hexa analyze refuses a project with no graded source (not graded: no source files) and prints no language line, so S04 (package.json alone) and S10 (only excluded JavaScript) now observe the same label through hexa doctor and the session-start block, which always name one; S09 gains one Python source so analyze has something to grade. The scenarios' own wording says hexa analyze for S04 and S10, which cannot be observed for a project with no source.",
+      "to": "55b661b93457af4c64a602668b5014b3de554c8b193d5a04ddb8507c78b73908"
     }
   ]
 }

@@ -153,7 +153,7 @@ async fn detect_language_framework(root: &Path) -> (String, String) {
     // TypeScript / Node
     if let Ok(content) = fs::read_to_string(root.join("package.json")).await {
         let framework = detect_ts_framework(&content);
-        return ("typescript".to_string(), framework);
+        return (crate::analyzer::package_language(root).to_string(), framework);
     }
 
     // Python: a Python manifest and none of the others (ADR-2611221646 §4).

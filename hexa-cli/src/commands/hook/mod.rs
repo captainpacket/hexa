@@ -558,7 +558,7 @@ fn manifest_language(project_dir: &Path) -> Option<&'static str> {
     } else if project_dir.join("go.mod").exists() {
         Some("go")
     } else if project_dir.join("package.json").exists() {
-        Some("typescript")
+        Some(hexa_analysis::analyzer::package_language(project_dir))
     } else if ["pyproject.toml", "setup.py", "setup.cfg"].iter().any(|m| project_dir.join(m).exists()) {
         Some("python")
     } else {

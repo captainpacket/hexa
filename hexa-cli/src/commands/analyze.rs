@@ -146,15 +146,18 @@ pub async fn run(
                 if has_go_mod {
                     l.push(("go", "go.mod"));
                 }
-                if has_package_json && has_typescript_sources(&root) {
-                    l.push(("typescript", "package.json"));
+                // Listed only where the project has sources of it (ADR-2611271955 §3).
+                if has_package_json {
+                    if let Some(lang) = hexa_analysis::analyzer::node_sources_language(&root) {
+                        l.push((lang, "package.json"));
+                    }
                 }
                 l.push(("python", manifest));
                 l
             }
             None if has_cargo_toml => vec![("rust", "Cargo.toml")],
             None if has_go_mod => vec![("go", "go.mod")],
-            None if has_package_json => vec![("typescript", "package.json")],
+            None if has_package_json => vec![(hexa_analysis::analyzer::package_language(&root), "package.json")],
             None => Vec::new(),
         };
         println!("  {}", "Project:".bold());
@@ -1131,12 +1134,6 @@ fn is_test_file(rel: &str) -> bool {
         // TS/JS colocated tests: foo.test.ts, foo.spec.tsx, …
         || name.contains(".test.")
         || name.contains(".spec.")
-}
-
-/// Whether there is TypeScript to grade under `root`: a `package.json`
-/// with none is tooling.
-fn has_typescript_sources(root: &Path) -> bool {
-    collect_source_files(root).iter().any(|f| f.extension().is_some_and(|e| e == "ts" || e == "tsx"))
 }
 
 /// [`collect_source_files`] under `dir`, less the Python of a project at `root`

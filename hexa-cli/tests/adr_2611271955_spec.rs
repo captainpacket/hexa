@@ -136,8 +136,11 @@ fn s03_tsconfig_keeps_typescript() {
 #[test]
 fn s04_package_json_alone_is_typescript() {
     assert_js_is_named();
+    // `hexa analyze` refuses a project with no source ("not graded"), so it prints no
+    // language line here; `hexa doctor` and the session-start block always name one.
     let d = project(&[PKG]);
-    assert_eq!(analyze_lang(d.path()), TYPESCRIPT);
+    assert_eq!(doctor_type(d.path()), TYPESCRIPT);
+    assert_eq!(session_lang(d.path()), "typescript");
 }
 
 /// S05: hexa doctor names the same language
@@ -185,7 +188,8 @@ fn s09_a_tooling_package_json_is_not_listed() {
     // Control: with JavaScript sources it is listed.
     let with = project(&[PKG, JS, py]);
     assert!(analyze_lang(with.path()).contains(JAVASCRIPT), "control: JavaScript beside Python is not listed");
-    let tooling = project(&[PKG, py]);
+    // A Python source gives `hexa analyze` something to grade (it refuses an empty project).
+    let tooling = project(&[PKG, py, ("app/mod.py", "x = 1\n")]);
     assert_eq!(analyze_lang(tooling.path()), "python (pyproject.toml)");
 }
 
@@ -199,7 +203,9 @@ fn s10_excluded_javascript_does_not_count() {
         ("vendor/lib.js", "export const v = 1;\n"),
         (".hexa/project.json", "{\"analyze\":{\"exclude\":[\"vendor\"]}}\n"),
     ]);
-    assert_eq!(analyze_lang(d.path()), TYPESCRIPT);
+    // No graded source is left, so `hexa analyze` refuses the project; doctor names it.
+    assert_eq!(doctor_type(d.path()), TYPESCRIPT);
+    assert_eq!(session_lang(d.path()), "typescript");
 }
 
 /// S11: A test file does not make a project javascript, and a source file does

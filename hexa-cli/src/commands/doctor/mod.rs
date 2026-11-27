@@ -50,7 +50,7 @@ pub async fn run_doctor(_verbose: bool, _fix: bool) -> anyhow::Result<()> {
     } else if has_go_mod {
         "go (go.mod)".to_string()
     } else if has_package_json {
-        "typescript (package.json)".to_string()
+        format!("{} (package.json)", hexa_analysis::analyzer::package_language(&cwd))
     } else if let Some(manifest) = python_manifest(&cwd) {
         format!("python ({manifest})")
     } else {
