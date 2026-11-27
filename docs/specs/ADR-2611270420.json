@@ -7,6 +7,10 @@
       "reason": "§8 says what the decision does not cover (a JavaScript scaffold and the type-based checks); it makes no behaviour to test"
     }
   ],
+  "accepted": {
+    "by": "craigjohnson",
+    "sha256": "45283305bafd8bcf2ffdf1fcce9f5223a83d6de9636a5cb26f9d0b064bfc485d"
+  },
   "specs": [
     {
       "id": "S01",
