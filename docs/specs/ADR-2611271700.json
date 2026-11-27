@@ -7,6 +7,10 @@
       "reason": "§7 names what the decision leaves undecided (the Project header label); it makes no behaviour to test"
     }
   ],
+  "accepted": {
+    "by": "craigjohnson",
+    "sha256": "242694b52d16691352c1bfb7be5d542931235e412a0f6c104710d79e64d2f8da"
+  },
   "specs": [
     {
       "id": "S01",
