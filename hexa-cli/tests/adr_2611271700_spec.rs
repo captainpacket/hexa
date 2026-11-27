@@ -234,10 +234,9 @@ fn s08_the_gate_needs_no_install_or_network() {
 fn s09_a_failing_or_empty_run_is_not_a_pass() {
     // The scaffold, committed, then judged by hexa's own evidence reader.
     let gate = |edit: &dyn Fn(&Path)| -> (i32, String, String) {
+        // `hexa init` makes the project's first commit itself (ADR-2610281552 §3).
         let (_t, dir) = scaffold_js();
-        assert!(git(&dir, &["init", "-q"]).status.success());
-        assert!(git(&dir, &["add", "-A"]).status.success());
-        assert!(git(&dir, &["commit", "-qm", "scaffold"]).status.success());
+        assert!(git(&dir, &["rev-parse", "--verify", "HEAD"]).status.success(), "the scaffold has no first commit");
         let before = String::from_utf8_lossy(&git(&dir, &["rev-parse", "HEAD"]).stdout).trim().to_string();
         edit(&dir);
         let o = hexa()
@@ -263,8 +262,10 @@ fn s09_a_failing_or_empty_run_is_not_a_pass() {
     });
     assert_ne!(code, 0, "a failing test passed the gate:\n{out}");
     assert_eq!(unmoved, "true", "a failing gate committed:\n{out}");
+    // No test file at all. (An emptied test file is not this: Node counts a file that
+    // registers no test as one passing test, and the gate reads what Node reports.)
     let (code, out, unmoved) = gate(&|d| {
-        std::fs::write(d.join("src/counter.test.js"), "// no tests in here\n").unwrap();
+        std::fs::remove_file(d.join("src/counter.test.js")).unwrap();
     });
     assert_ne!(code, 0, "a run that executed no test passed the gate:\n{out}");
     assert_eq!(unmoved, "true", "an empty gate committed:\n{out}");

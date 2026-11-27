@@ -12,7 +12,7 @@
     "sha256": "242694b52d16691352c1bfb7be5d542931235e412a0f6c104710d79e64d2f8da"
   },
   "sealed": {
-    "hexa-cli/tests/adr_2611271700_spec.rs": "0733d7a277a68e6ebc2ccb3dc7c97060189789853bf153a772b6f37afaada7aa"
+    "hexa-cli/tests/adr_2611271700_spec.rs": "ee33bb92a5318420ae8a48826ec89f76e3d4bcc9a1c83b45512fc6e6097c5c94"
   },
   "specs": [
     {
@@ -313,6 +313,17 @@
       "then": "The existing package.json is unchanged and the other scaffold files are still written.",
       "test": "hexa-cli/tests/adr_2611271700_spec.rs::s23_an_existing_file_is_never_overwritten",
       "red": "99f36f8"
+    }
+  ],
+  "amendments": [
+    {
+      "at": "2026-11-27T17:07:12.766077787+00:00",
+      "base_commit": "99f36f82d80fc2fb1a6cca3bf7367d76e3fdb9a7",
+      "by": "craigjohnson",
+      "file": "hexa-cli/tests/adr_2611271700_spec.rs",
+      "from": "0733d7a277a68e6ebc2ccb3dc7c97060189789853bf153a772b6f37afaada7aa",
+      "reason": "test setup only, no scenario or assertion changes: S09 ran its own git init and git commit on a project hexa init had already committed, so the commit failed before anything was judged; and its second case emptied the test file, which node counts as one passing test, where the scenario says there is no test file, so it now deletes it.",
+      "to": "ee33bb92a5318420ae8a48826ec89f76e3d4bcc9a1c83b45512fc6e6097c5c94"
     }
   ]
 }

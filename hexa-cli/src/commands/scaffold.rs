@@ -54,7 +54,7 @@ pub struct ScaffoldArgs {
     /// Directory to scaffold into (repo-relative). Created if missing.
     #[arg(long)]
     pub target: String,
-    /// Language: rust | go | ts | python.
+    /// Language: rust | go | ts | python | js.
     #[arg(long, default_value = "rust")]
     pub lang: String,
     /// Number of divergent designs the frontier path proposes (2-4).

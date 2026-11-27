@@ -49,7 +49,7 @@ pub struct InitArgs {
     #[arg(long)]
     pub scaffold: bool,
 
-    /// Scaffold language: rust | go | ts | python
+    /// Scaffold language: rust | go | ts | python | js
     #[arg(long, default_value = "rust")]
     pub lang: String,
 
@@ -595,6 +595,8 @@ pub const SCAFFOLD_LANGS: &[(&str, &str)] = &[
     ("ts", "npm install && npm test"),
     // The standard library's runner: no install, no network (ADR-2611230850 §2).
     ("python", "python3 -m unittest discover -s tests -t ."),
+    // Node's own runner: no install, no network (ADR-2611271700 §2).
+    ("js", "node --test"),
 ];
 
 /// The gate command for a language, or `None` if it is not one we emit.

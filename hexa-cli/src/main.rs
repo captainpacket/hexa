@@ -146,7 +146,7 @@ enum DevGroupAction {
         name: Option<String>,
         #[arg(long)]
         description: Option<String>,
-        /// Scaffold language: rust | go | ts | python
+        /// Scaffold language: rust | go | ts | python | js
         #[arg(long, default_value = "rust")]
         lang: String,
     },
@@ -450,7 +450,7 @@ ADRs are history and are not checked.")]
         name: Option<String>,
         #[arg(long)]
         description: Option<String>,
-        /// Scaffold language: rust | go | ts | python
+        /// Scaffold language: rust | go | ts | python | js
         #[arg(long, default_value = "rust")]
         lang: String,
     },

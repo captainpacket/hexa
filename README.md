@@ -184,8 +184,8 @@ With the hooks installed, a session opens by printing where the work stands,
 a feature-sized edit with no recorded gate is stopped, and a code-writing
 subagent must run in its own worktree.
 
-It scaffolds Rust, Go and TypeScript, and grades Python too (it does not
-scaffold Python). `hexa --help` lists every verb.
+It scaffolds and grades Rust, Go, TypeScript, Python and JavaScript.
+`hexa --help` lists every verb.
 [Getting started](docs/GETTING-STARTED.md) has the longer version.
 
 ---
