@@ -831,7 +831,7 @@ fn root_crate_name(root: &Path) -> Option<String> {
 }
 
 fn is_typescript(rel: &str) -> bool {
-    [".ts", ".tsx", ".js", ".jsx"].iter().any(|e| rel.ends_with(e))
+    [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"].iter().any(|e| rel.ends_with(e))
 }
 
 fn is_python(rel: &str) -> bool {
@@ -1022,16 +1022,12 @@ fn resolve_relative_ts(from_rel: &str, raw: &str, files: &HashSet<String>) -> Op
 /// files an import tries.
 fn ts_file_in(joined: &str, files: &HashSet<String>) -> Option<String> {
     let joined = joined.strip_suffix(".js").or_else(|| joined.strip_suffix(".jsx")).unwrap_or(joined);
-    let candidates = [
-        joined.to_string(),
-        format!("{joined}.ts"),
-        format!("{joined}.tsx"),
-        format!("{joined}.js"),
-        format!("{joined}.jsx"),
-        format!("{joined}/index.ts"),
-        format!("{joined}/index.tsx"),
-        format!("{joined}/index.js"),
-    ];
+    // A TypeScript file wins a tie with its JavaScript namesake, as the
+    // compiler's mapping of `./a.js` to `a.ts` does (ADR-2611270420 §3).
+    const EXTS: [&str; 6] = ["ts", "tsx", "js", "jsx", "mjs", "cjs"];
+    let mut candidates = vec![joined.to_string()];
+    candidates.extend(EXTS.iter().map(|e| format!("{joined}.{e}")));
+    candidates.extend(EXTS.iter().map(|e| format!("{joined}/index.{e}")));
     candidates.into_iter().find(|c| files.contains(c))
 }
 

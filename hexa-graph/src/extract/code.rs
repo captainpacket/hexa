@@ -28,6 +28,8 @@ impl Language {
             || path.ends_with(".jsx")
             || path.ends_with(".mts")
             || path.ends_with(".cts")
+            || path.ends_with(".mjs")
+            || path.ends_with(".cjs")
         {
             Some(Language::TypeScript)
         } else if path.ends_with(".go") {
@@ -254,7 +256,44 @@ fn extract_ts(root: &Node, source: &str) -> FileExtract {
             _ => ts_decl_entity(child, source, &mut out.entities),
         }
     }
+    // A CommonJS `require("x")` or a dynamic `import("x")` with one plain string
+    // is a use of that file, wherever it is written (ADR-2611270420 §2). Without
+    // it `graph consumers` called a required file safe to remove.
+    collect_ts_dynamic_uses(*root, source, &mut out.imports);
     out
+}
+
+/// Every `require("literal")` and `import("literal")` under `node`. A call whose
+/// argument is not one plain string names no file the graph can see.
+fn collect_ts_dynamic_uses(node: Node, source: &str, imports: &mut Vec<RawImport>) {
+    if node.kind() == "call_expression" {
+        let callee = node.child_by_field_name("function");
+        let is_use = callee.is_some_and(|f| match f.kind() {
+            "import" => true,
+            "identifier" => text(f, source) == "require",
+            _ => false,
+        });
+        if is_use {
+            if let Some(args) = node.child_by_field_name("arguments") {
+                let mut ac = args.walk();
+                let named: Vec<Node> = args.named_children(&mut ac).collect();
+                if let [arg] = named.as_slice() {
+                    if arg.kind() == "string" {
+                        imports.push(RawImport {
+                            raw_path: unquote(text(*arg, source)),
+                            names: vec!["*".to_string()],
+                            line: line_of(node),
+                            kind: ImportKind::Use,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_ts_dynamic_uses(child, source, imports);
+    }
 }
 
 fn ts_decl_entity(node: Node, source: &str, entities: &mut Vec<Entity>) {
