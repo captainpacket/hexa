@@ -821,8 +821,14 @@ pub async fn reprove(
     let mut amended = amendments_of(&std::fs::read_to_string(spec_path(&root, &a.id))?);
     let by = git_user_or_env(None)?;
     for file in by_file.keys() {
-        let (Some(from), Some(to)) = (sealed_before.get(file), spec.sealed.get(file)) else { continue };
-        if from != to {
+        // The hash the file's seal had. A re-acceptance drops the seal of a file
+        // that held a changed scenario's test, so there may be none recorded; the
+        // move still happened, and it chains from where the file's amendments
+        // end, or from its anchor in history when it has none. Skipping it left
+        // the chain broken for good ("does not continue the chain").
+        let from = sealed_before.get(file).cloned().or_else(|| chain_end(&amended, file)).or_else(|| seal_anchor(&root, file));
+        let (Some(from), Some(to)) = (from, spec.sealed.get(file)) else { continue };
+        if from != *to {
             amended.push(serde_json::json!({
                 "file": file,
                 "from": from,
@@ -1012,6 +1018,12 @@ fn blob_at(root: &Path, commit: &str, file: &str) -> Option<Vec<u8>> {
         .ok()
         .filter(|o| o.status.success())
         .map(|o| o.stdout)
+}
+
+/// The `to` of the last amendment recorded for `file`: the hash its seal had
+/// when it was last moved.
+fn chain_end(amendments: &[Value], file: &str) -> Option<String> {
+    amendments.iter().rev().find(|a| a["file"] == file).and_then(|a| a["to"].as_str()).map(str::to_string)
 }
 
 /// The sha256 a sealed file is anchored to (ADR-2611081151 §1, §2): its blob
