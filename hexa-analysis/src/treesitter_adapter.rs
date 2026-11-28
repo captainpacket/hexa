@@ -782,14 +782,13 @@ fn extract_ts_imports(
                     });
                 }
             }
-            // Dynamic import: const { X } = await import('./foo.js')
-            // or: import('./foo.js').then(...)
-            "expression_statement" | "lexical_declaration" | "variable_declaration" => {
-                collect_dynamic_imports(&child, source, from_file, &mut imports);
-            }
             _ => {}
         }
     }
+
+    // Dynamic `import("x")`, wherever it is written: inside a function, a
+    // class or an export it is still a dependency.
+    collect_dynamic_imports(root, source, from_file, &mut imports);
 
     // CommonJS `require("x")`, wherever it is written (ADR-2611270420 §2).
     collect_require_calls(root, source, from_file, &mut imports);
@@ -955,7 +954,10 @@ fn collect_dynamic_imports(
                     if let Some(args) = child.child_by_field_name("arguments") {
                         let mut ac = args.walk();
                         for arg in args.children(&mut ac) {
-                            if arg.kind() == "string" || arg.kind() == "template_string" {
+                            // A template with a `${…}` names no one file, as
+                            // `import(name)` does not.
+                            let plain_template = arg.kind() == "template_string" && !has_substitution(arg);
+                            if arg.kind() == "string" || plain_template {
                                 let raw_path = unquote(node_text(arg, source));
                                 imports.push(ImportStatement {
                                     from_file: from_file.to_string(),
